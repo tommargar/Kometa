@@ -55,8 +55,10 @@ class PlexMedia:
         # self.smart = True # needed
 
     def __repr__(self):
-        return self
-
+        media_type = getattr(self, "media_type", None) or "unknown"
+        rating_key = getattr(self, "ratingKey", None) or "?"
+        title = getattr(self, "title", None) or getattr(self, "name", None) or "unnamed"
+        return f"<PlexMedia {media_type}:{rating_key} {title}>"
 
 class Movie(Movie):
     def __init__(self, data):
@@ -3264,6 +3266,7 @@ class EmbyServer:
             "adaptation": ("Writer", "Adaption"),
             "story": ("Writer", "Story"),
             "comic book": ("Writer", "Comicvorlage"),
+            "characters": ("Writer", "Charaktere"),
             "original story": ("Writer", "Story"),
             "theatre play": ("Writer", "Theaterstück"),
 
