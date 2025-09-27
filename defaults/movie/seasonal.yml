@@ -233,10 +233,6 @@ dynamic_collections:
           - https://mdblist.com/lists/k0meta/asian-american-pacific-islander-heritage-month
         christmas:
           - https://mdblist.com/lists/k0meta/external/46597
-        disabilities:
-          - https://mdblist.com/lists/k0meta/day-of-persons-with-disabilities
-        lgbtq:
-          - https://mdblist.com/lists/k0meta/lgbtq-pride-month
         latinx:
           - https://mdblist.com/lists/k0meta/latinx-heritage-month
       letterboxd_list:
@@ -258,8 +254,8 @@ dynamic_collections:
         christmas: 🎅 Christmas Movies
         aapi: 🌊🌺 Asian American Pacific Islander Movies
         disabilities: ♿ Disability Month Movies
-        black_history: ✊ 🏿 Black History Month Movies
-        lgbtq: L🏳️‍🌈 LGBTQ Month Movies
+        black_history: ✊🏿 Black History Month Movies
+        lgbtq: 🏳️‍🌈 LGBTQ Month Movies
         latinx: 🪅 National Hispanic Heritage Movies
         women: 🚺 Women's History Month Movies
       visible_home:

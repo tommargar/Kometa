@@ -157,6 +157,7 @@ nav:
         - Switching from PMM to Kometa: kometa/guides/rebrand.md
     - Companion Scripts: &scripts
         - Overview: kometa/scripts/overview.md
+        - Quickstart: kometa/scripts/quickstart.md
         - ImageMaid: kometa/scripts/imagemaid.md
         - Kometa Overlay Reset: kometa/scripts/overlay-reset.md
   - USEFUL LINKS: &links
@@ -174,7 +175,7 @@ nav:
     - Library Operations: config/operations.md
   - CONNECTIONS:
     - REQUIRED CONNECTIONS:
-      - Plex: config/overview.md
+      - Plex: config/plex.md
       - TMDb: config/tmdb.md
     - OPTIONAL CONNECTIONS:
       - Tautulli: config/tautulli.md

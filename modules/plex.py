@@ -120,6 +120,7 @@ show_translation = {
     "lastViewedAt": "show.lastViewedAt",
     "resolution": "episode.resolution",
     "hdr": "episode.hdr",
+    "dovi": "episode.dovi",
     "subtitleLanguage": "episode.subtitleLanguage",
     "audioLanguage": "episode.audioLanguage",
     "trash": "episode.trash",
@@ -450,6 +451,9 @@ class Plex(Library):
         super().__init__(config, params)
         self.plex = params["plex"]
         self.url = self.plex["url"]
+        self.clean_bundles = params["plex"]["clean_bundles"]
+        self.empty_trash = params["plex"]["empty_trash"]
+        self.optimize = params["plex"]["optimize"]
         self.session = self.config.Requests.session
         if self.plex["verify_ssl"] is False and self.config.Requests.global_ssl is True:
             logger.debug("Overriding verify_ssl to False for Plex connection")
@@ -1095,6 +1099,24 @@ class Plex(Library):
             raise Failed(f"Collection Error: No valid Plex Collections in {collections}")
         return valid_collections
 
+    def _watchlist(self, filter=None, sort=None, libtype=None, maxresults=None, **kwargs):
+        params = {
+            'includeCollections': 1,
+            'includeExternalMedia': 1
+        }
+
+        if not filter:
+            filter = 'all'
+        if sort:
+            params['sort'] = sort
+        if libtype:
+            params['type'] = plexapi.utils.searchType(libtype)
+
+        params.update(kwargs)
+
+        key = f'{self.account.DISCOVER}/library/sections/watchlist/{filter}{plexapi.utils.joinArgs(params)}'
+        return self.account._toOnlineMetadata(self.account.fetchItems(key, maxresults=maxresults), **kwargs)
+
     def get_watchlist(self, sort=None, is_playlist=False):
         if is_playlist:
             libtype = None
@@ -1102,7 +1124,7 @@ class Plex(Library):
             libtype = "movie"
         else:
             libtype = "show"
-        watchlist = self.account.watchlist(sort=watchlist_sorts[sort], libtype=libtype)
+        watchlist = self._watchlist(sort=watchlist_sorts[sort], libtype=libtype)
         ids = []
         for item in watchlist:
             tmdb_id = []
@@ -1749,10 +1771,10 @@ class Plex(Library):
             item_type = "track"
         else:
             return True
-        item = self.reload(item)
         if filter_attr not in builder.filters[item_type]:
             return True
-        elif filter_attr in builder.date_filters:
+        item = self.reload(item, force=filter_attr in ["genre", "label", "collection"])
+        if filter_attr in builder.date_filters:
             if util.is_date_filter(getattr(item, filter_actual), modifier, filter_data, filter_final, current_time):
                 return False
         elif filter_attr in builder.string_filters:
@@ -1772,6 +1794,10 @@ class Plex(Library):
                         values.append(attr)
             elif filter_attr in ["filepath", "folder"]:
                 values = [loc for loc in item.locations if loc]
+            elif filter_attr == "season_title":
+                values = [item.season().title]
+            elif filter_attr == "show_title":
+                values = [item.show().title]
             else:
                 test_value = getattr(item, filter_actual)
                 values = [test_value] if test_value else []
