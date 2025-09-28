@@ -15,7 +15,6 @@ logger = util.logger
 MAX_IMAGE_SIZE = 10480000  # a little less than 10MB
 
 class Library(ABC):
-
     def __init__(self, config, params):
         self.session = None
         self.Radarr = None
@@ -127,11 +126,9 @@ class Library(ABC):
         self.content_rating_mapper = params["content_rating_mapper"]
         self.changes_webhooks = params["changes_webhooks"]
         self.split_duplicates = params["split_duplicates"] # TODO: Here or just in Plex?
-        self.clean_bundles = params["plex"]["clean_bundles"] # TODO: Here or just in Plex?
-        self.empty_trash = params["plex"]["empty_trash"] # TODO: Here or just in Plex?
-        self.optimize = params["plex"]["optimize"] # TODO: Here or just in Plex?
         self.stats = {"created": 0, "modified": 0, "deleted": 0, "added": 0, "unchanged": 0, "removed": 0, "radarr": 0, "sonarr": 0, "names": []}
         self.status = {}
+        self.plex_bulk_edit_batch_size = params["plex_bulk_edit_batch_size"]
         self.EmbyServer=None
         self.emby_server_url = None
         self.items_library_operation = True if self.assets_for_all or self.mass_genre_update or self.remove_title_parentheses \
@@ -321,6 +318,7 @@ class Library(ABC):
                          "tmdb_producer_details", "tmdb_writer_details", "tmdb_movie_details", "tmdb_list_details",
                          "tvdb_list_details", "tvdb_movie_details", "tvdb_show_details", "tmdb_show_details"]:
                 if attr in images:
+                    # New code to catch errors for TMDB images
                     ok = True
                     if attr != f"file_{image_type}":
                         import urllib.request, urllib.error
@@ -439,10 +437,7 @@ class Library(ABC):
         logger.separator(f"Caching {self.name} Library Items", space=False, border=False)
         logger.info("")
         items = self.get_all()
-        # print(items)
         for item in items:
-            # if item.get("ratingKey") is None:
-            #     print(item)
             self.cached_items[item.ratingKey] = (item, False)
         return items
 
@@ -455,27 +450,20 @@ class Library(ABC):
         for i, item in enumerate(items, 1):
             logger.ghost(f"Mapping: {i}/{len(items)}")
             if isinstance(item, tuple):
-                # logger.ghost(f"Processing: {i}/{len(items)}")
+                logger.ghost(f"Processing: {i}/{len(items)}")
                 key, guid = item
             else:
-                # logger.ghost(f"Processing: {i}/{len(items)} {item.title}")
-                # print(item)
+                logger.ghost(f"Processing: {i}/{len(items)} {item.title}")
                 key = item.ratingKey
                 guid = item.guid
             if key not in self.movie_rating_key_map and key not in self.show_rating_key_map:
-                # print(key, guid)
-                self.config.Convert.scan_guid(guid)
+                self.config.Convert.scan_guid(guid) # still needed?
                 if isinstance(item, tuple):
                     item_type, check_id = self.config.Convert.scan_guid(guid)
                     id_type, main_id, imdb_id, _ = self.config.Convert.ids_from_cache(key, guid, item_type, check_id, self)
                 else:
                     mydata = self.get_provider_ids(item)
                     id_type, main_id, imdb_id = self.config.Convert.get_id(item, self, mydata)
-
-
-                # print(f" - {id_type} - {main_id} - {imdb_id}")
-                # 1145484 tt0076759
-                #  - movie - [] - ['0076759']
                 if main_id:
                     if id_type == "movie":
                         if len(main_id) > 1:

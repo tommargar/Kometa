@@ -840,6 +840,7 @@ class CollectionBuilder:
                         if tmdb_person.isdigit():
                             person = self.config.TMDb.get_person(int(tmdb_person))
                             first_person = person.name
+                            logger.debug(f"Name: {first_person}")
                             # found exact match, now get the offset for poster
                             resu = self.config.TMDb.search_people(first_person)
                             idx = 0  # Default

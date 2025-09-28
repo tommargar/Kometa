@@ -150,6 +150,7 @@ library_operations = {
     "mass_originally_available_update": mass_available_options, "mass_added_at_update": mass_available_options,
     "mass_collection_mode": "mass_collection_mode", "mass_poster_update": "dict", "mass_background_update": "dict",
     "metadata_backup": "dict", "delete_collections": "dict", "genre_mapper": "dict", "content_rating_mapper": "dict",
+    "plex_bulk_edit_batch_size": "int",
 }
 
 class ConfigFile:
@@ -373,7 +374,9 @@ class ConfigFile:
                 return next_data
         self.data = check_next(self.data)
 
-        def check_for_attribute(data, attribute, parent=None, test_list=None, translations=None, default=None, do_print=True, default_is_none=False, req_default=False, var_type="str", throw=False, save=True, int_min=0, int_max=None):
+        def check_for_attribute(data, attribute, parent=None, test_list=None, translations=None, default=None,
+                                do_print=True, default_is_none=False, req_default=False, var_type="str", throw=False,
+                                save=True, int_min=0, int_max=None):
             endline = ""
             if parent is not None:
                 if data and parent in data:
@@ -393,32 +396,47 @@ class ConfigFile:
                 if parent and save is True:
                     yaml = self.Requests.file_yaml(self.config_path)
                     endline = f"\n{parent} sub-attribute {attribute} added to config"
-                    if parent not in yaml.data or not yaml.data[parent]:                yaml.data[parent] = {attribute: default}
-                    elif attribute not in yaml.data[parent]:                            yaml.data[parent][attribute] = default
-                    else:                                                               endline = ""
+                    if parent not in yaml.data or not yaml.data[parent]:
+                        yaml.data[parent] = {attribute: default}
+                    elif attribute not in yaml.data[parent]:
+                        yaml.data[parent][attribute] = default
+                    else:
+                        endline = ""
                     yaml.save()
-                if default_is_none and var_type in ["list", "int_list", "lower_list", "list_path"]: return default if default else []
+                if default_is_none and var_type in ["list", "int_list", "lower_list",
+                                                    "list_path"]:
+                    return default if default else []
             elif final_value is None:
-                if default_is_none and var_type in ["list", "int_list", "lower_list", "list_path"]: return default if default else []
-                elif default_is_none:                                               return None
-                else:                                                               message = f"{text} is blank"
+                if default_is_none and var_type in ["list", "int_list", "lower_list", "list_path"]:
+                    return default if default else []
+                elif default_is_none:
+                    return None
+                else:
+                    message = f"{text} is blank"
             elif var_type == "url":
-                if final_value.endswith(("\\", "/")):                               return final_value[:-1]
-                else:                                                               return final_value
+                if final_value.endswith(("\\", "/")):
+                    return final_value[:-1]
+                else:
+                    return final_value
             elif var_type == "bool":
-                if isinstance(final_value, bool):                                   return final_value
-                else:                                                               message = f"{text} must be either true or false"
+                if isinstance(final_value, bool):
+                    return final_value
+                else:
+                    message = f"{text} must be either true or false"
             elif var_type == "int":
                 if isinstance(final_value, int) and final_value >= int_min and (not int_max or final_value <= int_max):
                     return final_value
                 else:
                     message = f"{text} must an integer greater than or equal to {int_min}{f' and less than or equal to {int_max}'}"
             elif var_type == "path":
-                if os.path.exists(os.path.abspath(final_value)):                    return final_value
-                else:                                                               message = f"Path {os.path.abspath(final_value)} does not exist"
+                if os.path.exists(os.path.abspath(final_value)):
+                    return final_value
+                else:
+                    message = f"Path {os.path.abspath(final_value)} does not exist"
             elif var_type in ["list", "lower_list", "int_list"]:
                 output_list = []
-                for output_item in util.get_list(final_value, lower=var_type == "lower_list", split=var_type != "list", int_list=var_type == "int_list"):
+                for output_item in util.get_list(final_value, lower=var_type == "lower_list", split=var_type != "list",
+                                                 int_list=var_type == "int_list"):
                     if output_item not in output_list:
                         output_list.append(output_item)
                 failed_items = [o for o in output_list if o not in test_list] if test_list else []
@@ -438,10 +456,14 @@ class ConfigFile:
                         warning_message += f"Config Warning: Path does not exist: {os.path.abspath(p)}"
                 if do_print and warning_message:
                     logger.warning(warning_message)
-                if len(temp_list) > 0:                                              return temp_list
-                else:                                                               message = "No Paths exist"
-            elif test_list is None or final_value in test_list:                 return final_value
-            else:                                                               message = f"{text}: {final_value} is an invalid input"
+                if len(temp_list) > 0:
+                    return temp_list
+                else:
+                    message = "No Paths exist"
+            elif test_list is None or final_value in test_list:
+                return final_value
+            else:
+                message = f"{text}: {final_value} is an invalid input"
             if var_type == "path" and default and os.path.exists(os.path.abspath(default)):
                 return default
             elif var_type == "path" and default:
@@ -810,7 +832,7 @@ class ConfigFile:
 
             logger.separator()
 
-            logger.info("Connecting to Plex Libraries...")
+            logger.info("Connecting to Emby Libraries...")
 
             self.general["plex"] = {
                 "url": check_for_attribute(self.data, "url", parent="plex", var_type="url", default_is_none=True),
@@ -1237,11 +1259,12 @@ class ConfigFile:
                         "verify_ssl": check_for_attribute(lib, "verify_ssl", parent="emby", var_type="bool", default=self.general["emby"]["verify_ssl"], default_is_none=True, save=False),
                         "db_cache": check_for_attribute(lib, "db_cache", parent="emby", var_type="int", default=self.general["emby"]["db_cache"], default_is_none=True, save=False)
                     }
+
                     for attr in ["clean_bundles", "empty_trash", "optimize"]:
                         try:
                             params["plex"][attr] = check_for_attribute(lib, attr, parent="plex", var_type="bool", save=False, throw=True)
                         except Failed:
-                            test_attr = lib["plex"][attr] if "plex" in lib and attr in lib["plex"] and lib["plex"][attr] else self.general["plex"][attr]
+                            test_attr = lib["plex"][attr] if lib and "plex" in lib and attr in lib["plex"] and lib["plex"][attr] else self.general["plex"][attr]
                             if test_attr is not True and test_attr is not False:
                                 params["plex"][attr] = False
                                 try:
@@ -1256,6 +1279,8 @@ class ConfigFile:
                         params["plex"]["url"] = self.env_plex_url
                     if params["plex"]["token"].lower() == "env":
                         params["plex"]["token"] = self.env_plex_token
+
+
                     library = Plex(self, params)
                     # ToDo - Develop, document
                     emby_library = Emby(self, params)
@@ -1294,7 +1319,7 @@ class ConfigFile:
                     logger.stacktrace()
                     logger.error(e)
                     logger.info("")
-                    logger.info(f"Plex {display_name} Library Connection Failed")
+                    logger.info(f"{display_name} Library Connection Failed")
                     continue
 
                 if self.general["radarr"]["url"] or (lib and "radarr" in lib):

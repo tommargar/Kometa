@@ -972,6 +972,7 @@ class MetadataFile(DataFile):
                             person_depth = util.parse("Config", "depth", dynamic_data, parent=f"{map_name} data", methods=person_methods, datatype="int", default=3, minimum=1)
                             person_minimum = util.parse("Config", "minimum", dynamic_data, parent=f"{map_name} data", methods=person_methods, datatype="int", default=3, minimum=1) if "minimum" in person_methods else None
                             person_limit = util.parse("Config", "limit", dynamic_data, parent=f"{map_name} data", methods=person_methods, datatype="int", default=25, minimum=1) if "limit" in person_methods else None
+                            # Emby native items
                             lib_all = library.get_all_native()
                             include_cols = []
                             for i, item in enumerate(lib_all, 1):

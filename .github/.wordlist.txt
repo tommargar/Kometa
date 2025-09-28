@@ -6,6 +6,7 @@ addons
 adlib
 afi's
 amblin
+amc
 analytics
 anidb
 anidb's
@@ -20,6 +21,7 @@ appletv
 arrapi
 arrowverse
 atmos
+atres
 avenir
 bafta
 bambara
@@ -100,6 +102,7 @@ ffffff
 fi
 filepath
 filetype
+filmin
 flac
 flixpatrol
 fontawesome
@@ -207,6 +210,7 @@ mojo
 mojo's
 monetization
 mossi
+movistar
 mpaa
 mx
 myanimelist
@@ -251,11 +255,13 @@ persistentvolumeclaim
 pgid
 pkkid
 planetrocky
+player
 plex
 plex's
 plexapi
 plexcollection
 plexposters
+plus+
 png
 pokémon
 popeadam
@@ -280,6 +286,7 @@ reacher
 readme
 readwriteonce
 realtime
+reauthenticating
 reciperr
 reddit
 redheadjedi

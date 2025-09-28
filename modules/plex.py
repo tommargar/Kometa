@@ -1,24 +1,24 @@
-import os
-import plexapi
-import re
-import time
+import os, plexapi, re, time
 from datetime import datetime, timedelta
-# from importlib.metadata import pass_none
 from urllib.parse import unquote
-from xml.etree.ElementTree import ParseError
-
 import requests
+from modules import builder, util
+from modules.library import Library
+from modules.poster import ImageData
+from modules.request import parse_qs, quote_plus, urlparse
+from modules.util import Failed
 from PIL import Image
 from plexapi import utils
 from plexapi.audio import Artist, Track, Album
-from plexapi.collection import Collection
 from plexapi.exceptions import BadRequest, NotFound, Unauthorized
+from plexapi.collection import Collection
 from plexapi.library import Role, FilterChoice
 from plexapi.playlist import Playlist
 from plexapi.server import PlexServer
 from plexapi.video import Movie, Show, Season, Episode
 from requests.exceptions import ConnectionError, ConnectTimeout
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_not_exception_type
+from xml.etree.ElementTree import ParseError
 
 from modules import builder, util
 from modules.emby_server import EmbyServer, FilterChoiceEmby
@@ -130,6 +130,7 @@ show_translation = {
     "lastViewedAt": "show.lastViewedAt",
     "resolution": "episode.resolution",
     "hdr": "episode.hdr",
+    "dovi": "episode.dovi",
     "subtitleLanguage": "episode.subtitleLanguage",
     "audioLanguage": "episode.audioLanguage",
     "trash": "episode.trash",
@@ -455,17 +456,26 @@ watchlist_sorts = {
     "critic_rating.asc": "rating:asc", "critic_rating.desc": "rating:desc",
 }
 
+MAX_IMAGE_SIZE = 10480000  # a little less than 10MB
 
 class Plex(Library):
     def __init__(self, config, params):
         super().__init__(config, params)
-
-        self.filter_items_cache = {}
         self.plex = params["plex"]
-        self.url = self.plex["url"] # todo also used in webhooks for image retrieval
+        self.url = self.plex["url"]
+        self.clean_bundles = params["plex"]["clean_bundles"]
+        self.empty_trash = params["plex"]["empty_trash"]
+        self.optimize = params["plex"]["optimize"]
+        self.session = self.config.Requests.session # init?
+        # Emby
+        self.filter_items_cache = {}
         self.emby = params["emby"]
         self.emby_server_url = self.emby["url"]
-        self.session = self.config.Requests.session # init?
+        self.emby_api_key = self.emby["api_key"]
+        self.emby_user_id = self.emby["user_id"]
+        self.overlay_destination_folder = self.emby["overlay_destination_folder"]
+        self.EmbyServer = None
+        # Emby end
         if self.plex["verify_ssl"] is False and self.config.Requests.global_ssl is True:
             logger.debug("Overriding verify_ssl to False for Plex connection")
             self.session = self.config.Requests.create_session(verify_ssl=False)
@@ -473,16 +483,18 @@ class Plex(Library):
             logger.debug("Overriding verify_ssl to True for Plex connection")
             self.session = self.config.Requests.create_session()
         self.token = self.plex["token"]
-        self.emby_api_key = self.emby["api_key"]
-        self.emby_user_id = self.emby["user_id"]
-        self.overlay_destination_folder = self.emby["overlay_destination_folder"]
         self.timeout = self.plex["timeout"]
         logger.secret(self.url)
         logger.secret(self.token)
-        self.EmbyServer = None
+        try:
+            self.EmbyServer = EmbyServer(self.emby_server_url, self.emby_user_id, self.emby_api_key, config,
+                                         params["name"])
+            logger.info(f"Connected to server {self.EmbyServer.friendlyName} version {self.EmbyServer.version}")
+            logger.info(f"Running on {self.EmbyServer.platform} version {self.EmbyServer.platformVersion}")
+        except:
+            pass
         try:
             self.PlexServer = PlexServer(baseurl=self.url, token=self.token, session=self.session, timeout=self.timeout)
-            self.EmbyServer = EmbyServer(self.emby_server_url, self.emby_user_id, self.emby_api_key,config, params["name"])
             plexapi.server.TIMEOUT = self.timeout
             os.environ["PLEXAPI_PLEXAPI_TIMEOUT"] = str(self.timeout)
             logger.info(f"Connected to server {self.PlexServer.friendlyName} version {self.PlexServer.version}")
@@ -539,6 +551,8 @@ class Plex(Library):
         emby_library_names = []
         # print(params)
         self.lib_type = None
+
+
         for s in self.EmbyServer.get_libraries():
             # print(s)
             emby_library_names.append(s["Name"])
@@ -549,10 +563,9 @@ class Plex(Library):
             if s["Name"] == params["name"]:
                 self.Emby = s
                 self.EmbyServer.library_id= self.Emby.get('Id')
-                print(s)
                 break
         # print(emby_library_names)
-        if not self.Emby:
+        if self.Emby is None:
             raise Failed(f"Emby Error: Emby Library '{params['name']}' not found. Options: {emby_library_names}")
         # --------------
 
