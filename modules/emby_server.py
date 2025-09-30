@@ -1832,6 +1832,7 @@ class EmbyServer:
                     'studio': studio, # only one
                     'genres': genres,
                     'titleSort': item.get('SortName'),
+                    'contentRating': item.get('OfficialRating')
                     # not working
                     # 'media': [item.get('Path')],
                     # 'locations':[item.get('Path')] # todo: working?

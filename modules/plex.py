@@ -1188,7 +1188,7 @@ class Plex(Library):
                 "StartIndex": start_index,
                 "Limit": limit,
                 "ParentId": self.Emby.get("Id"),
-                "Fields": "Budget,Chapters,DateCreated,Genres,HomePageUrl,IndexOptions,MediaStreams,Overview,ParentId,Path,People,ProviderIds,PrimaryImageAspectRatio,Revenue,SortName,Studios,Taglines,CriticRating,CustomRating,CommunityRating",
+                "Fields": "Budget,Chapters,DateCreated,Genres,HomePageUrl,IndexOptions,MediaStreams,Overview,ParentId,Path,People,ProviderIds,PrimaryImageAspectRatio,Revenue,SortName,Studios,Taglines,CriticRating,CustomRating,CommunityRating,OfficialRating",
             }
 
             endpoint = f"{self.emby_server_url}/emby/Users/{self.emby_user_id}/Items"
