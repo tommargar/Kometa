@@ -1876,7 +1876,20 @@ class EmbyServer:
                 else:
                     logger.error(f"error converting Emby object")
                     continue
-                plex_object.locations = [item.get("Path", [])]
+                # Determine media path from Emby payload.
+                path = item.get("Path")
+                if not path:
+                    media_sources = item.get("MediaSources") or []
+                    for source in media_sources:
+                        path = source.get("Path") or source.get("Name") or source.get("FileName")
+                        if path:
+                            break
+                if path:
+                    try:
+                        path = os.fspath(path)
+                    except TypeError:
+                        path = str(path)
+                    setattr(plex_object, "_emby_path", path)
                 if not use_native_emby:
                     self.cached_plex_objects[item.get("Id")] = plex_object
 
