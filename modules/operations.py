@@ -190,9 +190,32 @@ class Operations:
                                 item_edits.append(f"\n{edit_type.capitalize()} IMDb Parental Labels (Batched) | {', '.join(label_list)}")
                     except Failed:
                         pass
+                location_path = None
                 if item.locations:
-                    # Emby: the location cannot be saved to my custom Embvy object, ToDo get path from native emby_item
-                    path = os.path.dirname(str(item.locations[0])) if self.library.is_movie else str(item.locations[0])
+                    first_location = item.locations[0]
+                    if isinstance(first_location, str) and first_location:
+                        location_path = first_location
+                if not location_path:
+                    emby_stub_path = getattr(item, "_emby_path", None)
+                    if isinstance(emby_stub_path, str) and emby_stub_path:
+                        location_path = emby_stub_path
+                if not location_path and emby_item:
+                    location_path = emby_item.get("Path")
+                    if not location_path:
+                        media_sources = emby_item.get("MediaSources") or []
+                        for source in media_sources:
+                            location_path = source.get("Path") or source.get("Name") or source.get("FileName")
+                            if location_path:
+                                break
+
+                if location_path and not isinstance(location_path, str):
+                    try:
+                        location_path = os.fspath(location_path)
+                    except TypeError:
+                        location_path = str(location_path)
+
+                if location_path:
+                    path = os.path.dirname(location_path) if self.library.is_movie else location_path
                     if self.library.Radarr and self.library.radarr_add_all_existing and tmdb_id:
                         path = path.replace(self.library.Radarr.plex_path, self.library.Radarr.radarr_path)
                         path = path[:-1] if path.endswith(('/', '\\')) else path
