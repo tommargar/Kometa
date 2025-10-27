@@ -478,7 +478,7 @@ class Operations:
                                         logger.info(f"No {option} {name_display[item_attr]} Found")
                                         raise Failed
                                     found_rating = f"{float(found_rating):.1f}"
-                                    if str(f"{current:.1f}") != str(found_rating):
+                                    if not current and found_rating or str(f"{current:.1f}") != str(found_rating):
                                         if found_rating not in rating_edits[item_attr]:
                                             rating_edits[item_attr][found_rating] = []
                                         rating_edits[item_attr][found_rating].append(item.ratingKey)

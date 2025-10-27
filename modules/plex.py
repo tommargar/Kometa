@@ -487,11 +487,13 @@ class Plex(Library):
         logger.secret(self.url)
         logger.secret(self.token)
         try:
+            logger.info("Connecting to Emby ...")
             self.EmbyServer = EmbyServer(self.emby_server_url, self.emby_user_id, self.emby_api_key, config,
                                          params["name"])
             logger.info(f"Connected to server {self.EmbyServer.friendlyName} version {self.EmbyServer.version}")
             logger.info(f"Running on {self.EmbyServer.platform} version {self.EmbyServer.platformVersion}")
         except:
+            logger.error(f"Failed to connect to Emby server.")
             pass
         try:
             self.PlexServer = PlexServer(baseurl=self.url, token=self.token, session=self.session, timeout=self.timeout)
@@ -552,7 +554,7 @@ class Plex(Library):
         # print(params)
         self.lib_type = None
 
-
+        # logger.info(self.EmbyServer)
         for s in self.EmbyServer.get_libraries():
             # print(s)
             emby_library_names.append(s["Name"])
