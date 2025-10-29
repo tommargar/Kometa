@@ -17,6 +17,9 @@ name_display = {
     "audienceRating": "Audience Rating",
     "rating": "Critic Rating",
     "userRating": "User Rating",
+    "CommunityRating": "Community Rating", # Emby
+    "CriticRating": "Tomatometer", # Emby
+    "CustomRating": "Custom Rating", # Emby
     "originallyAvailableAt": "Originally Available Date",
     "addedAt": "Added At Date",
     "contentRating": "Content Rating"
@@ -124,7 +127,9 @@ class Operations:
             radarr_adds = []
             sonarr_adds = []
             label_edits = {"add": {}, "remove": {}}
-            rating_edits = {"audienceRating": {}, "rating": {}, "userRating": {}}
+            rating_edits = {"audienceRating": {}, "rating": {}, "userRating": {}, "CustomRating": {}, "CriticRating": {}, "CommunityRating": {}}
+
+
             genre_edits = {"add": {}, "remove": {}}
             content_edits = {}
             studio_edits = {}
@@ -478,14 +483,36 @@ class Operations:
                                         logger.info(f"No {option} {name_display[item_attr]} Found")
                                         raise Failed
                                     found_rating = f"{float(found_rating):.1f}"
-                                    if str(f"{current:.1f}") != str(found_rating):
-                                        if found_rating not in rating_edits[item_attr]:
-                                            rating_edits[item_attr][found_rating] = []
-                                        rating_edits[item_attr][found_rating].append(item.ratingKey)
+                                    if str(f"{current:.1f}") != str(float(found_rating) * (10 if item_attr == "rating" else 1)):
+                                        emby_item_attribute = ""
+                                        match item_attr:
+                                            case "rating":
+                                                found_rating = int(float(found_rating) * 10)
+                                                emby_item_attribute = "CriticRating"
+                                                pass
+                                            case "userRating":
+                                                # todo - own field providerids
+                                                emby_item_attribute = "CustomRating"
+                                            case "audienceRating":
+                                                emby_item_attribute = "CommunityRating"
+                                        # Plex
+                                        # {'audienceRating': {'6.7': [2391406], '7.3': [2391407]},
+                                        #  'rating': {'5.8': [2391406]}, 'userRating': {}}
+
+                                        # Emby
+                                        # 'CommunityRating' = {float}
+                                        # 7.402
+                                        # 'CustomRating' = {str}
+                                        # '6.8'
+                                        # 'CriticRating' = {int}
+                                        # 69
+                                        if found_rating not in rating_edits[emby_item_attribute]:
+                                            rating_edits[emby_item_attribute][found_rating] = []
+                                        rating_edits[emby_item_attribute][found_rating].append(item.ratingKey)
                                         if item.ratingKey not in emby_payload:
                                             emby_payload[item.ratingKey] = {}
-                                        emby_payload[item.ratingKey][item_attr] = found_rating
-                                        item_edits.append(f"Update {name_display[item_attr]} (Batched) | {found_rating}")
+                                        emby_payload[item.ratingKey][emby_item_attribute] = found_rating
+                                        item_edits.append(f"Update {name_display[emby_item_attribute]} (Batched) | {found_rating}")
                                         do_cast_update = True
                                     break
                                 except Failed:
