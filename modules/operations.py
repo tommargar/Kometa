@@ -482,12 +482,12 @@ class Operations:
                                     if not found_rating:
                                         logger.info(f"No {option} {name_display[item_attr]} Found")
                                         raise Failed
-                                    found_rating = f"{float(found_rating):.1f}"
-                                    if str(f"{current:.1f}") != str(float(found_rating) * (10 if item_attr == "rating" else 1)):
+                                    found_rating = f"{float(found_rating)* (10 if item_attr == "rating" else 1):.1f}"
+                                    current *= 10 if item_attr == "rating" else 1
+                                    if str(f"{current:.1f}") != str(f"{(float(found_rating)):.1f}"):
                                         emby_item_attribute = ""
                                         match item_attr:
                                             case "rating":
-                                                found_rating = int(float(found_rating) * 10)
                                                 emby_item_attribute = "CriticRating"
                                                 pass
                                             case "userRating":
