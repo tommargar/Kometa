@@ -244,6 +244,7 @@ class EmbyServer:
         self.cached_studios = {}
         self.cached_provider_ids={}
         self.file_names = {}
+        self._file_names_fetch_attempted = False
 
         self.studio_list =None
         self.media_by_resolution = {}
@@ -479,7 +480,26 @@ class EmbyServer:
         Fetches years for all items in the database and caches the results.
         """
         if not self.file_names:
-            return []
+            if getattr(self, "_file_names_fetch_attempted", False):
+                return []
+
+            self._file_names_fetch_attempted = True
+
+            items = None
+            if self.library_id:
+                try:
+                    items = self.get_items(
+                        params={"ParentId": self.library_id},
+                        fields="Path",
+                    )
+                except Exception as exc:  # pragma: no cover - defensive logging only
+                    logger.error(f"Failed to warm filename cache for library {self.library_id}: {exc}")
+
+            if items:
+                self.cache_filenames(items)
+
+            if not self.file_names:
+                return []
         # MinWidth
         # MinHeight
 
