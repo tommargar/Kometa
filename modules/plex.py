@@ -882,6 +882,11 @@ class Plex(Library):
             updated_results = []
             for item in filtered:
                 keep_item = True
+                custom_rating_value = 0
+                if "MaxCustomRating" in query_params or "MinCustomRating" in query_params:
+                    rating = self.EmbyServer.get_custom_rating_from_item(item)
+                    if rating is not None:
+                        custom_rating_value = rating
                 if "MaxCriticRating" in query_params:
                     critic_rating = int(float(item.get("CriticRating", 0)))
                     max_rating = int(query_params.get("MaxCriticRating"))
@@ -895,9 +900,8 @@ class Plex(Library):
                         keep_item = False
 
                 if "MaxCustomRating" in query_params:
-                    custom_rating = float(item.get("CustomRating", 0))
                     max_rating = float(query_params.get("MaxCustomRating"))
-                    if custom_rating > max_rating or custom_rating == 0:
+                    if custom_rating_value > max_rating or custom_rating_value == 0:
                         keep_item = False
 
                 if "MinCriticRating" in query_params:
@@ -913,9 +917,8 @@ class Plex(Library):
                         keep_item = False
 
                 if "MinCustomRating" in query_params:
-                    custom_rating = float(item.get("CustomRating", 0))
                     min_rating = float(query_params.get("MinCustomRating"))
-                    if custom_rating < min_rating or custom_rating == 0:
+                    if custom_rating_value < min_rating or custom_rating_value == 0:
                         keep_item = False
 
                 if keep_item:
@@ -1093,7 +1096,7 @@ class Plex(Library):
                     operand = value_decoded.strip()
 
                     if field in ["rating","show.rating"]:
-                        emby_query_params["Fields"]= "CommunityRating,CriticRating,CustomRating"
+                        emby_query_params["Fields"]= "CommunityRating,CriticRating,ProviderIds"
                         if operator in ['>', '>=']:
                             emby_query_params['MinCriticRating'] = int(float(operand) * 10)
                         elif operator in ['<', '<=','<<']:
@@ -1101,7 +1104,7 @@ class Plex(Library):
                         else:
                             raise Failed(f"Unknown operator {operator} for {field}")
                     elif field in ["audienceRating", "show.audienceRating"]:
-                        emby_query_params["Fields"]= "CommunityRating,CriticRating,CustomRating"
+                        emby_query_params["Fields"]= "CommunityRating,CriticRating,ProviderIds"
                         if operator in ['>', '>=']:
                             emby_query_params['MinCommunityRating'] = operand
                         elif operator in ['<', '<=','<<']:
@@ -1109,7 +1112,7 @@ class Plex(Library):
                         else:
                             raise Failed(f"Unknown operator {operator} for {field}")
                     elif field in ["userRating", "show.userRating"]:
-                        emby_query_params["Fields"]= "CommunityRating,CriticRating,CustomRating"
+                        emby_query_params["Fields"]= "CommunityRating,CriticRating,ProviderIds"
                         if operator in ['>', '>=']:
                             emby_query_params['MinCustomRating'] = operand
                         elif operator in ['<', '<=','<<']:
@@ -1451,7 +1454,7 @@ class Plex(Library):
                 "StartIndex": start_index,
                 "Limit": limit,
                 "ParentId": self.Emby.get("Id"),
-                "Fields": "Budget,Chapters,DateCreated,Genres,HomePageUrl,IndexOptions,MediaStreams,Overview,ParentId,Path,People,ProviderIds,PrimaryImageAspectRatio,Revenue,SortName,Studios,Taglines,CriticRating,CustomRating,CommunityRating,OfficialRating",
+                "Fields": "Budget,Chapters,DateCreated,Genres,HomePageUrl,IndexOptions,MediaStreams,Overview,ParentId,Path,People,ProviderIds,PrimaryImageAspectRatio,Revenue,SortName,Studios,Taglines,CriticRating,CommunityRating,OfficialRating",
             }
 
             endpoint = f"{self.emby_server_url}/emby/Users/{self.emby_user_id}/Items"
