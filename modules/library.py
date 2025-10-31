@@ -441,6 +441,16 @@ class Library(ABC):
             self.cached_items[item.ratingKey] = (item, False)
         return items
 
+    def refresh_item_cache(self):
+        """Clear any stored item cache and repopulate it with fresh objects."""
+        self.cached_items.clear()
+        for attr in ["_all_items", "_emby_all_items", "_emby_all_items_native"]:
+            if hasattr(self, attr):
+                setattr(self, attr, [])
+        if hasattr(self, "filter_items_cache") and isinstance(self.filter_items_cache, dict):
+            self.filter_items_cache.clear()
+        return self.cache_items()
+
 
     @abstractmethod
     def get_provider_ids(self, item):
