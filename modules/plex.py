@@ -830,14 +830,19 @@ class Plex(Library):
             tag_items = item.get("TagItems") or []
             return {tag.get("Name") for tag in tag_items if tag.get("Name")}
 
-        def matches_person(item, person_ids):
+        def matches_person(item, person_ids, person_roles=None):
             people = item.get("People")
             if not isinstance(people, list):
                 return None
             for person in people:
                 pid = person.get("Id")
                 if pid is not None and str(pid) in person_ids:
-                    return True
+                    if person_roles:
+                        person_type = person.get("Type")
+                        if isinstance(person_type, str) and person_type.lower() in person_roles:
+                            return True
+                    else:
+                        return True
             return False
 
         include_item_types = query_params.get("IncludeItemTypes")
@@ -997,9 +1002,18 @@ class Plex(Library):
 
         if "PersonIds" in query_params:
             person_ids = {pid.strip() for pid in query_params["PersonIds"].split(",") if pid.strip()}
+            person_roles = None
+            if "PersonTypes" in query_params:
+                raw_roles = query_params["PersonTypes"]
+                if isinstance(raw_roles, str):
+                    parsed_roles = {role.strip().lower() for role in raw_roles.split(",") if role.strip()}
+                else:
+                    parsed_roles = {str(role).strip().lower() for role in raw_roles if str(role).strip()}
+                if parsed_roles:
+                    person_roles = parsed_roles
             person_matches = []
             for item in filtered:
-                match = matches_person(item, person_ids)
+                match = matches_person(item, person_ids, person_roles)
                 if match is None:
                     return None
                 if match:

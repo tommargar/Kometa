@@ -240,3 +240,211 @@ def test_cached_year_filter_matches_direct_call(monkeypatch):
 
     assert result == expected_result
     assert plex.EmbyServer.get_items_calls == 0
+
+
+def test_cached_person_filter_respects_requested_roles(monkeypatch):
+    import sys
+    import types
+    from urllib.parse import parse_qs as _parse_qs, quote_plus as _quote_plus, urlparse as _urlparse
+
+    class DummyLogger:
+        def __getattr__(self, name):
+            def _log(*args, **kwargs):
+                return None
+
+            return _log
+
+    stub_builder = types.ModuleType("modules.builder")
+    stub_library = types.ModuleType("modules.library")
+
+    class DummyLibrary:
+        pass
+
+    stub_library.Library = DummyLibrary
+
+    stub_poster = types.ModuleType("modules.poster")
+
+    class DummyImageData:
+        pass
+
+    stub_poster.ImageData = DummyImageData
+
+    stub_request = types.ModuleType("modules.request")
+    stub_request.parse_qs = _parse_qs
+    stub_request.quote_plus = _quote_plus
+    stub_request.urlparse = _urlparse
+
+    stub_util = types.ModuleType("modules.util")
+    stub_util.logger = DummyLogger()
+
+    class DummyFailed(Exception):
+        pass
+
+    stub_util.Failed = DummyFailed
+
+    monkeypatch.setitem(sys.modules, "modules.builder", stub_builder)
+    monkeypatch.setitem(sys.modules, "modules.library", stub_library)
+    monkeypatch.setitem(sys.modules, "modules.poster", stub_poster)
+    monkeypatch.setitem(sys.modules, "modules.request", stub_request)
+    monkeypatch.setitem(sys.modules, "modules.util", stub_util)
+
+    from modules.plex import Plex
+    import modules.plex as plex_module
+
+    plex_module.logger = DummyLogger()
+
+    multi_role_person_id = "p1"
+    api_items = [
+        {
+            "Id": "movie-both",
+            "Type": "Movie",
+            "Name": "Both Roles",
+            "People": [
+                {"Id": multi_role_person_id, "Type": "Actor"},
+                {"Id": multi_role_person_id, "Type": "Director"},
+            ],
+        },
+        {
+            "Id": "movie-actor",
+            "Type": "Movie",
+            "Name": "Actor Only",
+            "People": [
+                {"Id": multi_role_person_id, "Type": "Actor"},
+            ],
+        },
+        {
+            "Id": "movie-director",
+            "Type": "Movie",
+            "Name": "Director Only",
+            "People": [
+                {"Id": multi_role_person_id, "Type": "Director"},
+            ],
+        },
+        {
+            "Id": "movie-unrelated",
+            "Type": "Movie",
+            "Name": "Other Person",
+            "People": [
+                {"Id": "p2", "Type": "Actor"},
+            ],
+        },
+    ]
+
+    hydrated_items = []
+
+    class DummyRequestsGet:
+        def __init__(self, store):
+            self.store = store
+
+        def __call__(self, url, headers=None, params=None):
+            items = [dict(item) for item in api_items]
+            self.store[:] = items
+            return DummyResponse({"Items": api_items, "TotalRecordCount": len(api_items)})
+
+    class StubEmbyServer:
+        def __init__(self, items):
+            self.items = list(items)
+            self.headers = {}
+            self.media_by_resolution = {}
+            self.get_items_calls = 0
+
+        def cache_filenames(self, items):
+            return None
+
+        def get_items(self, params):
+            self.get_items_calls += 1
+            include_types = params.get("IncludeItemTypes")
+            allowed_types = {
+                t.strip() for t in include_types.split(",") if t.strip()
+            } if include_types else None
+
+            person_ids = params.get("PersonIds")
+            requested_ids = {
+                pid.strip() for pid in person_ids.split(",") if pid.strip()
+            } if person_ids else None
+
+            person_types = params.get("PersonTypes")
+            requested_roles = {
+                role.strip().lower() for role in person_types.split(",") if role.strip()
+            } if person_types else set()
+
+            results = []
+            for item in self.items:
+                if allowed_types and item.get("Type") not in allowed_types:
+                    continue
+                if requested_ids:
+                    people = item.get("People")
+                    if not isinstance(people, list):
+                        continue
+                    match_found = False
+                    for person in people:
+                        pid = person.get("Id")
+                        if pid is None or str(pid) not in requested_ids:
+                            continue
+                        if requested_roles:
+                            person_type = person.get("Type")
+                            if isinstance(person_type, str) and person_type.lower() in requested_roles:
+                                match_found = True
+                                break
+                        else:
+                            match_found = True
+                            break
+                    if not match_found:
+                        continue
+                results.append(item)
+            return list(results)
+
+        def convert_emby_to_plex(self, items, convert_people=True):
+            return [item["Id"] for item in items]
+
+        def get_custom_rating_from_item(self, item):
+            return None
+
+    dummy_requests = DummyRequestsGet(hydrated_items)
+    monkeypatch.setattr(plex_module.requests, "get", dummy_requests)
+
+    plex = Plex.__new__(Plex)
+    plex.type = "Movie"
+    plex.name = "Dummy"
+    plex.Emby = {"Name": "Dummy", "Id": "library1"}
+    plex.emby_server_url = "http://emby"
+    plex.emby_user_id = "user"
+    plex._emby_all_items = []
+    plex._emby_all_items_native = []
+    plex._search_choices_cache = {}
+    plex._filter_items_cache = {}
+    plex.EmbyServer = StubEmbyServer(api_items)
+
+    plex.get_all_native(builder_level="movie")
+
+    assert hydrated_items and all("People" in item for item in hydrated_items)
+
+    actor_params = {
+        "IncludeItemTypes": "Movie",
+        "PersonIds": multi_role_person_id,
+        "PersonTypes": "actor",
+    }
+    expected_actor_items = plex.EmbyServer.get_items(actor_params)
+    expected_actor_result = plex.EmbyServer.convert_emby_to_plex(expected_actor_items)
+
+    director_params = {
+        "IncludeItemTypes": "Movie",
+        "PersonIds": multi_role_person_id,
+        "PersonTypes": "director",
+    }
+    expected_director_items = plex.EmbyServer.get_items(director_params)
+    expected_director_result = plex.EmbyServer.convert_emby_to_plex(expected_director_items)
+
+    plex.EmbyServer.get_items_calls = 0
+
+    actor_result = plex.fetchItems(f"?type=1&actor={multi_role_person_id}")
+    assert actor_result == expected_actor_result
+    assert plex.EmbyServer.get_items_calls == 0
+    assert "movie-director" not in actor_result
+
+    plex.EmbyServer.get_items_calls = 0
+
+    director_result = plex.fetchItems(f"?type=1&director={multi_role_person_id}")
+    assert director_result == expected_director_result
+    assert plex.EmbyServer.get_items_calls == 0
+    assert "movie-actor" not in director_result
