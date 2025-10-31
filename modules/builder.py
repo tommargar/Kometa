@@ -1274,7 +1274,7 @@ class CollectionBuilder:
                     my_tmdb_id = str(self.data.get("tmdb_person")[0])
                     if my_tmdb_id in method_data:
                         offset = "" if self.tmdb_person_offset == 0 else f" ({self.tmdb_person_offset + 1})"
-                        method_data = method_data.replace(my_tmdb_id, f"{self.data.get('key_name').replace(" ", "%20")}{offset}")
+                        method_data = method_data.replace(my_tmdb_id, f"{self.data.get('key_name').replace(' ', '%20')}{offset}")
                     pass
                 # Hole den Pfad aus der URL
                 parsed_url = urllib.parse.urlparse(method_data)
@@ -2152,6 +2152,7 @@ class CollectionBuilder:
                 if method_name == "plex_search":
                     prevalidated = self._precheck_plex_filter(method_name, dict_data)
                     if prevalidated is False:
+                        self._precheck_skipped_builders = True
                         continue
                     try:
                         self.builders.append((method_name, self.build_filter("plex_search", dict_data, prevalidated=prevalidated)))
@@ -2171,6 +2172,7 @@ class CollectionBuilder:
             filter_payload = {"any": {method_name: method_data}}
             prevalidated = self._precheck_plex_filter("plex_search", filter_payload)
             if prevalidated is False:
+                self._precheck_skipped_builders = True
                 return
             try:
                 self.builders.append(("plex_search", self.build_filter("plex_search", filter_payload, prevalidated=prevalidated)))
@@ -3900,7 +3902,9 @@ class CollectionBuilder:
                 expected_prefix = f"{self.icon}{self.library.name}" # entsricht '📺 Serien '
 
                 # Put the library name in front for better sorting of Emnby collections
-                new_sort_title = f"{expected_prefix}_{new_sort_title.replace(f"{self.icon}{self.library.name} ", "")}"
+                original_prefix = f"{self.icon}{self.library.name} "
+                new_sort_title = new_sort_title.replace(original_prefix, "")
+                new_sort_title = f"{expected_prefix}_{new_sort_title}"
 
                 # append icon for filtering the libraries
                 if False:  # OLD
