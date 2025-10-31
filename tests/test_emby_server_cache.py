@@ -1,3 +1,4 @@
+import re
 import sys
 from pathlib import Path
 
@@ -448,3 +449,207 @@ def test_cached_person_filter_respects_requested_roles(monkeypatch):
     assert director_result == expected_director_result
     assert plex.EmbyServer.get_items_calls == 0
     assert "movie-actor" not in director_result
+
+
+def test_cached_rating_sort_normalizes_nested_payloads(monkeypatch):
+    import types
+    from urllib.parse import parse_qs as _parse_qs, quote_plus as _quote_plus, urlparse as _urlparse
+
+    class CapturingLogger:
+        def __init__(self):
+            self.errors = []
+
+        def error(self, message, *args, **kwargs):
+            self.errors.append((message, args, kwargs))
+
+        def __getattr__(self, name):
+            def _log(*args, **kwargs):
+                return None
+
+            return _log
+
+    stub_builder = types.ModuleType("modules.builder")
+    stub_library = types.ModuleType("modules.library")
+
+    class DummyLibrary:
+        pass
+
+    stub_library.Library = DummyLibrary
+
+    stub_poster = types.ModuleType("modules.poster")
+
+    class DummyImageData:
+        pass
+
+    stub_poster.ImageData = DummyImageData
+
+    stub_request = types.ModuleType("modules.request")
+    stub_request.parse_qs = _parse_qs
+    stub_request.quote_plus = _quote_plus
+    stub_request.urlparse = _urlparse
+
+    capturing_logger = CapturingLogger()
+
+    stub_util = types.ModuleType("modules.util")
+    stub_util.logger = capturing_logger
+
+    class DummyFailed(Exception):
+        pass
+
+    stub_util.Failed = DummyFailed
+
+    monkeypatch.setitem(sys.modules, "modules.builder", stub_builder)
+    monkeypatch.setitem(sys.modules, "modules.library", stub_library)
+    monkeypatch.setitem(sys.modules, "modules.poster", stub_poster)
+    monkeypatch.setitem(sys.modules, "modules.request", stub_request)
+    monkeypatch.setitem(sys.modules, "modules.util", stub_util)
+
+    from modules.plex import Plex
+    import modules.plex as plex_module
+
+    plex_module.logger = capturing_logger
+
+    api_items = [
+        {"Id": "movie-missing", "Type": "Movie", "Name": "Missing", "CriticRating": None},
+        {"Id": "movie-high", "Type": "Movie", "Name": "High", "CriticRating": "95%"},
+        {
+            "Id": "movie-dict",
+            "Type": "Movie",
+            "Name": "Dict",
+            "CriticRating": {"Value": "88.5/100", "Votes": 10},
+        },
+        {
+            "Id": "movie-list",
+            "Type": "Movie",
+            "Name": "List",
+            "CriticRating": ["70 of 100", {"Ignored": "text"}],
+        },
+        {"Id": "movie-zero", "Type": "Movie", "Name": "Zero", "CriticRating": 0},
+    ]
+
+    hydrated_items = []
+
+    class DummyRequestsGet:
+        def __init__(self, store):
+            self.store = store
+
+        def __call__(self, url, headers=None, params=None):
+            items = [dict(item) for item in api_items]
+            self.store[:] = items
+            return DummyResponse({"Items": items, "TotalRecordCount": len(items)})
+
+    class StubEmbyServer:
+        def __init__(self, items):
+            self.items = list(items)
+            self.headers = {}
+            self.media_by_resolution = {}
+            self.get_items_calls = 0
+
+        def cache_filenames(self, items):
+            return None
+
+        def _normalize_rating(self, value):
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                return float(value)
+            if isinstance(value, str):
+                match = re.search(r"[-+]?\d*\.?\d+", value)
+                if match:
+                    try:
+                        return float(match.group())
+                    except (TypeError, ValueError):
+                        return None
+                return None
+            if isinstance(value, dict):
+                for sub_value in value.values():
+                    normalized = self._normalize_rating(sub_value)
+                    if normalized is not None:
+                        return normalized
+                return None
+            if isinstance(value, (list, tuple, set)):
+                for sub_value in value:
+                    normalized = self._normalize_rating(sub_value)
+                    if normalized is not None:
+                        return normalized
+                return None
+            return None
+
+        def get_items(self, params):
+            self.get_items_calls += 1
+            include_types = params.get("IncludeItemTypes")
+            allowed_types = {
+                t.strip() for t in include_types.split(",") if t.strip()
+            } if include_types else None
+
+            results = []
+            for item in self.items:
+                if allowed_types and item.get("Type") not in allowed_types:
+                    continue
+                results.append(dict(item))
+
+            sort_by = params.get("SortBy")
+            if sort_by:
+                reverse_order = params.get("SortOrder", "Ascending").lower() == "descending"
+
+                sortable = []
+                none_bucket = []
+                for item in results:
+                    value = item.get(sort_by)
+                    if sort_by == "CriticRating":
+                        value = self._normalize_rating(value)
+                    if value is None:
+                        none_bucket.append(item)
+                    else:
+                        sortable.append((value, item))
+                sortable.sort(key=lambda pair: pair[0], reverse=reverse_order)
+                results = [item for _, item in sortable] + none_bucket
+
+            return [dict(item) for item in results]
+
+        def convert_emby_to_plex(self, items, convert_people=True):
+            return [item["Id"] for item in items]
+
+        def get_custom_rating_from_item(self, item):
+            return None
+
+        def get_item(self, item_id):
+            for item in self.items:
+                if str(item.get("Id")) == str(item_id):
+                    return dict(item)
+            raise KeyError(item_id)
+
+    dummy_requests = DummyRequestsGet(hydrated_items)
+    monkeypatch.setattr(plex_module.requests, "get", dummy_requests)
+
+    plex = Plex.__new__(Plex)
+    plex.type = "Movie"
+    plex.name = "Dummy"
+    plex.Emby = {"Name": "Dummy", "Id": "library1"}
+    plex.emby_server_url = "http://emby"
+    plex.emby_user_id = "user"
+    plex._emby_all_items = []
+    plex._emby_all_items_native = []
+    plex._search_choices_cache = {}
+    plex._filter_items_cache = {}
+    plex.EmbyServer = StubEmbyServer(api_items)
+
+    plex.get_all_native(builder_level="movie")
+
+    assert hydrated_items and all("CriticRating" in item for item in hydrated_items)
+
+    expected_items = plex.EmbyServer.get_items(
+        {
+            "IncludeItemTypes": "Movie",
+            "ParentId": "library1",
+            "Recursive": "true",
+            "SortBy": "CriticRating",
+            "SortOrder": "Descending",
+        }
+    )
+    expected_result = plex.EmbyServer.convert_emby_to_plex(expected_items)
+    plex.EmbyServer.get_items_calls = 0
+
+    result = plex.fetchItems("?type=1&sort=rating:desc")
+
+    assert result == expected_result
+    assert plex.EmbyServer.get_items_calls == 0
+    assert capturing_logger.errors == []
