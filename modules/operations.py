@@ -484,12 +484,13 @@ class Operations:
                                     if not found_rating:
                                         logger.info(f"No {option} {name_display[item_attr]} Found")
                                         raise Failed
-                                    found_rating = f"{float(found_rating)* (10 if item_attr == "rating" else 1):.1f}"
+                                    multiplier = 10 if item_attr == "rating" else 1
+                                    found_rating = f"{float(found_rating) * multiplier:.1f}"
                                     try:
                                         current *= 10 if item_attr == "rating" else 1
                                     except:
                                         pass
-                                    if current is None and found_rating or str(f"{current:.1f}") != str(f"{(float(found_rating)):.1f}"):
+                                    if str(f"{current:.1f}") != str(f"{(float(found_rating)):.1f}"):
                                         emby_item_attribute = ""
                                         match item_attr:
                                             case "rating":
@@ -1126,7 +1127,7 @@ class Operations:
 
                         if len(item_edits) > 0:
                             # Output list as lines
-                            logger.info(f"Item Edits: {"\n".join(item_edits)}")
+                            logger.info("Item Edits: %s", "\n".join(item_edits))
 
             logger.info("")
             logger.separator("Batch Updates", space=False, border=False)
