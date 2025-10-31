@@ -195,6 +195,7 @@ class CollectionBuilder:
         self.is_playlist = False
         self.playlist = library is None
         self.overlay = overlay
+        self._precheck_skipped_builders = False
         methods = {m.lower(): m for m in self.data}
         if self.playlist:
             self.type = "playlist"
@@ -1154,7 +1155,10 @@ class CollectionBuilder:
                 self.details["label"] = append_labels
 
         if not self.server_preroll and not self.smart_url and not self.blank_collection and len(self.builders) == 0:
-            raise Failed(f"{self.Type} Error: No builders were found")
+            if self._precheck_skipped_builders and self.ignore_blank_results:
+                logger.warning(f"{self.Type} Warning: All builders were skipped after prevalidation")
+            else:
+                raise Failed(f"{self.Type} Error: No builders were found")
 
         if self.blank_collection and len(self.builders) > 0:
             raise Failed(f"{self.Type} Error: No builders allowed with blank_collection")
@@ -2903,7 +2907,7 @@ class CollectionBuilder:
             logger.debug(f"Smart URL: {filter_url}")
         return type_key, filter_details, filter_url
 
-    def validate_attribute(self, attribute, modifier, final, data, validate, plex_search=False):
+    def validate_attribute(self, attribute, modifier, final, data, validate, plex_search=False, precheck=False):
         def smart_pair(list_to_pair):
             return [(t, t) for t in list_to_pair] if plex_search else list_to_pair
         if attribute in tag_attributes and modifier in [".regex"]:
@@ -2921,7 +2925,7 @@ class CollectionBuilder:
                     error += f"\nOptions: {names}"
                 if validate:
                     raise Failed(error)
-                else:
+                elif not precheck:
                     logger.error(error)
             return valid_list
         elif modifier == ".regex":
@@ -3021,7 +3025,7 @@ class CollectionBuilder:
                             error += f"\nOptions: {names}"
                         if validate:
                             raise FilterFailed(error)
-                        elif not self.ignore_blank_results:
+                        elif not self.ignore_blank_results and not precheck:
                             logger.error(error)
             return valid_list
         elif attribute in date_attributes and modifier in [".before", ".after"]:
@@ -3069,7 +3073,7 @@ class CollectionBuilder:
                     if message:
                         if validate:
                             raise Failed(message)
-                        else:
+                        elif not precheck:
                             logger.error(message)
                 if not final_filters:
                     raise Failed(f"{self.Type} Error: no filters found under {attribute}")
