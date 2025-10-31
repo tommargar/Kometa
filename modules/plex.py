@@ -469,6 +469,7 @@ class Plex(Library):
         self.session = self.config.Requests.session # init?
         # Emby
         self.filter_items_cache = {}
+        self._search_choices_cache = {}
         self.emby = params["emby"]
         self.emby_server_url = self.emby["url"]
         self.emby_api_key = self.emby["api_key"]
@@ -1573,6 +1574,19 @@ class Plex(Library):
         final_search = search_translation[search_name] if search_name in search_translation else search_name
         final_search = show_translation[final_search] if self.is_show and final_search in show_translation else final_search
         final_search = get_tags_translation[final_search] if final_search in get_tags_translation else final_search
+        normalized_person_list = None
+        if person_list:
+            normalized_person_list = tuple(sorted(str(person).strip().lower() for person in person_list if person is not None))
+        cache_key = (
+            final_search,
+            bool(title),
+            bool(name_pairs),
+            normalized_person_list,
+            str(tmdb_person_id) if tmdb_person_id is not None else None,
+        )
+        if cache_key in self._search_choices_cache:
+            cached_choices, cached_names = self._search_choices_cache[cache_key]
+            return dict(cached_choices), list(cached_names)
         try:
             names = []
             choices = {}
@@ -1586,6 +1600,7 @@ class Plex(Library):
                 choices[choice.key] = choice.title if use_title else choice.key
                 choices[choice.title.lower()] = choice.title if use_title else choice.key
                 choices[choice.key.lower()] = choice.title if use_title else choice.key
+            self._search_choices_cache[cache_key] = (dict(choices), list(names))
             return choices, names
         except NotFound:
             logger.debug(f"Search Attribute: {final_search}")
@@ -2413,6 +2428,8 @@ class Plex(Library):
                     self.EmbyServer.set_genres(obj.ratingKey, final_tags)
                 else:
                     raise WARNING(f"edit_tags: I won't edit {attr} with {final_tags}")
+                if hasattr(self, "_search_choices_cache") and isinstance(self._search_choices_cache, dict):
+                    self._search_choices_cache.clear()
 
             if _add:
                 display += f"+{', +'.join(_add)}"

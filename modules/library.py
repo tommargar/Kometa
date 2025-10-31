@@ -449,6 +449,8 @@ class Library(ABC):
                 setattr(self, attr, [])
         if hasattr(self, "filter_items_cache") and isinstance(self.filter_items_cache, dict):
             self.filter_items_cache.clear()
+        if hasattr(self, "_search_choices_cache") and isinstance(self._search_choices_cache, dict):
+            self._search_choices_cache.clear()
         return self.cache_items()
 
 
