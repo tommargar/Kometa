@@ -148,11 +148,12 @@ class Overlays:
                             if compare_name not in overlay_compare or properties[original_name].updated:
                                 overlay_change = f"{compare_name} not in {overlay_compare} or {properties[original_name].updated}"
 
+                    special_text_cache = self.cache.query_overlay_special_text(item.ratingKey) if self.cache else {}
                     if self.cache:
                         for over_name in over_names:
                             current_overlay = properties[over_name]  # <--- WICHTIG
-                            if properties[over_name].name.startswith("text"):
-                                for cache_key, cache_value in self.cache.query_overlay_special_text(item.ratingKey).items():
+                            if properties[over_name].name.startswith("text") and special_text_cache:
+                                for cache_key, cache_value in special_text_cache.items():
                                     actual = plex.attribute_translation[cache_key] if cache_key in plex.attribute_translation else cache_key
                                     if actual == "total_runtime":
                                         sub_items = item.episodes() if current_overlay.level in ["show", "season"] else item.tracks()
