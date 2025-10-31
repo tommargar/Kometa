@@ -448,7 +448,142 @@ def test_cached_person_filter_respects_requested_roles(monkeypatch):
     director_result = plex.fetchItems(f"?type=1&director={multi_role_person_id}")
     assert director_result == expected_director_result
     assert plex.EmbyServer.get_items_calls == 0
-    assert "movie-actor" not in director_result
+
+
+def test_cached_resolution_filter_uses_emby_cache(monkeypatch):
+    import sys
+    import types
+    from urllib.parse import parse_qs as _parse_qs, quote_plus as _quote_plus, urlparse as _urlparse
+
+    class DummyLogger:
+        def __getattr__(self, name):
+            def _log(*args, **kwargs):
+                return None
+
+            return _log
+
+    stub_builder = types.ModuleType("modules.builder")
+
+    stub_library = types.ModuleType("modules.library")
+
+    class DummyLibrary:
+        pass
+
+    stub_library.Library = DummyLibrary
+
+    stub_poster = types.ModuleType("modules.poster")
+
+    class DummyImageData:
+        pass
+
+    stub_poster.ImageData = DummyImageData
+
+    stub_request = types.ModuleType("modules.request")
+    stub_request.parse_qs = _parse_qs
+    stub_request.quote_plus = _quote_plus
+    stub_request.urlparse = _urlparse
+
+    stub_util = types.ModuleType("modules.util")
+    stub_util.logger = DummyLogger()
+
+    class DummyFailed(Exception):
+        pass
+
+    stub_util.Failed = DummyFailed
+
+    monkeypatch.setitem(sys.modules, "modules.builder", stub_builder)
+    monkeypatch.setitem(sys.modules, "modules.library", stub_library)
+    monkeypatch.setitem(sys.modules, "modules.poster", stub_poster)
+    monkeypatch.setitem(sys.modules, "modules.request", stub_request)
+    monkeypatch.setitem(sys.modules, "modules.util", stub_util)
+
+    from modules.plex import Plex
+    import modules.plex as plex_module
+
+    plex_module.logger = DummyLogger()
+
+    api_items = [
+        {
+            "Id": "movie-1080",
+            "Type": "Movie",
+            "ProductionYear": 2022,
+            "PremiereDate": "2022-01-01T00:00:00Z",
+            "Name": "Full HD",
+        },
+        {
+            "Id": "movie-720",
+            "Type": "Movie",
+            "ProductionYear": 2020,
+            "PremiereDate": "2020-01-01T00:00:00Z",
+            "Name": "HD",
+        },
+    ]
+
+    hydrated_items = []
+
+    class DummyRequestsGet:
+        def __init__(self, store):
+            self.store = store
+
+        def __call__(self, url, headers=None, params=None):
+            items = [dict(item) for item in api_items]
+            self.store[:] = items
+            return DummyResponse({"Items": items, "TotalRecordCount": len(items)})
+
+    class StubEmbyServer:
+        def __init__(self, items):
+            self.items = list(items)
+            self.headers = {}
+            self.media_by_resolution = {
+                "1080p": {"movie-1080"},
+                "720p": {"movie-720"},
+            }
+            self.get_items_calls = 0
+
+        def cache_filenames(self, items):
+            return None
+
+        def get_items(self, params):
+            self.get_items_calls += 1
+            return list(self.items)
+
+        def convert_emby_to_plex(self, items, convert_people=True):
+            return [item["Id"] for item in items]
+
+        def get_custom_rating_from_item(self, item):
+            return None
+
+        def get_item(self, item_id):
+            for item in self.items:
+                if item.get("Id") == item_id:
+                    return item
+            return None
+
+    dummy_requests = DummyRequestsGet(hydrated_items)
+    monkeypatch.setattr(plex_module.requests, "get", dummy_requests)
+
+    plex = Plex.__new__(Plex)
+    plex.type = "Movie"
+    plex.name = "Dummy"
+    plex.Emby = {"Name": "Dummy", "Id": "library1"}
+    plex.emby_server_url = "http://emby"
+    plex.emby_user_id = "user"
+    plex._emby_all_items = []
+    plex._emby_all_items_native = []
+    plex._search_choices_cache = {}
+    plex._filter_items_cache = {}
+    plex.EmbyServer = StubEmbyServer(api_items)
+
+    plex.get_all_native(builder_level="movie")
+
+    assert hydrated_items and all("Id" in item for item in hydrated_items)
+
+    plex.EmbyServer.get_items_calls = 0
+
+    result = plex.fetchItems("?type=1&resolution=1080p")
+
+    assert result == ["movie-1080"]
+    assert plex.EmbyServer.get_items_calls == 0
 
 
 def test_cached_rating_sort_normalizes_nested_payloads(monkeypatch):

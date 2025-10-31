@@ -1301,15 +1301,22 @@ class Plex(Library):
                             years_list.append(value_decoded)
                     elif key_decoded in ['resolution']:
                         index_key = value_decoded
-                        if index_key not in ["4k", "HD", "4K"]:
-                            index_key += 'p'
-                        elif index_key == "HD":
+                        lower_index = index_key.lower()
+                        if lower_index == "hd":
                             index_key = "720p"
-                        normalized_key = index_key.lower()
+                            lower_index = "720p"
+                        elif lower_index not in ["4k"] and not lower_index.endswith("p"):
+                            index_key = f"{index_key}p"
+                            lower_index = index_key.lower()
+                        normalized_key = lower_index
                         if normalized_key == "4k":
                             normalized_key = "4k"
                         if normalized_key not in self.EmbyServer.media_by_resolution:
-                            raise Failed(f"Decoded value {value_decoded} not in search!")
+                            logger.warning(
+                                "Emby BETA: resolution '%s' is not cached; skipping filter",
+                                value_decoded,
+                            )
+                            continue
                         emby_query_params.setdefault("_Resolutions", set()).add(normalized_key)
                     elif key_decoded == 'hdr':
                         if value_decoded == "1":
