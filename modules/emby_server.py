@@ -1012,7 +1012,7 @@ class EmbyServer:
         search_tag=""
         get_fields=f"&Fields=ParentId"
         if title:
-            search_title= f"&SearchTerm={urllib.parse.quote(title).replace("&","%26")}"
+            search_title = f"&SearchTerm={urllib.parse.quote(title).replace('&', '%26')}"
         if label:
             search_tag = f"&Tags={urllib.parse.quote(label)}"
         # else:
@@ -1070,7 +1070,7 @@ class EmbyServer:
             for item in all_items_in_box_set:
                 if item.get("ParentId") == library_id:
                     collections_with_items.append(collection_item)
-                    print(f"{collection_item.get("Name","UNKNOWN")} found in Library")
+                    print(f"{collection_item.get('Name', 'UNKNOWN')} found in Library")
                     break
             # if collection_item.get("ParentId") == library_id:
 
@@ -2432,6 +2432,56 @@ class EmbyServer:
             logger.error(f"Error removing BoxSet with ID '{collection_id}': {e}")
             return False
 
+    def _names_from_item(self, item: dict, list_key: str, dict_list_key: str) -> set[str]:
+        names: set[str] = set()
+        values = item.get(list_key)
+        if isinstance(values, list):
+            for value in values:
+                if value:
+                    names.add(str(value))
+
+        object_list = item.get(dict_list_key)
+        if isinstance(object_list, list):
+            for entry in object_list:
+                if not isinstance(entry, dict):
+                    continue
+                name = entry.get("Name") or entry.get("name")
+                if name:
+                    names.add(str(name))
+
+        return names
+
+    def _collect_cached_items_for_library(self, library_id: str = "") -> list[dict]:
+        library_filter = str(library_id) if library_id else None
+        merged: dict[str, dict] = {}
+
+        def _merge_item(item: dict | None, fallback_key: str | None) -> None:
+            if not isinstance(item, dict):
+                return
+
+            if library_filter:
+                lib_value = item.get("LibraryId") or item.get("ParentId") or ""
+                if str(lib_value) != library_filter:
+                    return
+
+            item_id = item.get("Id") or fallback_key
+            if item_id in (None, ""):
+                return
+
+            key = str(item_id)
+            bucket = merged.setdefault(key, {})
+            bucket.update(item)
+
+        for key, cached_item in self.item_cache.items():
+            fallback = str(key) if key is not None else None
+            _merge_item(cached_item, fallback)
+
+        for key, cached_item in self._items_cache.items():
+            fallback = str(key) if key is not None else None
+            _merge_item(cached_item, fallback)
+
+        return list(merged.values())
+
     def get_emby_item_tags(self, plex_object, library_id: str = "", search_all: bool = False,
                            from_cache: bool = True) -> list[str]:
         # Item-spezifisch (häufigster Fall)
@@ -2440,22 +2490,14 @@ class EmbyServer:
             item = self.get_item(item_id, force_refresh=(item_id in self.dirty_items))
             if not item:
                 return []
-            # Emby liefert entweder "Tags": ["A","B"] oder "TagItems": [{"Name":"A"}, ...]
-            if isinstance(item.get("Tags"), list):
-                tags = {t for t in item["Tags"] if t}
-            else:
-                tags = {ti.get("Name") for ti in (item.get("TagItems") or []) if ti.get("Name")}
+            # Emby liefert "Tags": ["A","B"] und/oder "TagItems": [{"Name":"A"}, ...]
+            tags = self._names_from_item(item, "Tags", "TagItems")
             return sorted(tags)
 
         # Library-weit: erst versuchen, aus bereits gecachten Items zu aggregieren
         agg = set()
-        for cached in self.item_cache.values():
-            if library_id and str(cached.get("LibraryId") or cached.get("ParentId") or "") != str(library_id):
-                continue
-            if isinstance(cached.get("Tags"), list):
-                agg.update({t for t in cached["Tags"] if t})
-            else:
-                agg.update({ti.get("Name") for ti in (cached.get("TagItems") or []) if ti.get("Name")})
+        for cached in self._collect_cached_items_for_library(library_id):
+            agg.update(self._names_from_item(cached, "Tags", "TagItems"))
         if agg:
             return sorted(agg)
 
@@ -2471,21 +2513,13 @@ class EmbyServer:
             item = self.get_item(item_id, force_refresh=(item_id in self.dirty_items))
             if not item:
                 return []
-            # "Genres": ["Comedy"] oder "GenreItems": [{"Name":"Comedy"}]
-            if isinstance(item.get("Genres"), list):
-                genres = {g for g in item["Genres"] if g}
-            else:
-                genres = {gi.get("Name") for gi in (item.get("GenreItems") or []) if gi.get("Name")}
+            # "Genres": ["Comedy"] und/oder "GenreItems": [{"Name":"Comedy"}]
+            genres = self._names_from_item(item, "Genres", "GenreItems")
             return sorted(genres)
 
         agg = set()
-        for cached in self.item_cache.values():
-            if library_id and str(cached.get("LibraryId") or cached.get("ParentId") or "") != str(library_id):
-                continue
-            if isinstance(cached.get("Genres"), list):
-                agg.update({g for g in cached["Genres"] if g})
-            else:
-                agg.update({gi.get("Name") for gi in (cached.get("GenreItems") or []) if gi.get("Name")})
+        for cached in self._collect_cached_items_for_library(library_id):
+            agg.update(self._names_from_item(cached, "Genres", "GenreItems"))
         if agg:
             return sorted(agg)
 
@@ -4566,7 +4600,7 @@ class EmbyServer:
             if str(dp.get("Id") or "").isdigit():
                 continue
             emby_existing = by_name.get((et, self._norm_name(nm_clean)))
-            emby_existing_dupe = by_name.get((et, self._norm_name(f"{dp.get("Name")}-{tmdb}")))
+            emby_existing_dupe = by_name.get((et, self._norm_name(f"{dp.get('Name')}-{tmdb}")))
             if emby_existing_dupe:
                 pass
             if emby_existing or emby_existing_dupe:
