@@ -1012,7 +1012,7 @@ class EmbyServer:
         search_tag=""
         get_fields=f"&Fields=ParentId"
         if title:
-            search_title= f"&SearchTerm={urllib.parse.quote(title).replace("&","%26")}"
+            search_title = f"&SearchTerm={urllib.parse.quote(title).replace('&', '%26')}"
         if label:
             search_tag = f"&Tags={urllib.parse.quote(label)}"
         # else:
@@ -1070,7 +1070,7 @@ class EmbyServer:
             for item in all_items_in_box_set:
                 if item.get("ParentId") == library_id:
                     collections_with_items.append(collection_item)
-                    print(f"{collection_item.get("Name","UNKNOWN")} found in Library")
+                    print(f"{collection_item.get('Name', 'UNKNOWN')} found in Library")
                     break
             # if collection_item.get("ParentId") == library_id:
 
@@ -1317,10 +1317,26 @@ class EmbyServer:
         response.raise_for_status()
         return response.json()
 
-    def invalidate_item(self, item_id: int) -> None:
+    def invalidate_item(self, item_id: int | str) -> None:
         """Von außen aufrufen, wenn du ein Item (z.B. Genres) geändert hast."""
-        self.dirty_items.add(item_id)
-        self.item_cache.pop(item_id, None)
+
+        # Für Konsistenz sowohl int- als auch str-Repräsentationen behandeln.
+        item_id_str = str(item_id)
+        try:
+            item_id_int = int(item_id_str)
+        except (TypeError, ValueError):
+            item_id_int = None
+
+        if item_id_int is not None:
+            self.dirty_items.add(item_id_int)
+            self.item_cache.pop(item_id_int, None)
+        # Manche Call-Sites benutzen evtl. str-Ids im item_cache.
+        self.item_cache.pop(item_id_str, None)
+
+        # Auch den Bulk-Cache für diese ID leeren.
+        self._items_cache.pop(item_id_str, None)
+        self._items_cache_fields.pop(item_id_str, None)
+        self._items_cache_ts.pop(item_id_str, None)
 
     def _resolve_item_id(self, plex_object) -> int:
         # ratingKey auf Plex-Objekten
@@ -3653,11 +3669,21 @@ class EmbyServer:
         # 1) Aufteilen in bekannte (frisch + Feld-Superset) und nachzuladende IDs
         to_fetch: list[str] = []
         for id_ in fetch_ids_all:
+            try:
+                id_int = int(id_)
+            except (TypeError, ValueError):
+                id_int = None
+
             cached_item = self._items_cache.get(id_)
             cached_fields = self._items_cache_fields.get(id_, set())
             ts = self._items_cache_ts.get(id_, 0.0)
 
-            if cached_item and is_fresh(ts) and req_fields_set.issubset(cached_fields):
+            if (
+                cached_item
+                and (id_int is None or id_int not in self.dirty_items)
+                and is_fresh(ts)
+                and req_fields_set.issubset(cached_fields)
+            ):
                 out[id_] = cached_item
             else:
                 to_fetch.append(id_)
@@ -3693,6 +3719,11 @@ class EmbyServer:
 
                     self._items_cache_ts[it_id] = now_fetch
                     out[it_id] = self._items_cache[it_id]
+
+                    try:
+                        self.dirty_items.discard(int(it_id))
+                    except (TypeError, ValueError):
+                        pass
 
         return out
 
@@ -4566,7 +4597,7 @@ class EmbyServer:
             if str(dp.get("Id") or "").isdigit():
                 continue
             emby_existing = by_name.get((et, self._norm_name(nm_clean)))
-            emby_existing_dupe = by_name.get((et, self._norm_name(f"{dp.get("Name")}-{tmdb}")))
+            emby_existing_dupe = by_name.get((et, self._norm_name(f"{dp.get('Name')}-{tmdb}")))
             if emby_existing_dupe:
                 pass
             if emby_existing or emby_existing_dupe:
