@@ -744,6 +744,49 @@ def test_emby_resolution_cache_parses_filename_and_filters(monkeypatch):
     assert result_hd == ["movie-hd"]
     assert plex.EmbyServer.get_items_calls == 0
 
+
+def test_get_resolutions_warms_filename_cache(monkeypatch):
+    server = EmbyServer.__new__(EmbyServer)
+    server.file_names = {}
+    server.cached_studios = {}
+    server.cached_people = {}
+    server.cached_locations = {}
+    server.cached_runtime = {}
+    server.cached_provider_ids = {}
+    server.media_by_resolution = {}
+    server.library_id = "lib-cache"
+
+    fetch_calls = []
+
+    def stub_get_items(self, params=None, fields=None, **_):
+        fetch_calls.append({
+            "params": dict(params or {}),
+            "fields": fields,
+        })
+        return [
+            {"Id": "movie-1080", "Path": "/data/Movie.1080p.mkv"},
+            {"Id": "movie-hdr", "Path": "/data/Series.S01E01.HDR10.2160p.mkv"},
+        ]
+
+    monkeypatch.setattr(EmbyServer, "get_items", stub_get_items)
+
+    choices = server.get_resolutions()
+
+    assert fetch_calls, "expected lightweight fetch to run"
+    assert fetch_calls[0]["params"].get("ParentId") == "lib-cache"
+    assert "Path" in (fetch_calls[0]["fields"] or "")
+
+    choice_map = {choice.key: choice.title for choice in choices}
+    assert choice_map.get("1080p") == "1080p"
+    assert choice_map.get("hdr") == "hdr"
+
+    assert "movie-1080" in server.media_by_resolution.get("1080p", [])
+    assert "movie-hdr" in server.media_by_resolution.get("hdr", [])
+
+    second_choices = server.get_resolutions()
+    assert len(fetch_calls) == 1, "fetch should not repeat once cache is populated"
+    assert {c.key for c in second_choices} == {c.key for c in choices}
+
 def test_cached_rating_sort_normalizes_nested_payloads(monkeypatch):
     import types
     from urllib.parse import parse_qs as _parse_qs, quote_plus as _quote_plus, urlparse as _urlparse
