@@ -1342,7 +1342,13 @@ class Plex(Library):
                         normalized_key = lower_index
                         if normalized_key == "4k":
                             normalized_key = "4k"
-                        if normalized_key not in self.EmbyServer.media_by_resolution:
+                        media_by_resolutions = getattr(self.EmbyServer, "media_by_resolution", None)
+                        if not media_by_resolutions or normalized_key not in media_by_resolutions:
+                            get_resolutions = getattr(self.EmbyServer, "get_resolutions", None)
+                            if callable(get_resolutions):
+                                get_resolutions()
+                                media_by_resolutions = getattr(self.EmbyServer, "media_by_resolution", None)
+                        if not media_by_resolutions or normalized_key not in media_by_resolutions:
                             logger.warning(
                                 "Emby BETA: resolution '%s' is not cached; skipping filter",
                                 value_decoded,
@@ -1396,6 +1402,16 @@ class Plex(Library):
 
         emby_query_params['ParentId'] = self.Emby.get("Id")
 
+        needs_resolution_filter = bool(
+            emby_query_params.get("_Resolutions") or emby_query_params.get("_RequireHdr")
+        )
+        if needs_resolution_filter:
+            media_by_resolutions = getattr(self.EmbyServer, "media_by_resolution", None)
+            if not media_by_resolutions:
+                get_resolutions = getattr(self.EmbyServer, "get_resolutions", None)
+                if callable(get_resolutions):
+                    get_resolutions()
+
         if unknown_params:
             logger.error(f"Emby BETA: unknown parameters: {unknown_params}")
             # |     1 | Unknown parameter: {'duplicate': '1'} ?type=1&sort=titleSort&duplicate=1
@@ -1417,6 +1433,11 @@ class Plex(Library):
         if items is None:
             api_query_params = {k: v for k, v in emby_query_params.items() if not k.startswith('_')}
             items = self.EmbyServer.get_items(api_query_params)
+            if items is None:
+                items = []
+            filtered_items = self._filter_emby_native_items(list(items), emby_query_params)
+            if filtered_items is not None:
+                items = filtered_items
 
         all_shows = None
         if is_show:

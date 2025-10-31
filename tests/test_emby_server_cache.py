@@ -788,3 +788,107 @@ def test_cached_rating_sort_normalizes_nested_payloads(monkeypatch):
     assert result == expected_result
     assert plex.EmbyServer.get_items_calls == 0
     assert capturing_logger.errors == []
+
+
+def test_resolution_filter_applied_after_api_fetch(monkeypatch):
+    import sys
+    import types
+    from urllib.parse import parse_qs as _parse_qs, quote_plus as _quote_plus, urlparse as _urlparse
+
+    class DummyLogger:
+        def __getattr__(self, name):
+            def _log(*args, **kwargs):
+                return None
+
+            return _log
+
+    stub_builder = types.ModuleType("modules.builder")
+    stub_library = types.ModuleType("modules.library")
+
+    class DummyLibrary:
+        pass
+
+    stub_library.Library = DummyLibrary
+
+    stub_poster = types.ModuleType("modules.poster")
+
+    class DummyImageData:
+        pass
+
+    stub_poster.ImageData = DummyImageData
+
+    stub_request = types.ModuleType("modules.request")
+    stub_request.parse_qs = _parse_qs
+    stub_request.quote_plus = _quote_plus
+    stub_request.urlparse = _urlparse
+
+    stub_util = types.ModuleType("modules.util")
+    stub_util.logger = DummyLogger()
+
+    class DummyFailed(Exception):
+        pass
+
+    stub_util.Failed = DummyFailed
+
+    monkeypatch.setitem(sys.modules, "modules.builder", stub_builder)
+    monkeypatch.setitem(sys.modules, "modules.library", stub_library)
+    monkeypatch.setitem(sys.modules, "modules.poster", stub_poster)
+    monkeypatch.setitem(sys.modules, "modules.request", stub_request)
+    monkeypatch.setitem(sys.modules, "modules.util", stub_util)
+
+    from modules.plex import Plex
+    import modules.plex as plex_module
+
+    plex_module.logger = DummyLogger()
+
+    class StubEmbyServer:
+        def __init__(self):
+            self.media_by_resolution = {}
+            self.get_items_calls = 0
+            self.get_resolutions_calls = 0
+            self.last_converted = None
+
+        def get_resolutions(self):
+            self.get_resolutions_calls += 1
+            self.media_by_resolution = {
+                "1080p": ["movie-1080"],
+                "4k": ["movie-4k"],
+                "hdr": ["movie-hdr"],
+                "plus": [],
+                "dvhdr": [],
+                "dvhdrplus": [],
+            }
+            return []
+
+        def get_items(self, params):
+            self.get_items_calls += 1
+            return [
+                {"Id": "movie-1080", "Type": "Movie", "Name": "Full HD"},
+                {"Id": "movie-4k", "Type": "Movie", "Name": "Ultra HD"},
+            ]
+
+        def convert_emby_to_plex(self, items, convert_people=True):
+            self.last_converted = list(items)
+            return [item["Id"] for item in items]
+
+    plex = Plex.__new__(Plex)
+    plex.type = "Movie"
+    plex.name = "Dummy"
+    plex.Emby = {"Name": "Dummy", "Id": "library1"}
+    plex.emby_server_url = "http://emby"
+    plex.emby_user_id = "user"
+    plex._emby_all_items = []
+    plex._emby_all_items_native = []
+    plex._search_choices_cache = {}
+    plex._filter_items_cache = {}
+    plex.EmbyServer = StubEmbyServer()
+
+    plex._can_use_emby_cache = lambda params: False
+
+    result = plex.fetchItems("?type=1&resolution=1080p")
+
+    assert result == ["movie-1080"]
+    assert plex.EmbyServer.get_items_calls == 1
+    assert plex.EmbyServer.get_resolutions_calls >= 1
+    assert plex.EmbyServer.last_converted and len(plex.EmbyServer.last_converted) == 1
+    assert plex.EmbyServer.last_converted[0]["Id"] == "movie-1080"
