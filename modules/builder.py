@@ -2127,15 +2127,7 @@ class CollectionBuilder:
                     validated[key] = nested_validated
                 else:
                     try:
-                        validation = self.validate_attribute(
-                            attr,
-                            modifier,
-                            final_attr,
-                            value,
-                            validate=False,
-                            plex_search=True,
-                            precheck=True
-                        )
+                        validation = self.validate_attribute(attr, modifier, final_attr, value, validate=False, plex_search=True)
                     except Failed as e:
                         logger.error(e)
                         return False
@@ -2160,7 +2152,6 @@ class CollectionBuilder:
                 if method_name == "plex_search":
                     prevalidated = self._precheck_plex_filter(method_name, dict_data)
                     if prevalidated is False:
-                        self._precheck_skipped_builders = True
                         continue
                     try:
                         self.builders.append((method_name, self.build_filter("plex_search", dict_data, prevalidated=prevalidated)))
@@ -2180,7 +2171,6 @@ class CollectionBuilder:
             filter_payload = {"any": {method_name: method_data}}
             prevalidated = self._precheck_plex_filter("plex_search", filter_payload)
             if prevalidated is False:
-                self._precheck_skipped_builders = True
                 return
             try:
                 self.builders.append(("plex_search", self.build_filter("plex_search", filter_payload, prevalidated=prevalidated)))
