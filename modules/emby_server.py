@@ -1484,11 +1484,11 @@ class EmbyServer:
         for batch in batches:
             if batch:
                 query_params["Ids"] = ",".join(batch)
-            start_index = 0
+            current_index = start_index
 
             while True:
                 time.sleep(self.seconds_between_requests)
-                query_params["StartIndex"] = start_index
+                query_params["StartIndex"] = current_index
                 encoded_query = self.custom_encode(query_params)
                 full_url = f"{url}?{encoded_query}"
 
@@ -1504,9 +1504,14 @@ class EmbyServer:
                 if "Items" in response_data:
                     items = response_data["Items"]
                     all_items.extend(items)
-                    if len(items) < limit_query:
+                    if not items:
+                        break
+
+                    page_size = limit if limit else len(items)
+                    current_index += page_size
+
+                    if len(items) < page_size:
                         break  # All items retrieved
-                    start_index += limit_query
                 else:
                     break
 
