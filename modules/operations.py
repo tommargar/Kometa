@@ -936,7 +936,7 @@ class Operations:
                     # tick("Emby genres updated", min_ms=5)
 
                 if len(item_edits) > 0:
-                    logger.info(f"{"\n".join(item_edits)}")
+                    logger.info("\n".join(item_edits))
                 else:
                     logger.info("No Item Edits")
 
