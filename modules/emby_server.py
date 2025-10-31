@@ -768,7 +768,7 @@ class EmbyServer:
     def get_items_with_imdb_id(self, imdb_ids, item_types=None):
         batch_size = self.api_batch_size
         returned_items = []
-        gotten_item_names = []
+        seen_item_ids = set()
 
         if item_types is None:
             item_types = ["Movie", "Series"]
@@ -788,6 +788,8 @@ class EmbyServer:
             batch_imdb_ids = [
                 imdb_id for imdb_id in batch_imdb_ids if imdb_id is not None
             ]
+            if not batch_imdb_ids:
+                continue
             imdb_ids_str = ",".join(["imdb." + imdb_id for imdb_id in batch_imdb_ids])
 
             items = self.get_items(
@@ -798,9 +800,12 @@ class EmbyServer:
             )
 
             for item in items:
-                if item["Name"] not in gotten_item_names:
-                    returned_items.append(item["Id"])
-                    gotten_item_names.append(item["Name"])
+                item_id = item.get("Id")
+                if item_id is None:
+                    continue
+                if item_id not in seen_item_ids:
+                    returned_items.append(item_id)
+                    seen_item_ids.add(item_id)
 
         return returned_items
 
