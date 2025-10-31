@@ -1,4 +1,4 @@
-import os, plexapi, re, time
+import os, plexapi, re, time, random
 from datetime import datetime, timedelta
 from urllib.parse import unquote
 import requests
@@ -736,6 +736,299 @@ class Plex(Library):
         return self.EmbyServer.convert_emby_to_plex([item])[0]
         return self.PlexServer.fetchItem(data)
 
+    def _parse_emby_datetime(self, value):
+        """Parse ISO-formatted timestamps returned by Emby."""
+        if not value:
+            return None
+        try:
+            if isinstance(value, str) and value.endswith("Z"):
+                value = f"{value[:-1]}+00:00"
+            return datetime.fromisoformat(value)
+        except (TypeError, ValueError):
+            pass
+        # Try a couple of common fallback formats
+        for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ"):
+            try:
+                return datetime.strptime(value, fmt)
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    def _can_use_emby_cache(self, emby_query_params):
+        """Return True when the local cache can satisfy the requested filters."""
+        if not emby_query_params:
+            return False
+
+        if emby_query_params.get("Ids"):
+            return False
+
+        if "PersonIds" in emby_query_params:
+            include_types = emby_query_params.get("IncludeItemTypes", "")
+            if include_types:
+                include_person = any(
+                    t.strip().lower() == "person" for t in include_types.split(",") if t.strip()
+                )
+                if include_person:
+                    return False
+
+        supported_keys = {
+            "Recursive",
+            "Fields",
+            "IncludeItemTypes",
+            "ParentId",
+            "Years",
+            "Genres",
+            "Studios",
+            "Tags",
+            "OfficialRatings",
+            "MinCriticRating",
+            "MaxCriticRating",
+            "MinCommunityRating",
+            "MaxCommunityRating",
+            "MinCustomRating",
+            "MaxCustomRating",
+            "MinPremiereDate",
+            "MaxPremiereDate",
+            "Limit",
+            "SortBy",
+            "SortOrder",
+            "PersonIds",
+            "PersonTypes",
+        }
+
+        for key, value in emby_query_params.items():
+            if key.startswith("_"):
+                continue
+            if key not in supported_keys and value not in (None, ""):
+                return False
+
+        return True
+
+    def _filter_emby_native_items(self, items, query_params):
+        """Apply supported Emby filters to a list of cached native items."""
+        if items is None:
+            return None
+
+        filtered = list(items)
+
+        def get_year(item):
+            year = item.get("ProductionYear")
+            if isinstance(year, int):
+                return str(year)
+            if isinstance(year, str) and year.isdigit():
+                return year
+            premiere = item.get("PremiereDate")
+            premiere_date = self._parse_emby_datetime(premiere)
+            if premiere_date:
+                return str(premiere_date.year)
+            return None
+
+        def get_tags(item):
+            raw_tags = item.get("Tags") or []
+            if raw_tags:
+                return set(raw_tags)
+            tag_items = item.get("TagItems") or []
+            return {tag.get("Name") for tag in tag_items if tag.get("Name")}
+
+        def matches_person(item, person_ids):
+            people = item.get("People")
+            if not isinstance(people, list):
+                return None
+            for person in people:
+                pid = person.get("Id")
+                if pid is not None and str(pid) in person_ids:
+                    return True
+            return False
+
+        include_item_types = query_params.get("IncludeItemTypes")
+        if include_item_types:
+            allowed_types = {t.strip() for t in include_item_types.split(",") if t.strip()}
+            if allowed_types:
+                filtered = [item for item in filtered if item.get("Type") in allowed_types]
+
+        years_value = query_params.get("Years")
+        if years_value:
+            allowed_years = {y.strip() for y in years_value.split(",") if y.strip()}
+            if allowed_years:
+                filtered = [item for item in filtered if get_year(item) in allowed_years]
+
+        min_premiere = self._parse_emby_datetime(query_params.get("MinPremiereDate"))
+        if min_premiere:
+            filtered = [
+                item
+                for item in filtered
+                if (premiere := self._parse_emby_datetime(item.get("PremiereDate"))) and premiere >= min_premiere
+            ]
+
+        max_premiere = self._parse_emby_datetime(query_params.get("MaxPremiereDate"))
+        if max_premiere:
+            filtered = [
+                item
+                for item in filtered
+                if (premiere := self._parse_emby_datetime(item.get("PremiereDate"))) and premiere <= max_premiere
+            ]
+
+        if any(
+            key in query_params
+            for key in (
+                "MaxCriticRating",
+                "MaxCommunityRating",
+                "MaxCustomRating",
+                "MinCriticRating",
+                "MinCommunityRating",
+                "MinCustomRating",
+            )
+        ):
+            updated_results = []
+            for item in filtered:
+                keep_item = True
+                if "MaxCriticRating" in query_params:
+                    critic_rating = int(float(item.get("CriticRating", 0)))
+                    max_rating = int(query_params.get("MaxCriticRating"))
+                    if critic_rating > max_rating or critic_rating == 0:
+                        keep_item = False
+
+                if "MaxCommunityRating" in query_params:
+                    community_rating = float(item.get("CommunityRating", 0))
+                    max_rating = float(query_params.get("MaxCommunityRating"))
+                    if community_rating > max_rating or community_rating == 0:
+                        keep_item = False
+
+                if "MaxCustomRating" in query_params:
+                    custom_rating = float(item.get("CustomRating", 0))
+                    max_rating = float(query_params.get("MaxCustomRating"))
+                    if custom_rating > max_rating or custom_rating == 0:
+                        keep_item = False
+
+                if "MinCriticRating" in query_params:
+                    critic_rating = int(float(item.get("CriticRating", 0)))
+                    min_rating = int(query_params.get("MinCriticRating"))
+                    if critic_rating < min_rating or critic_rating == 0:
+                        keep_item = False
+
+                if "MinCommunityRating" in query_params:
+                    community_rating = float(item.get("CommunityRating", 0))
+                    min_rating = float(query_params.get("MinCommunityRating"))
+                    if community_rating < min_rating or community_rating == 0:
+                        keep_item = False
+
+                if "MinCustomRating" in query_params:
+                    custom_rating = float(item.get("CustomRating", 0))
+                    min_rating = float(query_params.get("MinCustomRating"))
+                    if custom_rating < min_rating or custom_rating == 0:
+                        keep_item = False
+
+                if keep_item:
+                    updated_results.append(item)
+
+            filtered = updated_results
+
+        if "Studios" in query_params:
+            studio_value = query_params["Studios"]
+            if isinstance(studio_value, str):
+                studio_names = [s.strip() for s in studio_value.split(",") if s.strip()]
+            else:
+                studio_names = [str(s).strip() for s in studio_value if str(s).strip()]
+            if studio_names:
+                studio_filter_results = []
+                for item in filtered:
+                    for studio in item.get("Studios", []) or []:
+                        if studio.get("Name") in studio_names:
+                            studio_filter_results.append(item)
+                            break
+                filtered = studio_filter_results
+
+        if "Genres" in query_params:
+            genres_value = query_params["Genres"]
+            if isinstance(genres_value, str):
+                source_genres = genres_value.split(",")
+            else:
+                source_genres = genres_value
+            requested_genres = {str(g).strip() for g in source_genres if str(g).strip()}
+            if requested_genres:
+                filtered = [
+                    item
+                    for item in filtered
+                    if requested_genres.issubset({str(g) for g in item.get("Genres", []) if g})
+                ]
+
+        if "Tags" in query_params:
+            requested_tags = {tag.strip() for tag in query_params["Tags"].split("|") if tag.strip()}
+            if requested_tags:
+                filtered = [
+                    item
+                    for item in filtered
+                    if (tags := get_tags(item)) and requested_tags.intersection(tags)
+                ]
+
+        if "OfficialRatings" in query_params:
+            allowed_ratings = {r.strip() for r in query_params["OfficialRatings"].split("|") if r.strip()}
+            if allowed_ratings:
+                filtered = [
+                    item
+                    for item in filtered
+                    if item.get("OfficialRating") in allowed_ratings
+                ]
+
+        resolution_filters = query_params.get("_Resolutions")
+        require_hdr = query_params.get("_RequireHdr")
+        if resolution_filters or require_hdr:
+            allowed_ids = None
+            if resolution_filters:
+                allowed_ids = set()
+                for res_key in resolution_filters:
+                    allowed_ids.update(str(i) for i in self.EmbyServer.media_by_resolution.get(res_key, []))
+            if require_hdr:
+                hdr_ids = set()
+                for hdr_key in ["dvhdr", "dvhdrplus", "hdr", "plus"]:
+                    hdr_ids.update(str(i) for i in self.EmbyServer.media_by_resolution.get(hdr_key, []))
+                allowed_ids = hdr_ids if allowed_ids is None else allowed_ids.intersection(hdr_ids)
+            if allowed_ids is not None:
+                filtered = [item for item in filtered if str(item.get("Id")) in allowed_ids]
+
+        if "PersonIds" in query_params:
+            person_ids = {pid.strip() for pid in query_params["PersonIds"].split(",") if pid.strip()}
+            person_matches = []
+            for item in filtered:
+                match = matches_person(item, person_ids)
+                if match is None:
+                    return None
+                if match:
+                    person_matches.append(item)
+            filtered = person_matches
+
+        sort_key = query_params.get("SortBy")
+        if sort_key:
+            reverse_order = query_params.get("SortOrder", "Ascending").lower() == "descending"
+            if sort_key.lower() == "random":
+                random.shuffle(filtered)
+            else:
+                def sort_value(item):
+                    value = item.get(sort_key)
+                    if sort_key in ["PremiereDate", "DateCreated"]:
+                        value = self._parse_emby_datetime(value) or datetime.min
+                    elif value is None and sort_key == "Name":
+                        value = item.get("SortName") or item.get("Name") or ""
+                    return value
+
+                try:
+                    filtered.sort(key=sort_value, reverse=reverse_order)
+                except Exception as e:
+                    logger.error(f"Error during local sorting by {sort_key}: {e}")
+                    return None
+
+        limit_value = query_params.get("Limit")
+        if limit_value:
+            try:
+                limit_int = int(limit_value)
+                if limit_int >= 0:
+                    filtered = filtered[:limit_int]
+            except (TypeError, ValueError):
+                logger.error(f"Invalid Limit value for local filtering: {limit_value}")
+                return None
+
+        return filtered
+
     # @retry(stop=stop_after_attempt(6), wait=wait_fixed(10),
     #        retry=retry_if_not_exception_type((BadRequest, NotFound, Unauthorized)))
 
@@ -842,14 +1135,6 @@ class Plex(Library):
                     else:
                         unknown_params[key_decoded] = value_decoded
                 else:
-                    hdr_ids = list(set(
-                        # self.EmbyServer.media_by_resolution.get("dv", []) +
-                           self.EmbyServer.media_by_resolution.get("dvhdr", []) +
-                           self.EmbyServer.media_by_resolution.get("dvhdrplus", []) +
-                           self.EmbyServer.media_by_resolution.get("hdr", []) +
-                           self.EmbyServer.media_by_resolution.get("plus", [])
-                           ))
-
                     # Process regular parameters
                     if key_decoded in ['type', 'and']:
                         pass  # Already handled above
@@ -956,55 +1241,20 @@ class Plex(Library):
                         if value_decoded.isdigit():
                             years_list.append(value_decoded)
                     elif key_decoded in ['resolution']:
-                        #add the missing p in search
                         index_key = value_decoded
-                        if index_key not in ["4k","HD","4K"]:
+                        if index_key not in ["4k", "HD", "4K"]:
                             index_key += 'p'
                         elif index_key == "HD":
                             index_key = "720p"
-                        try:
-                            all_ids = self.EmbyServer.media_by_resolution[index_key]
-                        except:
+                        normalized_key = index_key.lower()
+                        if normalized_key == "4k":
+                            normalized_key = "4k"
+                        if normalized_key not in self.EmbyServer.media_by_resolution:
                             raise Failed(f"Decoded value {value_decoded} not in search!")
-                            # "MediaStreams": [ "VideoRange": "HDR 10"],
-                        # Builder: plex_search: (1, "Plex Movie Search\nSort By: ['title.asc']\nFilter:\n  Match all of the following:\n    Critic Rating is greater than or equal 0.0\n    Critic Rating is less than 6.0", '?type=1&sort=titleSort&rating%3E=0.0&and=1&rating%3C%3C=6.0') |
-                        # todo rating search broken; critic 0-100 vs 0-10.0 ?
-                        search_ids = []
-
-                        if "hdr" in args and args["hdr"] == ['1']:
-                            for id in all_ids:
-                                if id in hdr_ids:
-                                    search_ids.append(id)
-                        else:
-                            search_ids = all_ids
-                        if len(search_ids) == 0:
-                            return []
-                        id_string = ",".join(search_ids)
-                        items = [item for item in self._emby_all_items if str(item.ratingKey) in search_ids]
-                        # all_emby_items = self.EmbyServer.get_items(params={'Ids': id_string})
-                        # plex_items = self.EmbyServer.convert_emby_to_plex(items)
-                        return items
-                        # match value_decoded:
-                        #     case '4k':
-                        #         emby_query_params['Is4K'] = 'true'
-                        #         break
-                        #     case '1080p':
-                        #         emby_query_params['IsHD'] = 'true'
-                        #         break
-                        #     case _:
-                        #         Failed(f"Unknown parameter: {unknown_params} {uri_args}")
-                            # MinWidth=1200
-                            # MaxWidth=1200
-                            # MinHeight=1200
-                            # MaxHeight=1200
-                        #todo: handle resolutions from filter
-                    elif key_decoded == "hdr" in args and value_decoded == "1":
-                        if len(hdr_ids) == 0:
-                            return []
-                        id_string = ",".join(hdr_ids)
-                        all_emby_items = self.EmbyServer.get_items(params={'Ids': id_string})
-                        plex_items = self.EmbyServer.convert_emby_to_plex(all_emby_items)
-                        return plex_items
+                        emby_query_params.setdefault("_Resolutions", set()).add(normalized_key)
+                    elif key_decoded == 'hdr':
+                        if value_decoded == "1":
+                            emby_query_params['_RequireHdr'] = True
 
                     else:
                         if key_decoded not in ["pop", "push", "or"]:
@@ -1059,8 +1309,18 @@ class Plex(Library):
         #     pass
 
 
+        items = None
+        if self._can_use_emby_cache(emby_query_params):
+            self.get_all_native(builder_level=self.type.lower())
+            native_source = self._emby_all_items_native or []
+            filtered_items = self._filter_emby_native_items(list(native_source), emby_query_params)
+            if filtered_items is not None:
+                items = filtered_items
 
-        items = self.EmbyServer.get_items(emby_query_params)
+        if items is None:
+            api_query_params = {k: v for k, v in emby_query_params.items() if not k.startswith('_')}
+            items = self.EmbyServer.get_items(api_query_params)
+
         all_shows = None
         if is_show:
             all_shows= []
