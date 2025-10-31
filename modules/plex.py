@@ -1575,12 +1575,14 @@ class Plex(Library):
         final_search = get_tags_translation[final_search] if final_search in get_tags_translation else final_search
         try:
             names = []
+            seen_names = set()
             choices = {}
             use_title = title and final_search not in ["contentRating", "audioLanguage", "subtitleLanguage", "resolution"]
             tags_iter = self.get_tags(final_search, person_list = person_list, tmdb_person_id = tmdb_person_id)
             for choice in tags_iter:
 
-                if choice.title not in names:
+                if choice.title not in seen_names:
+                    seen_names.add(choice.title)
                     names.append((choice.title, choice.key) if name_pairs else choice.title)
                 choices[choice.title] = choice.title if use_title else choice.key
                 choices[choice.key] = choice.title if use_title else choice.key
