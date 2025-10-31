@@ -195,6 +195,7 @@ class CollectionBuilder:
         self.is_playlist = False
         self.playlist = library is None
         self.overlay = overlay
+        self._precheck_skipped_builders = False
         methods = {m.lower(): m for m in self.data}
         if self.playlist:
             self.type = "playlist"
@@ -1154,7 +1155,10 @@ class CollectionBuilder:
                 self.details["label"] = append_labels
 
         if not self.server_preroll and not self.smart_url and not self.blank_collection and len(self.builders) == 0:
-            raise Failed(f"{self.Type} Error: No builders were found")
+            if self._precheck_skipped_builders and self.ignore_blank_results:
+                logger.warning(f"{self.Type} Warning: All builders were skipped after prevalidation")
+            else:
+                raise Failed(f"{self.Type} Error: No builders were found")
 
         if self.blank_collection and len(self.builders) > 0:
             raise Failed(f"{self.Type} Error: No builders allowed with blank_collection")
@@ -2065,6 +2069,84 @@ class CollectionBuilder:
             final["limit"] = util.parse(self.Type, "limit", dict_data, methods=dict_methods, parent=method_name, default=0, datatype="int", maximum=1000) if "limit" in dict_methods else 0
             self.builders.append((method_name, final))
 
+    def _precheck_plex_filter(self, method, plex_filter):
+        if plex_filter is None:
+            logger.warning(f"{self.Type} Warning: {method} filter is blank")
+            return False
+        if not isinstance(plex_filter, dict):
+            logger.error(f"{self.Type} Error: {method} filter must be a dictionary")
+            return False
+
+        filter_alias = {m.lower(): m for m in plex_filter}
+
+        if "any" not in filter_alias and "all" not in filter_alias:
+            base_dict = {}
+            any_dicts = []
+            for alias_key, alias_value in filter_alias.items():
+                attr, _, final = self.library.split(alias_key)
+                if final in plex.and_searches:
+                    base_dict[alias_value[:-4]] = plex_filter[alias_value]
+                elif final in plex.or_searches:
+                    any_dicts.append({alias_value: plex_filter[alias_value]})
+                elif final in plex.searches:
+                    base_dict[alias_value] = plex_filter[alias_value]
+            if any_dicts:
+                base_dict["any"] = any_dicts
+            if not base_dict:
+                logger.warning(f"{self.Type} Warning: {method} filter has no valid attributes to evaluate")
+                return False
+        else:
+            base = "all" if "all" in filter_alias else "any"
+            base_value = plex_filter.get(filter_alias[base])
+            if base_value is None:
+                logger.warning(f"{self.Type} Warning: {method} {base} filter is blank")
+                return False
+            if not isinstance(base_value, dict):
+                logger.error(f"{self.Type} Error: {method} {base} must be a dictionary")
+                return False
+            base_dict = base_value
+
+        def walk(filter_dict):
+            validated = {}
+            for key, value in filter_dict.items():
+                attr, modifier, final_attr = self.library.split(key)
+                if final_attr.startswith(("any", "all")) or attr in ["any", "all"]:
+                    dicts = util.get_list(value)
+                    if not dicts:
+                        logger.warning(f"{self.Type} Warning: {method} {key} filter has no nested conditions")
+                        return False
+                    nested_validated = []
+                    for dict_data in dicts:
+                        if not isinstance(dict_data, dict):
+                            logger.error(f"{self.Type} Error: {method} {key} attribute must be a dictionary")
+                            return False
+                        inside = walk(dict_data)
+                        if inside is False:
+                            return False
+                        nested_validated.append(inside)
+                    validated[key] = nested_validated
+                else:
+                    try:
+                        validation = self.validate_attribute(
+                            attr,
+                            modifier,
+                            final_attr,
+                            value,
+                            validate=False,
+                            plex_search=True,
+                            precheck=True
+                        )
+                    except Failed as e:
+                        logger.error(e)
+                        return False
+                    if validation is None or (isinstance(validation, (list, tuple, set, dict)) and len(validation) == 0):
+                        logger.warning(f"{self.Type} Warning: {method} {final_attr} produced no valid values")
+                        return False
+                    validated[key] = validation
+            return validated
+
+        return walk(base_dict)
+
     def _plex(self, method_name, method_data):
         if method_name in ["plex_all", "plex_pilots"]:
             self.builders.append((method_name, self.builder_level))
@@ -2076,8 +2158,12 @@ class CollectionBuilder:
             for dict_data in util.parse(self.Type, method_name, method_data, datatype="listdict"):
                 dict_methods = {dm.lower(): dm for dm in dict_data}
                 if method_name == "plex_search":
+                    prevalidated = self._precheck_plex_filter(method_name, dict_data)
+                    if prevalidated is False:
+                        self._precheck_skipped_builders = True
+                        continue
                     try:
-                        self.builders.append((method_name, self.build_filter("plex_search", dict_data)))
+                        self.builders.append((method_name, self.build_filter("plex_search", dict_data, prevalidated=prevalidated)))
                     except FilterFailed as e:
                         if self.ignore_blank_results:
                             raise
@@ -2091,8 +2177,13 @@ class CollectionBuilder:
                     exact_list.append(self.name)
                     self.builders.append((method_name, {"exclude_prefix": prefix_list, "exclude": exact_list}))
         else:
+            filter_payload = {"any": {method_name: method_data}}
+            prevalidated = self._precheck_plex_filter("plex_search", filter_payload)
+            if prevalidated is False:
+                self._precheck_skipped_builders = True
+                return
             try:
-                self.builders.append(("plex_search", self.build_filter("plex_search", {"any": {method_name: method_data}})))
+                self.builders.append(("plex_search", self.build_filter("plex_search", filter_payload, prevalidated=prevalidated)))
             except FilterFailed as e:
                 if self.ignore_blank_results:
                     raise
@@ -2610,7 +2701,7 @@ class CollectionBuilder:
         if self.do_report and filtered_items:
             self.library.add_filtered(self.name, [(i.title, self.library.get_id_from_maps(i.ratingKey)) for i in filtered_items], self.library.is_movie)
 
-    def build_filter(self, method, plex_filter, display=False, default_sort=None):
+    def build_filter(self, method, plex_filter, display=False, default_sort=None, prevalidated=None):
         if display:
             logger.info("")
             logger.info(f"Validating Method: {method}")
@@ -2686,7 +2777,7 @@ class CollectionBuilder:
             validate = plex_filter[filter_alias["validate"]]
             filter_details += f"Validate: {validate}\n"
 
-        def _filter(filter_dict, is_all=True, level=1):
+        def _filter(filter_dict, is_all=True, level=1, prevalidated_dict=None):
             output = ""
             display_out = f"\n{'  ' * level}Match {'all' if is_all else 'any'} of the following:"
             level += 1
@@ -2694,7 +2785,10 @@ class CollectionBuilder:
             conjunction = f"{'and' if is_all else 'or'}=1&"
             for _key, _data in filter_dict.items():
                 attr, modifier, final_attr = self.library.split(_key)
-
+                prevalidated_entry = None
+                if isinstance(prevalidated_dict, dict) and _key in prevalidated_dict:
+                    prevalidated_entry = prevalidated_dict[_key]
+                
                 def build_url_arg(arg, mod=None, arg_s=None, mod_s=None):
                     arg_key = plex.search_translation[attr] if attr in plex.search_translation else attr
                     arg_key = plex.show_translation[arg_key] if self.library.is_show and arg_key in plex.show_translation else arg_key
@@ -2728,15 +2822,28 @@ class CollectionBuilder:
                         dicts = util.get_list(_data)
                         results = ""
                         display_add = ""
-                        for dict_data in dicts:
+                        prevalidated_children = None
+                        if isinstance(prevalidated_entry, list):
+                            prevalidated_children = prevalidated_entry
+                        elif isinstance(prevalidated_entry, dict):
+                            prevalidated_children = [prevalidated_entry] * len(dicts)
+                        else:
+                            prevalidated_children = [None] * len(dicts)
+                        for i, dict_data in enumerate(dicts):
                             if not isinstance(dict_data, dict):
                                 raise Failed(f"{self.Type} Error: {attr} must be either a dictionary or list of dictionaries")
-                            inside_filter, inside_display = _filter(dict_data, is_all=attr == "all", level=level)
+                            child_prevalidated = None
+                            if i < len(prevalidated_children):
+                                child_prevalidated = prevalidated_children[i]
+                            inside_filter, inside_display = _filter(dict_data, is_all=attr == "all", level=level, prevalidated_dict=child_prevalidated)
                             if len(inside_filter) > 0:
                                 display_add += inside_display
                                 results += f"{conjunction if len(results) > 0 else ''}push=1&{inside_filter}pop=1&"
                     else:
-                        validation = self.validate_attribute(attr, modifier, final_attr, _data, validate, plex_search=True)
+                        if prevalidated_entry is not None:
+                            validation = prevalidated_entry
+                        else:
+                            validation = self.validate_attribute(attr, modifier, final_attr, _data, validate, plex_search=True)
                         if validation is not False and validation != 0 and not validation:
                             continue
                         elif attr in plex.date_attributes and modifier in ["", ".not"]:
@@ -2798,7 +2905,7 @@ class CollectionBuilder:
             if not isinstance(plex_filter[filter_alias[base]], dict):
                 raise Failed(f"{self.Type} Error: {base} must be a dictionary: {plex_filter[filter_alias[base]]}")
             base_dict = plex_filter[filter_alias[base]]
-        built_filter, filter_text = _filter(base_dict, is_all=base_all)
+        built_filter, filter_text = _filter(base_dict, is_all=base_all, prevalidated_dict=prevalidated)
         filter_details = f"{filter_details}Filter:{filter_text}"
         if len(built_filter) > 0:
             final_filter = built_filter[:-1] if base_all else f"push=1&{built_filter}pop=1"
@@ -2810,7 +2917,7 @@ class CollectionBuilder:
             logger.debug(f"Smart URL: {filter_url}")
         return type_key, filter_details, filter_url
 
-    def validate_attribute(self, attribute, modifier, final, data, validate, plex_search=False):
+    def validate_attribute(self, attribute, modifier, final, data, validate, plex_search=False, precheck=False):
         def smart_pair(list_to_pair):
             return [(t, t) for t in list_to_pair] if plex_search else list_to_pair
         if attribute in tag_attributes and modifier in [".regex"]:
@@ -2828,7 +2935,7 @@ class CollectionBuilder:
                     error += f"\nOptions: {names}"
                 if validate:
                     raise Failed(error)
-                else:
+                elif not precheck:
                     logger.error(error)
             return valid_list
         elif modifier == ".regex":
@@ -2928,7 +3035,7 @@ class CollectionBuilder:
                             error += f"\nOptions: {names}"
                         if validate:
                             raise FilterFailed(error)
-                        elif not self.ignore_blank_results:
+                        elif not self.ignore_blank_results and not precheck:
                             logger.error(error)
             return valid_list
         elif attribute in date_attributes and modifier in [".before", ".after"]:
@@ -2976,7 +3083,7 @@ class CollectionBuilder:
                     if message:
                         if validate:
                             raise Failed(message)
-                        else:
+                        elif not precheck:
                             logger.error(message)
                 if not final_filters:
                     raise Failed(f"{self.Type} Error: no filters found under {attribute}")
