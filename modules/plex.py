@@ -1,5 +1,5 @@
 import os, plexapi, re, time, random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.parse import unquote
 import requests
 from modules import builder, util
@@ -736,23 +736,54 @@ class Plex(Library):
         return self.EmbyServer.convert_emby_to_plex([item])[0]
         return self.PlexServer.fetchItem(data)
 
+    # modules/plex.py
+    from datetime import datetime, timezone
+
+    def _to_aware_utc(self, dt: datetime | None) -> datetime | None:
+        if dt is None:
+            return None
+        if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
     def _parse_emby_datetime(self, value):
-        """Parse ISO-formatted timestamps returned by Emby."""
+        """Parse ISO timestamps from Emby and ALWAYS return UTC-aware datetimes (or None)."""
         if not value:
             return None
+
+        # Bereits datetime?
+        if isinstance(value, datetime):
+            return self._to_aware_utc(value)
+
+        s = str(value).strip()
+
+        # Emby nutzt häufig 'Z' -> UTC
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+
+        # Emby liefert teils 7+ Nachkommastellen. Kürzen auf 6 (Python-Mikrosekunden).
         try:
-            if isinstance(value, str) and value.endswith("Z"):
-                value = f"{value[:-1]}+00:00"
-            return datetime.fromisoformat(value)
-        except (TypeError, ValueError):
-            pass
-        # Try a couple of common fallback formats
-        for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ"):
-            try:
-                return datetime.strptime(value, fmt)
-            except (TypeError, ValueError):
-                continue
-        return None
+            # Offset-Position finden (falls vorhanden)
+            off_idx = max(s.rfind("+"), s.rfind("-"))
+            time_part, offset = (s[:off_idx], s[off_idx:]) if off_idx > 10 else (s, "")
+            if "." in time_part:
+                base, frac = time_part.split(".", 1)
+                frac = "".join(c for c in frac if c.isdigit())
+                frac = (frac + "000000")[:6]
+                time_part = f"{base}.{frac}"
+            s_norm = f"{time_part}{offset}"
+
+            dt = datetime.fromisoformat(s_norm)
+            return self._to_aware_utc(dt)
+        except Exception:
+            # Fallbacks – liefern naiv, darum danach _to_aware_utc
+            for fmt in ("%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S"):
+                try:
+                    dt = datetime.strptime(s.replace("Z", ""), fmt)
+                    return self._to_aware_utc(dt)
+                except Exception:
+                    continue
+            return None
 
     def _can_use_emby_cache(self, emby_query_params):
         """Return True when the local cache can satisfy the requested filters."""

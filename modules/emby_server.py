@@ -483,18 +483,31 @@ class EmbyServer:
         # MinWidth
         # MinHeight
 
+        # my_resolutions = {
+        #     "4k": "(?i)2160|4k",
+        #     "1080p": "(?i)1080|2k",
+        #     "720p": "(?i)\\b720\\b|\\bHD(?!R)\\b",
+        #     "576p": "(?i)576",
+        #     "480p": "(?i)480|sd",
+        #     # HDR
+        #     "hdr": r"(?i)\bHDR10\b",  # HDR
+        #
+        #     "plus": r'(?i)\bhdr10(\+|p(lus)?\b)',  # HDR10+
+        #     "dvhdr": r'(?i)\bdv(.hdr10?\b)',  # DV HDR10
+        #     "dvhdrplus": r'(?i)\bdv.HDR10(\+|P(lus)?\b)',  # DV HDR10+
+        # }
         my_resolutions = {
-            "4k": "(?i)2160|4k",
-            "1080p": "(?i)1080|2k",
-            "720p": "(?i)\\b720\\b|\\bHD(?!R)\\b",
-            "576p": "(?i)576",
-            "480p": "(?i)480|sd",
-            # HDR
-            "hdr": r"(?i)\bHDR10\b",  # HDR
+            "4k": r"(?i)^(?:4k|2160p?)$",  # Key ist '4k', 2160p lassen wir als Alias zu
+            "1080p": r"(?i)^(?:1080p?|2k)$",
+            "720p": r"(?i)^720p$",  # WICHTIG: exakt '720p', nicht \b720\b
+            "576p": r"(?i)^(?:576p?|576|dvd)$",  # <- DVD ergänzt
+            "480p": r"(?i)^(?:480p?|480|sd)$",
 
-            "plus": r'(?i)\bhdr10(\+|p(lus)?\b)',  # HDR10+
-            "dvhdr": r'(?i)\bdv(.hdr10?\b)',  # DV HDR10
-            "dvhdrplus": r'(?i)\bdv.HDR10(\+|P(lus)?\b)',  # DV HDR10+
+            # Diese vier matchen die angezeigten Options-Keys, nicht die Labels
+            "hdr": r"(?i)^hdr$",
+            "plus": r"(?i)^plus$",
+            "dvhdr": r"(?i)^dvhdr$",
+            "dvhdrplus": r"(?i)^dvhdrplus$",
         }
 
         all_choices = []
