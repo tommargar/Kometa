@@ -147,6 +147,17 @@ class Operations:
             # Emby cast and crew update list; in dev as too slow and unreliable
             people_alias_revert = []
             emby_payload = {}
+
+            trakt_user_ratings = None
+
+            def trakt_ratings():
+                nonlocal trakt_user_ratings
+                if trakt_user_ratings is None:
+                    trakt_user_ratings = self.config.Trakt.user_ratings(self.library.is_movie)
+                if not trakt_user_ratings:
+                    raise Failed
+                return trakt_user_ratings
+
             for i, item in enumerate(items, 1):
                 logger.info("")
                 logger.info(f"({i}/{total_items}) {item.title}")
@@ -229,15 +240,6 @@ class Operations:
                         path = path.replace(self.library.Sonarr.plex_path, self.library.Sonarr.sonarr_path)
                         path = path[:-1] if path.endswith(("/", "\\")) else path
                         sonarr_adds.append((tvdb_id, path))
-
-                _trakt_ratings = None
-                def trakt_ratings():
-                    nonlocal _trakt_ratings
-                    if _trakt_ratings is None:
-                        _trakt_ratings = self.config.Trakt.user_ratings(self.library.is_movie)
-                    if not _trakt_ratings:
-                        raise Failed
-                    return _trakt_ratings
 
                 _tmdb_obj = None
                 def tmdb_obj(ignore_cache = False):
