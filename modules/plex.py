@@ -3546,10 +3546,15 @@ class Plex(Library):
             if modifier == ".regex":
                 has_match = False
                 for reg in filter_data:
+                    pattern = re.compile(reg)
                     for name in attrs:
-                        if isinstance(name, str):
-                            if re.compile(reg).search(name):
-                                has_match = True
+                        if name is None:
+                            continue
+                        if pattern.search(str(name)):
+                            has_match = True
+                            break
+                    if has_match:
+                        break
                 if has_match is False:
                     return False
             elif (not list(set(filter_data) & set(attrs)) and modifier == "") \
