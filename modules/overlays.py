@@ -89,19 +89,21 @@ class Overlays:
             total_keys = len(key_to_overlays)
             for i, (over_key, (item, over_names)) in enumerate(sorted(key_to_overlays.items(), key=lambda io: self.library.get_item_display_title(io[1][0], sort=True)), 1):
                 # item_title = self.library.get_item_display_title(item)
-                emby_item = self.library.EmbyServer.get_item(item.ratingKey)
-                emby_images = self.library.EmbyServer.get_item_images(item.ratingKey)
-                emby_poster = None
-                emby_thumb = None
-                if emby_images:
-                    for image in emby_images:
-                        match image.get('ImageType', None):
-                            case 'Primary':
-                                emby_poster = image
-                            case 'Thumb':
-                                emby_thumb = image
+                # emby_item = self.library.EmbyServer.get_item(item.ratingKey)
+                # emby_images = self.library.EmbyServer.get_item_images(item.ratingKey)
+                # emby_poster = None
+                # emby_thumb = None
+                # if emby_images:
+                #     for image in emby_images:
+                #         match image.get('ImageType', None):
+                #             case 'Primary':
+                #                 emby_poster = image
+                #             case 'Thumb':
+                #                 emby_thumb = image
 
-                item_title = emby_item.get("Name",'')
+                # item_title = emby_item.get("Name",'')
+                item_title = self.library.get_item_display_title(item)
+
                 try:
                     logger.ghost(f"Overlaying: ({i}/{total_keys}) {item_title}")
                     image_compare = None
