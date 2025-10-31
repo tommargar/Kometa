@@ -1155,11 +1155,8 @@ class CollectionBuilder:
                 self.details["label"] = append_labels
 
         if not self.server_preroll and not self.smart_url and not self.blank_collection and len(self.builders) == 0:
-            if self.ignore_blank_results:
-                if self._precheck_skipped_builders:
-                    logger.warning(f"{self.Type} Warning: All builders were skipped after prevalidation")
-                else:
-                    logger.warning(f"{self.Type} Warning: No builders were found but ignore_blank_results is enabled")
+            if self._precheck_skipped_builders and self.ignore_blank_results:
+                logger.warning(f"{self.Type} Warning: All builders were skipped after prevalidation")
             else:
                 raise Failed(f"{self.Type} Error: No builders were found")
 
@@ -2130,15 +2127,7 @@ class CollectionBuilder:
                     validated[key] = nested_validated
                 else:
                     try:
-                        validation = self.validate_attribute(
-                            attr,
-                            modifier,
-                            final_attr,
-                            value,
-                            validate=False,
-                            plex_search=True,
-                            precheck=True
-                        )
+                        validation = self.validate_attribute(attr, modifier, final_attr, value, validate=False, plex_search=True)
                     except Failed as e:
                         logger.error(e)
                         return False
@@ -2163,7 +2152,6 @@ class CollectionBuilder:
                 if method_name == "plex_search":
                     prevalidated = self._precheck_plex_filter(method_name, dict_data)
                     if prevalidated is False:
-                        self._precheck_skipped_builders = True
                         continue
                     try:
                         self.builders.append((method_name, self.build_filter("plex_search", dict_data, prevalidated=prevalidated)))
@@ -2183,7 +2171,6 @@ class CollectionBuilder:
             filter_payload = {"any": {method_name: method_data}}
             prevalidated = self._precheck_plex_filter("plex_search", filter_payload)
             if prevalidated is False:
-                self._precheck_skipped_builders = True
                 return
             try:
                 self.builders.append(("plex_search", self.build_filter("plex_search", filter_payload, prevalidated=prevalidated)))
@@ -2939,10 +2926,7 @@ class CollectionBuilder:
                 if validate:
                     raise Failed(error)
                 elif not precheck:
-                    if self.ignore_blank_results:
-                        logger.warning(error.replace("Plex Error", "Plex Warning"))
-                    else:
-                        logger.error(error)
+                    logger.error(error)
             return valid_list
         elif modifier == ".regex":
             return util.validate_regex(data, self.Type, validate=validate)
