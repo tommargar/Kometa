@@ -496,44 +496,47 @@ class EmbyServer:
         #     "dvhdr": r'(?i)\bdv(.hdr10?\b)',  # DV HDR10
         #     "dvhdrplus": r'(?i)\bdv.HDR10(\+|P(lus)?\b)',  # DV HDR10+
         # }
-        my_resolutions = {
-            "4k": r"(?i)^(?:4k|2160p?)$",  # Key ist '4k', 2160p lassen wir als Alias zu
-            "1080p": r"(?i)^(?:1080p?|2k)$",
-            "720p": r"(?i)^720p$",  # WICHTIG: exakt '720p', nicht \b720\b
-            "576p": r"(?i)^(?:576p?|576|dvd)$",  # <- DVD ergänzt
-            "480p": r"(?i)^(?:480p?|480|sd)$",
-
-            # Diese vier matchen die angezeigten Options-Keys, nicht die Labels
-            "hdr": r"(?i)^hdr$",
-            "plus": r"(?i)^plus$",
-            "dvhdr": r"(?i)^dvhdr$",
-            "dvhdrplus": r"(?i)^dvhdrplus$",
+        resolution_patterns = {
+            "4k": [r"(?i)(?<!\w)(?:4k|2160p|uhd)(?!\w)"],
+            "1080p": [r"(?i)(?<!\w)(?:1080p|2k)(?!\w)"],
+            "720p": [r"(?i)(?<!\w)720p(?!\w)"],
+            "576p": [r"(?i)(?<!\w)(?:576p|576|dvd)(?!\w)"],
+            "480p": [r"(?i)(?<!\w)(?:480p|480|sd)(?!\w)"],
+            "hdr": [
+                r"(?i)(?<!\w)hdr(?!10\+?)(?!\d)(?!\w)",
+                r"(?i)(?<!\w)hdr10(?!\+)(?!\w)",
+            ],
+            "plus": [
+                r"(?i)(?<!\w)hdr10\+",
+                r"(?i)(?<!\w)hdr10plus(?!\w)",
+            ],
+            "dvhdr": [
+                r"(?i)(?<!\w)dv[\W_]*hdr10(?!\+)",
+                r"(?i)(?<!\w)dolby[\W_]*vision(?![\w+])",
+            ],
+            "dvhdrplus": [
+                r"(?i)(?<!\w)dv[\W_]*hdr10\+",
+                r"(?i)(?<!\w)dv[\W_]*hdr10plus(?!\w)",
+            ],
         }
 
+        self.media_by_resolution = {}
         all_choices = []
-        found_matches = []
+        found_canonical_keys: set[str] = set()
 
-        # self.media_by_resolution = {}
-        # Durchsuche die filenames nach Auflösungen und Editionen
         for file_key, file_name in self.file_names.items():
-            from modules import util
-            logger = util.logger
-            # logger.info(f"file name: {file_name}")
-            # Suche nach Auflösungen
-            for resolution_key, resolution_regex in my_resolutions.items():
-                match = _re.search(resolution_regex, file_name)
-                if match:
-                    found_regex = match.group(0)
-                    if resolution_key not in self.media_by_resolution:
-                        self.media_by_resolution[resolution_key] = [file_key]
-                    else:
-                        self.media_by_resolution[resolution_key].append(file_key)
-                    if found_regex not in found_matches:
-                        filter_choice = FilterChoiceEmby(key=found_regex, title=resolution_key)
-                        all_choices.append(filter_choice)
-                        found_matches.append(found_regex)
-
-            # Suche nach Editionen
+            if not file_name:
+                continue
+            for resolution_key, patterns in resolution_patterns.items():
+                for pattern in patterns:
+                    if _re.search(pattern, file_name):
+                        bucket = self.media_by_resolution.setdefault(resolution_key, [])
+                        if file_key not in bucket:
+                            bucket.append(file_key)
+                        if resolution_key not in found_canonical_keys:
+                            all_choices.append(FilterChoiceEmby(key=resolution_key, title=resolution_key))
+                            found_canonical_keys.add(resolution_key)
+                        break
 
         return all_choices
 

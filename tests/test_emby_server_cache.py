@@ -586,6 +586,164 @@ def test_cached_resolution_filter_uses_emby_cache(monkeypatch):
     assert plex.EmbyServer.get_items_calls == 0
 
 
+def test_emby_resolution_cache_parses_filename_and_filters(monkeypatch):
+    import sys
+    import types
+    from urllib.parse import parse_qs as _parse_qs, quote_plus as _quote_plus, urlparse as _urlparse
+
+    class DummyLogger:
+        def __getattr__(self, name):
+            def _log(*args, **kwargs):
+                return None
+
+            return _log
+
+    stub_builder = types.ModuleType("modules.builder")
+
+    stub_library = types.ModuleType("modules.library")
+
+    class DummyLibrary:
+        pass
+
+    stub_library.Library = DummyLibrary
+
+    stub_poster = types.ModuleType("modules.poster")
+
+    class DummyImageData:
+        pass
+
+    stub_poster.ImageData = DummyImageData
+
+    stub_request = types.ModuleType("modules.request")
+    stub_request.parse_qs = _parse_qs
+    stub_request.quote_plus = _quote_plus
+    stub_request.urlparse = _urlparse
+
+    stub_util = types.ModuleType("modules.util")
+    stub_util.logger = DummyLogger()
+
+    class DummyFailed(Exception):
+        pass
+
+    stub_util.Failed = DummyFailed
+
+    monkeypatch.setitem(sys.modules, "modules.builder", stub_builder)
+    monkeypatch.setitem(sys.modules, "modules.library", stub_library)
+    monkeypatch.setitem(sys.modules, "modules.poster", stub_poster)
+    monkeypatch.setitem(sys.modules, "modules.request", stub_request)
+    monkeypatch.setitem(sys.modules, "modules.util", stub_util)
+
+    from modules.plex import Plex
+    import modules.plex as plex_module
+
+    plex_module.logger = DummyLogger()
+
+    api_items = [
+        {
+            "Id": "movie-4k",
+            "Type": "Movie",
+            "ProductionYear": 2022,
+            "PremiereDate": "2022-01-01T00:00:00Z",
+            "Name": "Ultra HD",
+        },
+        {
+            "Id": "movie-hd",
+            "Type": "Movie",
+            "ProductionYear": 2021,
+            "PremiereDate": "2021-01-01T00:00:00Z",
+            "Name": "Full HD",
+        },
+    ]
+
+    hydrated_items = []
+
+    class DummyRequestsGet:
+        def __init__(self, store):
+            self.store = store
+
+        def __call__(self, url, headers=None, params=None):
+            items = [dict(item) for item in api_items]
+            self.store[:] = items
+            return DummyResponse({"Items": items, "TotalRecordCount": len(items)})
+
+    cache_builder = EmbyServer.__new__(EmbyServer)
+    cache_builder.file_names = {
+        "movie-4k": "Title.2160p.HDR10.mkv",
+        "movie-hd": "Another.Title.1080p.mkv",
+    }
+    cache_builder.media_by_resolution = {}
+
+    choices = EmbyServer.get_resolutions(cache_builder)
+
+    choice_keys = {choice.key for choice in choices}
+    assert "4k" in choice_keys
+    assert "hdr" in choice_keys
+    assert "1080p" in choice_keys
+    assert "movie-4k" in cache_builder.media_by_resolution.get("4k", [])
+    assert "movie-4k" in cache_builder.media_by_resolution.get("hdr", [])
+    assert "movie-hd" in cache_builder.media_by_resolution.get("1080p", [])
+
+    class StubEmbyServer:
+        def __init__(self, items, media_by_resolution):
+            self.items = list(items)
+            self.headers = {}
+            self.media_by_resolution = media_by_resolution
+            self.get_items_calls = 0
+
+        def cache_filenames(self, items):
+            return None
+
+        def get_items(self, params):
+            self.get_items_calls += 1
+            return list(self.items)
+
+        def convert_emby_to_plex(self, items, convert_people=True):
+            return [item["Id"] for item in items]
+
+        def get_custom_rating_from_item(self, item):
+            return None
+
+        def get_item(self, item_id):
+            for item in self.items:
+                if item.get("Id") == item_id:
+                    return item
+            return None
+
+    dummy_requests = DummyRequestsGet(hydrated_items)
+    monkeypatch.setattr(plex_module.requests, "get", dummy_requests)
+
+    plex = Plex.__new__(Plex)
+    plex.type = "Movie"
+    plex.name = "Dummy"
+    plex.Emby = {"Name": "Dummy", "Id": "library1"}
+    plex.emby_server_url = "http://emby"
+    plex.emby_user_id = "user"
+    plex._emby_all_items = []
+    plex._emby_all_items_native = []
+    plex._search_choices_cache = {}
+    plex._filter_items_cache = {}
+    plex.EmbyServer = StubEmbyServer(api_items, cache_builder.media_by_resolution)
+
+    plex.get_all_native(builder_level="movie")
+
+    assert hydrated_items and all("Id" in item for item in hydrated_items)
+
+    plex.EmbyServer.get_items_calls = 0
+
+    result_4k = plex.fetchItems("?type=1&resolution=4k")
+    assert result_4k == ["movie-4k"]
+    assert plex.EmbyServer.get_items_calls == 0
+
+    plex.EmbyServer.get_items_calls = 0
+    hdr_result = plex.fetchItems("?type=1&resolution=4k&hdr=1")
+    assert hdr_result == ["movie-4k"]
+    assert plex.EmbyServer.get_items_calls == 0
+
+    plex.EmbyServer.get_items_calls = 0
+    result_hd = plex.fetchItems("?type=1&resolution=1080")
+    assert result_hd == ["movie-hd"]
+    assert plex.EmbyServer.get_items_calls == 0
+
 def test_cached_rating_sort_normalizes_nested_payloads(monkeypatch):
     import types
     from urllib.parse import parse_qs as _parse_qs, quote_plus as _quote_plus, urlparse as _urlparse
