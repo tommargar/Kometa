@@ -830,19 +830,19 @@ class Plex(Library):
             tag_items = item.get("TagItems") or []
             return {tag.get("Name") for tag in tag_items if tag.get("Name")}
 
-        def matches_person(item, person_ids, allowed_types):
+        def matches_person(item, person_ids, person_roles=None):
             people = item.get("People")
             if not isinstance(people, list):
                 return None
             for person in people:
                 pid = person.get("Id")
-                if pid is None or str(pid) not in person_ids:
-                    continue
-                if allowed_types:
-                    person_type = person.get("Type")
-                    if not isinstance(person_type, str) or person_type.lower() not in allowed_types:
-                        continue
-                return True
+                if pid is not None and str(pid) in person_ids:
+                    if person_roles:
+                        person_type = person.get("Type")
+                        if isinstance(person_type, str) and person_type.lower() in person_roles:
+                            return True
+                    else:
+                        return True
             return False
 
         include_item_types = query_params.get("IncludeItemTypes")
@@ -855,20 +855,13 @@ class Plex(Library):
         if years_value:
             allowed_years = {y.strip() for y in years_value.split(",") if y.strip()}
             if allowed_years:
-                year_filtered = []
-                saw_year_value = False
-                missing_year_data = False
+                hydrated_items = []
                 for item in filtered:
                     item_year = get_year(item)
                     if item_year is None:
-                        missing_year_data = True
-                        continue
-                    saw_year_value = True
-                    if item_year in allowed_years:
-                        year_filtered.append(item)
-                if not saw_year_value and missing_year_data:
-                    return None
-                filtered = year_filtered
+                        return None
+                    hydrated_items.append((item, item_year))
+                filtered = [item for item, item_year in hydrated_items if item_year in allowed_years]
 
         min_premiere = self._parse_emby_datetime(query_params.get("MinPremiereDate"))
         if min_premiere:
@@ -900,6 +893,11 @@ class Plex(Library):
             updated_results = []
             for item in filtered:
                 keep_item = True
+                custom_rating_value = 0
+                if "MaxCustomRating" in query_params or "MinCustomRating" in query_params:
+                    rating = self.EmbyServer.get_custom_rating_from_item(item)
+                    if rating is not None:
+                        custom_rating_value = rating
                 if "MaxCriticRating" in query_params:
                     critic_rating = int(float(item.get("CriticRating", 0)))
                     max_rating = int(query_params.get("MaxCriticRating"))
@@ -913,9 +911,8 @@ class Plex(Library):
                         keep_item = False
 
                 if "MaxCustomRating" in query_params:
-                    custom_rating = float(item.get("CustomRating", 0))
                     max_rating = float(query_params.get("MaxCustomRating"))
-                    if custom_rating > max_rating or custom_rating == 0:
+                    if custom_rating_value > max_rating or custom_rating_value == 0:
                         keep_item = False
 
                 if "MinCriticRating" in query_params:
@@ -931,9 +928,8 @@ class Plex(Library):
                         keep_item = False
 
                 if "MinCustomRating" in query_params:
-                    custom_rating = float(item.get("CustomRating", 0))
                     min_rating = float(query_params.get("MinCustomRating"))
-                    if custom_rating < min_rating or custom_rating == 0:
+                    if custom_rating_value < min_rating or custom_rating_value == 0:
                         keep_item = False
 
                 if keep_item:
@@ -1006,14 +1002,18 @@ class Plex(Library):
 
         if "PersonIds" in query_params:
             person_ids = {pid.strip() for pid in query_params["PersonIds"].split(",") if pid.strip()}
-            person_types_value = query_params.get("PersonTypes")
-            if isinstance(person_types_value, str):
-                allowed_person_types = {ptype.strip().lower() for ptype in person_types_value.split(",") if ptype.strip()}
-            else:
-                allowed_person_types = set()
+            person_roles = None
+            if "PersonTypes" in query_params:
+                raw_roles = query_params["PersonTypes"]
+                if isinstance(raw_roles, str):
+                    parsed_roles = {role.strip().lower() for role in raw_roles.split(",") if role.strip()}
+                else:
+                    parsed_roles = {str(role).strip().lower() for role in raw_roles if str(role).strip()}
+                if parsed_roles:
+                    person_roles = parsed_roles
             person_matches = []
             for item in filtered:
-                match = matches_person(item, person_ids, allowed_person_types)
+                match = matches_person(item, person_ids, person_roles)
                 if match is None:
                     return None
                 if match:
@@ -1026,17 +1026,39 @@ class Plex(Library):
             if sort_key.lower() == "random":
                 random.shuffle(filtered)
             else:
+                def _normalize_rating(value):
+                    if isinstance(value, (int, float)) and not isinstance(value, bool):
+                        return float(value)
+                    if isinstance(value, str):
+                        match = re.search(r"[-+]?\d*\.?\d+", value)
+                        if match:
+                            try:
+                                return float(match.group())
+                            except (TypeError, ValueError):
+                                return None
+                        return None
+                    if isinstance(value, dict):
+                        for sub_value in value.values():
+                            normalized = _normalize_rating(sub_value)
+                            if normalized is not None:
+                                return normalized
+                        return None
+                    if isinstance(value, (list, tuple, set)):
+                        for sub_value in value:
+                            normalized = _normalize_rating(sub_value)
+                            if normalized is not None:
+                                return normalized
+                        return None
+                    return None
+
                 def sort_value(item):
                     value = item.get(sort_key)
                     if sort_key in ["PremiereDate", "DateCreated"]:
-                        value = self._parse_emby_datetime(value)
-                    elif sort_key in ["CriticRating", "CommunityRating", "CustomRating"]:
-                        try:
-                            value = float(value) if value is not None else None
-                        except (TypeError, ValueError):
-                            value = None
+                        value = self._parse_emby_datetime(value) or datetime.min
                     elif value is None and sort_key == "Name":
                         value = item.get("SortName") or item.get("Name") or ""
+                    elif isinstance(sort_key, str) and "rating" in sort_key.lower():
+                        value = _normalize_rating(value)
                     return value
 
                 try:
@@ -1044,15 +1066,12 @@ class Plex(Library):
                     none_bucket = []
                     for item in filtered:
                         value = sort_value(item)
-                        if isinstance(value, str):
-                            value = value.lower()
                         if value is None:
                             none_bucket.append(item)
                         else:
                             sortable.append((value, item))
                     sortable.sort(key=lambda pair: pair[0], reverse=reverse_order)
-                    filtered = [item for _, item in sortable]
-                    filtered.extend(none_bucket)
+                    filtered = [item for _, item in sortable] + none_bucket
                 except Exception as e:
                     logger.error(f"Error during local sorting by {sort_key}: {e}")
                     return None
@@ -1133,7 +1152,7 @@ class Plex(Library):
                     operand = value_decoded.strip()
 
                     if field in ["rating","show.rating"]:
-                        emby_query_params["Fields"]= "CommunityRating,CriticRating,CustomRating"
+                        emby_query_params["Fields"]= "CommunityRating,CriticRating,ProviderIds"
                         if operator in ['>', '>=']:
                             emby_query_params['MinCriticRating'] = int(float(operand) * 10)
                         elif operator in ['<', '<=','<<']:
@@ -1141,7 +1160,7 @@ class Plex(Library):
                         else:
                             raise Failed(f"Unknown operator {operator} for {field}")
                     elif field in ["audienceRating", "show.audienceRating"]:
-                        emby_query_params["Fields"]= "CommunityRating,CriticRating,CustomRating"
+                        emby_query_params["Fields"]= "CommunityRating,CriticRating,ProviderIds"
                         if operator in ['>', '>=']:
                             emby_query_params['MinCommunityRating'] = operand
                         elif operator in ['<', '<=','<<']:
@@ -1149,7 +1168,7 @@ class Plex(Library):
                         else:
                             raise Failed(f"Unknown operator {operator} for {field}")
                     elif field in ["userRating", "show.userRating"]:
-                        emby_query_params["Fields"]= "CommunityRating,CriticRating,CustomRating"
+                        emby_query_params["Fields"]= "CommunityRating,CriticRating,ProviderIds"
                         if operator in ['>', '>=']:
                             emby_query_params['MinCustomRating'] = operand
                         elif operator in ['<', '<=','<<']:
@@ -1491,7 +1510,7 @@ class Plex(Library):
                 "StartIndex": start_index,
                 "Limit": limit,
                 "ParentId": self.Emby.get("Id"),
-                "Fields": "Budget,Chapters,DateCreated,Genres,HomePageUrl,IndexOptions,MediaStreams,Overview,ParentId,Path,People,PremiereDate,ProductionYear,ProviderIds,PrimaryImageAspectRatio,Revenue,SortName,Studios,Taglines,CriticRating,CustomRating,CommunityRating,OfficialRating",
+                "Fields": "Budget,Chapters,DateCreated,Genres,HomePageUrl,IndexOptions,MediaStreams,Overview,ParentId,Path,People,ProductionYear,PremiereDate,ProviderIds,PrimaryImageAspectRatio,Revenue,SortName,Studios,Taglines,CriticRating,CommunityRating,OfficialRating",
             }
 
             endpoint = f"{self.emby_server_url}/emby/Users/{self.emby_user_id}/Items"

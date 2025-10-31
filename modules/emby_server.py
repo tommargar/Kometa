@@ -208,7 +208,8 @@ class EmbyConfig:
 
 class EmbyServer:
 
-    #ToDo: use the ProvideId field for saving item rating instead of overwriting custom rating field
+    CUSTOM_RATING_PROVIDER = "CustomRating"
+
     def __init__(self, server_url, user_id, api_key, config, library_name = None):
 
         # ToDo: Merge the cache
@@ -297,6 +298,44 @@ class EmbyServer:
 
         # create an instance of the API class
         # client = emby_client.ApiClient(configuration)
+
+    @classmethod
+    def _normalize_custom_rating_input(cls, value):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            value_str = value.strip()
+        else:
+            value_str = f"{value}".strip()
+        if not value_str:
+            return None
+        try:
+            float(value_str)
+        except (TypeError, ValueError):
+            return None
+        return value_str
+
+    @classmethod
+    def get_custom_rating_from_item(cls, item, *, raw=False):
+        if not item:
+            return None
+        provider_ids = item.get("ProviderIds") or {}
+        rating_value = None
+        for key, value in provider_ids.items():
+            if isinstance(key, str) and key.lower() == cls.CUSTOM_RATING_PROVIDER.lower():
+                rating_value = value
+                break
+        if rating_value is None:
+            return None
+        rating_str = str(rating_value).strip()
+        if not rating_str:
+            return None
+        if raw:
+            return rating_str
+        try:
+            return float(rating_str)
+        except (TypeError, ValueError):
+            return None
 
     # -------------------------------------------------------------
     # Nutzt DEINE bestehende get_people() – nichts Neues erfunden.
@@ -1466,7 +1505,7 @@ class EmbyServer:
         if fields:
             query_params["Fields"] = fields
         else:
-            query_params["Fields"] = "Studios,CustomRating,CriticRating,CommunityRating"
+            query_params["Fields"] = "Studios,CriticRating,CommunityRating,ProviderIds"
 
         if include_item_types:
             query_params["IncludeItemTypes"] = ",".join(include_item_types)
@@ -1559,6 +1598,11 @@ class EmbyServer:
 
             for item in all_items:
                 keep_item = True
+                custom_rating_value = 0
+                if "MaxCustomRating" in query_params or "MinCustomRating" in query_params:
+                    rating = self.get_custom_rating_from_item(item)
+                    if rating is not None:
+                        custom_rating_value = rating
                 if "MaxCriticRating" in query_params:
                     critic_rating = int(item.get("CriticRating", 0))
                     max_rating = int(query_params.get("MaxCriticRating"))
@@ -1572,9 +1616,8 @@ class EmbyServer:
                         keep_item = False
 
                 if "MaxCustomRating" in query_params:
-                    custom_rating = float(item.get("CustomRating", 0))
                     max_rating = float(query_params.get("MaxCustomRating"))
-                    if custom_rating > max_rating or custom_rating == 0:
+                    if custom_rating_value > max_rating or custom_rating_value == 0:
                         keep_item = False
 
                 if "MinCriticRating" in query_params:
@@ -1590,9 +1633,8 @@ class EmbyServer:
                         keep_item = False
 
                 if "MinCustomRating" in query_params:
-                    custom_rating = float(item.get("CustomRating", 0))
                     min_rating = float(query_params.get("MinCustomRating"))
-                    if custom_rating < min_rating or custom_rating == 0:
+                    if custom_rating_value < min_rating or custom_rating_value == 0:
                         keep_item = False
 
                 if keep_item:
@@ -1856,7 +1898,7 @@ class EmbyServer:
                     'grandparentTitle':item.get('SeriesName'),
                     'audienceRating': item.get("CommunityRating"),
                     'rating': crit_rat,
-                    'userRating': item.get("CustomRating"),
+                    'userRating': self.get_custom_rating_from_item(item, raw=True),
                     'studio': studio, # only one
                     'genres': genres,
                     'titleSort': item.get('SortName'),
@@ -1979,8 +2021,61 @@ class EmbyServer:
             return None
         self._ensure_http_session()
 
+        data = dict(data or {})
+
         if "LockedFields" not in item:
             item["LockedFields"] = []
+
+        provider_ids_raw = dict(item.get("ProviderIds") or {})
+        provider_ids = {}
+        for key, value in provider_ids_raw.items():
+            if isinstance(key, str) and key.lower() == self.CUSTOM_RATING_PROVIDER.lower():
+                provider_ids[self.CUSTOM_RATING_PROVIDER] = value
+            else:
+                provider_ids[key] = value
+        provider_ids_original = provider_ids.copy()
+
+        custom_rating_updated = False
+
+        def _apply_custom_rating_update(rating_value):
+            nonlocal custom_rating_updated, provider_ids
+            custom_rating_updated = True
+            normalized_rating = self._normalize_custom_rating_input(rating_value)
+            if normalized_rating is None:
+                provider_ids.pop(self.CUSTOM_RATING_PROVIDER, None)
+            else:
+                provider_ids[self.CUSTOM_RATING_PROVIDER] = normalized_rating
+
+        provider_ids_update_raw = data.pop("ProviderIds", None)
+        provider_ids_update = None
+        if provider_ids_update_raw is not None:
+            try:
+                provider_ids_update = dict(provider_ids_update_raw)
+            except (TypeError, ValueError):
+                provider_ids_update = {}
+        if provider_ids_update:
+            normalized_update = {}
+            for key, value in provider_ids_update.items():
+                if isinstance(key, str) and key.lower() == self.CUSTOM_RATING_PROVIDER.lower():
+                    _apply_custom_rating_update(value)
+                else:
+                    normalized_update[key] = value
+            if normalized_update:
+                provider_ids.update(normalized_update)
+
+        if "CustomRating" in data:
+            rating_value = data.pop("CustomRating")
+            _apply_custom_rating_update(rating_value)
+
+        if custom_rating_updated:
+            item.pop("CustomRating", None)
+
+        if provider_ids != provider_ids_original:
+            data["ProviderIds"] = provider_ids
+            if provider_ids:
+                self.cached_provider_ids[str(item_id)] = provider_ids
+            else:
+                self.cached_provider_ids.pop(str(item_id), None)
 
         if "ForcedSortName" in data:
             item["ForcedSortName"] = data["ForcedSortName"]
@@ -2789,9 +2884,16 @@ class EmbyServer:
                 changes["CriticRating"] = float(new_value)*10
                 item.rating = new_value
                 # self.__update_item(item_id,{"CriticRating": new_value})
-            elif field_attr == "userRating": # ToDo: use ProviderId instead of age rating
-                changes["CustomRating"] = new_value
-                item.userRating = new_value
+            elif field_attr == "userRating":
+                normalized = self._normalize_custom_rating_input(new_value)
+                changes["CustomRating"] = normalized
+                if normalized is None:
+                    item.userRating = None
+                else:
+                    try:
+                        item.userRating = float(normalized)
+                    except (TypeError, ValueError):
+                        item.userRating = None
             elif field_attr == "contentRating":
                 changes["OfficialRating"] = new_value
                 item.contentRating = new_value # item update still needed?
