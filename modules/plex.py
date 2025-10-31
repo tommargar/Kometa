@@ -1026,16 +1026,52 @@ class Plex(Library):
             if sort_key.lower() == "random":
                 random.shuffle(filtered)
             else:
+                def _normalize_rating(value):
+                    if isinstance(value, (int, float)) and not isinstance(value, bool):
+                        return float(value)
+                    if isinstance(value, str):
+                        match = re.search(r"[-+]?\d*\.?\d+", value)
+                        if match:
+                            try:
+                                return float(match.group())
+                            except (TypeError, ValueError):
+                                return None
+                        return None
+                    if isinstance(value, dict):
+                        for sub_value in value.values():
+                            normalized = _normalize_rating(sub_value)
+                            if normalized is not None:
+                                return normalized
+                        return None
+                    if isinstance(value, (list, tuple, set)):
+                        for sub_value in value:
+                            normalized = _normalize_rating(sub_value)
+                            if normalized is not None:
+                                return normalized
+                        return None
+                    return None
+
                 def sort_value(item):
                     value = item.get(sort_key)
                     if sort_key in ["PremiereDate", "DateCreated"]:
                         value = self._parse_emby_datetime(value) or datetime.min
                     elif value is None and sort_key == "Name":
                         value = item.get("SortName") or item.get("Name") or ""
+                    elif isinstance(sort_key, str) and "rating" in sort_key.lower():
+                        value = _normalize_rating(value)
                     return value
 
                 try:
-                    filtered.sort(key=sort_value, reverse=reverse_order)
+                    sortable = []
+                    none_bucket = []
+                    for item in filtered:
+                        value = sort_value(item)
+                        if value is None:
+                            none_bucket.append(item)
+                        else:
+                            sortable.append((value, item))
+                    sortable.sort(key=lambda pair: pair[0], reverse=reverse_order)
+                    filtered = [item for _, item in sortable] + none_bucket
                 except Exception as e:
                     logger.error(f"Error during local sorting by {sort_key}: {e}")
                     return None
