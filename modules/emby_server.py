@@ -2921,7 +2921,7 @@ class EmbyServer:
                 # self.__update_item(item_id,{"CriticRating": new_value})
             elif field_attr == "userRating":
                 normalized = self._normalize_custom_rating_input(new_value)
-                changes["CustomRating"] = normalized
+                changes["ProviderIds"] = {self.CUSTOM_RATING_PROVIDER: normalized}
                 if normalized is None:
                     item.userRating = None
                 else:
