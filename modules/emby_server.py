@@ -2893,19 +2893,19 @@ class EmbyServer:
                 updates["CommunityRating"] = rating_data["CommunityRating"]
             if "CriticRating" in rating_data:
                 updates["CriticRating"] = float(rating_data["CriticRating"])*10
-            provider_ids = rating_data.get("ProviderIds") or {}
+            provider_ids = rating_data.get("ProviderIds")
             if provider_ids:
-                normalized_provider_ids = {}
-                for key, value in provider_ids.items():
-                    if isinstance(key, str) and key.lower() == self.CUSTOM_RATING_PROVIDER.lower():
-                        normalized_rating = self._normalize_custom_rating_input(value)
-                        if normalized_rating is None:
-                            continue
-                        normalized_provider_ids[self.CUSTOM_RATING_PROVIDER] = normalized_rating
+                provider_ids_payload = dict(provider_ids)
+                if self.CUSTOM_RATING_PROVIDER in provider_ids_payload:
+                    normalized_rating = self._normalize_custom_rating_input(
+                        provider_ids_payload[self.CUSTOM_RATING_PROVIDER]
+                    )
+                    if normalized_rating is None:
+                        provider_ids_payload.pop(self.CUSTOM_RATING_PROVIDER, None)
                     else:
-                        normalized_provider_ids[key] = value
-                if normalized_provider_ids:
-                    updates["ProviderIds"] = normalized_provider_ids
+                        provider_ids_payload[self.CUSTOM_RATING_PROVIDER] = normalized_rating
+                if provider_ids_payload:
+                    updates["ProviderIds"] = provider_ids_payload
 
             self.__update_item(
                 item_id,
