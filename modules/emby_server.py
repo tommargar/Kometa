@@ -337,11 +337,6 @@ class EmbyServer:
         except (TypeError, ValueError):
             return None
 
-    # -------------------------------------------------------------
-    # Nutzt DEINE bestehende get_people() – nichts Neues erfunden.
-    # Fügt nur die fehlenden Bausteine zusammen & integriert library_id.
-    # -------------------------------------------------------------
-
     def _normalize_person(self, p: dict) -> dict:
         # Vergleichsrelevante Felder; PrimaryImageTag etc. ignorieren
         out = {

@@ -490,7 +490,7 @@ class Operations:
                                         current *= 10 if item_attr == "rating" else 1
                                     except:
                                         pass
-                                    if current is not None and str(f"{current:.1f}") != str(f"{(float(found_rating)):.1f}"):
+                                    if current is not None and str(f"{current:.1f}") != str(f"{(float(found_rating)):.1f}") or current is None and found_rating is not None:
                                         rating_key = item_attr
                                         payload_key = rating_key
                                         log_display_key = item_attr
