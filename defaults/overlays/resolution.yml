@@ -11,6 +11,7 @@ external_templates:
   template_variables:
     conditionals:
       suppress_overlays:
+        default: <<overlay_name>>-Dovetail
         conditions:
           - type: edition_dovetail
             value:
@@ -97,18 +98,6 @@ external_templates:
             value: <<vertical_offset+64>>
           - type: resolution_dovetail
             value: <<vertical_offset+30>>
-      resolution_filters:
-        default:
-          has_dolby_vision: <<dolby_vision>>
-          filepath.regex:
-            - <<regex>>
-        conditions:
-          - type: resolution_dovetail
-            value:
-              has_edition: true
-              has_dolby_vision: <<dolby_vision>>
-              filepath.regex:
-                - <<regex>>
       back_width:
         conditions:
           - type: [edition, resolution, edition_dovetail]
@@ -249,7 +238,10 @@ templates:
         any:
           resolution.regex: <<res>>
         hdr: <<hdr>>
-    filters: <<resolution_filters>>
+    filters:
+      has_dolby_vision: <<dolby_vision>>
+      filepath.regex:
+        - <<regex>>
 
 overlays:
 
