@@ -127,7 +127,7 @@ class Operations:
             radarr_adds = []
             sonarr_adds = []
             label_edits = {"add": {}, "remove": {}}
-            rating_edits = {"audienceRating": {}, "rating": {}, "userRating": {}, "CustomRating": {}, "CriticRating": {}, "CommunityRating": {}}
+            rating_edits = {"audienceRating": {}, "rating": {}, "userRating": {}, "CriticRating": {}, "CommunityRating": {}}
 
 
             genre_edits = {"add": {}, "remove": {}}
@@ -491,16 +491,16 @@ class Operations:
                                     except:
                                         pass
                                     if current is not None and str(f"{current:.1f}") != str(f"{(float(found_rating)):.1f}"):
-                                        emby_item_attribute = ""
+                                        rating_key = item_attr
+                                        payload_key = rating_key
+                                        log_display_key = item_attr
                                         match item_attr:
                                             case "rating":
-                                                emby_item_attribute = "CriticRating"
-                                                pass
+                                                payload_key = "CriticRating"
                                             case "userRating":
-                                                # todo - own field providerids
-                                                emby_item_attribute = "CustomRating"
+                                                payload_key = "ProviderIds"
                                             case "audienceRating":
-                                                emby_item_attribute = "CommunityRating"
+                                                payload_key = "CommunityRating"
                                         # Plex
                                         # {'audienceRating': {'6.7': [2391406], '7.3': [2391407]},
                                         #  'rating': {'5.8': [2391406]}, 'userRating': {}}
@@ -512,13 +512,21 @@ class Operations:
                                         # '6.8'
                                         # 'CriticRating' = {int}
                                         # 69
-                                        if found_rating not in rating_edits[emby_item_attribute]:
-                                            rating_edits[emby_item_attribute][found_rating] = []
-                                        rating_edits[emby_item_attribute][found_rating].append(item.ratingKey)
+                                        if rating_key not in rating_edits:
+                                            rating_edits[rating_key] = {}
+                                        if found_rating not in rating_edits[rating_key]:
+                                            rating_edits[rating_key][found_rating] = []
+                                        rating_edits[rating_key][found_rating].append(item.ratingKey)
                                         if item.ratingKey not in emby_payload:
                                             emby_payload[item.ratingKey] = {}
-                                        emby_payload[item.ratingKey][emby_item_attribute] = found_rating
-                                        item_edits.append(f"Update {name_display[emby_item_attribute]} (Batched) | {found_rating}")
+                                        if payload_key == "ProviderIds":
+                                            provider_key = getattr(self.library.EmbyServer, "CUSTOM_RATING_PROVIDER", "CustomRating")
+                                            provider_ids = emby_payload[item.ratingKey].setdefault("ProviderIds", {})
+                                            provider_ids[provider_key] = found_rating
+                                        elif payload_key:
+                                            emby_payload[item.ratingKey][payload_key] = found_rating
+                                        display_label = name_display.get(log_display_key, log_display_key)
+                                        item_edits.append(f"Update {display_label} (Batched) | {found_rating}")
                                         do_cast_update = True
                                     break
                                 except Failed:
