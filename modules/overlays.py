@@ -153,28 +153,85 @@ class Overlays:
                     special_text_cache = self.cache.query_overlay_special_text(item.ratingKey) if self.cache else {}
                     if self.cache:
                         for over_name in over_names:
-                            current_overlay = properties[over_name]  # <--- WICHTIG
-                            if properties[over_name].name.startswith("text") and special_text_cache:
-                                for cache_key, cache_value in special_text_cache.items():
-                                    actual = plex.attribute_translation[cache_key] if cache_key in plex.attribute_translation else cache_key
-                                    if actual == "total_runtime":
-                                        sub_items = item.episodes() if current_overlay.level in ["show", "season"] else item.tracks()
-                                        sub_items = [ep.duration for ep in sub_items if hasattr(ep, "duration") and ep.duration]
-                                        real_value = sum(sub_items)
+                            if overlay_change:
+                                break
+                            current_overlay = properties[over_name]
+                            if not current_overlay.name.startswith("text"):
+                                continue
+                            if "<<" not in current_overlay.name:
+                                continue
+                            full_text = current_overlay.name[5:-1]
+                            matches = re.findall(r"<<([^<>]+)>>", full_text)
+                            if not matches:
+                                continue
+                            expected_vars = set()
+                            for match in matches:
+                                base_var = match
+                                if base_var.startswith("originally_available["):
+                                    base_var = "originally_available"
+                                else:
+                                    stripped = False
+                                    for mod in overlay.double_mods:
+                                        if base_var.endswith(mod):
+                                            base_var = base_var[:-len(mod)]
+                                            stripped = True
+                                            break
+                                    if not stripped:
+                                        for mod in overlay.single_mods:
+                                            if base_var.endswith(mod):
+                                                base_var = base_var[:-len(mod)]
+                                                break
+                                expected_vars.add(base_var)
+                            for format_var in expected_vars:
+                                if overlay_change:
+                                    break
+                                cached_value = special_text_cache.get(format_var) if special_text_cache else None
+                                if cached_value is None:
+                                    overlay_change = f"Missing Special Text Cache for {format_var}"
+                                    break
+                                real_value = None
+                                if format_var == "show_title":
+                                    attr = "parentTitle" if current_overlay.level == "season" else "grandparentTitle"
+                                    real_value = getattr(item, attr, None)
+                                elif format_var == "runtime" and current_overlay.level in ["show", "season", "artist", "album"]:
+                                    if hasattr(item, "duration") and item.duration:
+                                        real_value = item.duration
                                     else:
-                                        if not hasattr(item, actual):
-                                            continue
-                                        real_value = getattr(item, actual)
-                                    if cache_value is None or real_value is None:
-                                        continue
-                                    if cache_key in overlay.float_vars:
-                                        cache_value = float(cache_value)
-                                    if cache_key in overlay.int_vars:
-                                        cache_value = int(cache_value)
-                                    if cache_key in overlay.date_vars:
-                                        real_value = real_value.strftime("%Y-%m-%d") # noqa
-                                    if real_value != cache_value:
-                                        overlay_change = f"Special Text Changed from {cache_value} to {real_value}"
+                                        sub_items = item.episodes() if current_overlay.level in ["show", "season"] else item.tracks()
+                                        durations = [getattr(ep, "duration", None) for ep in sub_items]
+                                        durations = [d for d in durations if d]
+                                        if durations:
+                                            real_value = sum(durations) / len(durations)
+                                elif format_var == "total_runtime":
+                                    sub_items = item.episodes() if current_overlay.level in ["show", "season"] else item.tracks()
+                                    durations = [getattr(ep, "duration", None) for ep in sub_items]
+                                    durations = [d for d in durations if d]
+                                    if durations:
+                                        real_value = sum(durations)
+                                else:
+                                    actual_attr = plex.attribute_translation.get(format_var, format_var)
+                                    if hasattr(item, actual_attr):
+                                        real_value = getattr(item, actual_attr)
+                                if real_value is None:
+                                    continue
+                                if format_var == "versions":
+                                    real_value = len(real_value) if isinstance(real_value, (list, tuple, set)) else real_value
+                                try:
+                                    if format_var in overlay.float_vars:
+                                        real_value = float(real_value)
+                                        compare_value = float(cached_value)
+                                    elif format_var in overlay.int_vars:
+                                        real_value = int(real_value)
+                                        compare_value = int(cached_value)
+                                    else:
+                                        compare_value = cached_value
+                                    if format_var in overlay.date_vars and hasattr(real_value, "strftime"):
+                                        real_value = real_value.strftime("%Y-%m-%d")
+                                except (TypeError, ValueError):
+                                    continue
+                                if real_value != compare_value:
+                                    overlay_change = f"Special Text Changed from {cached_value} to {real_value}"
+                                    break
                     try:
                         #todo: for Emby transparent PNG, ignore existing poster files
                         poster = ImageData("asset_directory", my_overlay_path if has_overlay else "", is_url=False)
