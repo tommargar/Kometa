@@ -2881,7 +2881,8 @@ class EmbyServer:
                     elif field_attr == "rating":
                         update_items[item_id]["CriticRating"] = float(rating_value) * 10 if rating_value else ''
                     elif field_attr == "userRating":
-                        update_items[item_id]["CustomRating"] = rating_value
+                        provider_map = update_items[item_id].setdefault("ProviderIds", {})
+                        provider_map[self.CUSTOM_RATING_PROVIDER] = rating_value
 
         # Wende die Updates an
         for item_id, rating_data in update_items.items():
@@ -2892,8 +2893,19 @@ class EmbyServer:
                 updates["CommunityRating"] = rating_data["CommunityRating"]
             if "CriticRating" in rating_data:
                 updates["CriticRating"] = float(rating_data["CriticRating"])*10
-            if "CustomRating" in rating_data:
-                updates["CustomRating"] = rating_data["CustomRating"]
+            provider_ids = rating_data.get("ProviderIds") or {}
+            if provider_ids:
+                normalized_provider_ids = {}
+                for key, value in provider_ids.items():
+                    if isinstance(key, str) and key.lower() == self.CUSTOM_RATING_PROVIDER.lower():
+                        normalized_rating = self._normalize_custom_rating_input(value)
+                        if normalized_rating is None:
+                            continue
+                        normalized_provider_ids[self.CUSTOM_RATING_PROVIDER] = normalized_rating
+                    else:
+                        normalized_provider_ids[key] = value
+                if normalized_provider_ids:
+                    updates["ProviderIds"] = normalized_provider_ids
 
             self.__update_item(
                 item_id,
