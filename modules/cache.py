@@ -1416,13 +1416,17 @@ class Cache:
                         names.add(nm.casefold())
         return names
 
-    def add_false_friend_name(self, name: str) -> None:
+    def add_false_friend_name(self, name: str) -> bool:
         nm = (name or "").strip()
-        logger.info(f"Added 'false friend' {name} to alias list.")
         if not nm:
-            return
+            return False
+        inserted = False
         with sqlite3.connect(self.cache_path) as connection:
             connection.row_factory = sqlite3.Row
             with closing(connection.cursor()) as cursor:
                 cursor.execute("CREATE TABLE IF NOT EXISTS false_friend_names (name TEXT PRIMARY KEY)")
                 cursor.execute("INSERT OR IGNORE INTO false_friend_names(name) VALUES (?)", (nm.casefold(),))
+                inserted = cursor.rowcount > 0
+        if inserted:
+            logger.info(f"Added 'false friend' {name} to alias list.")
+        return inserted
