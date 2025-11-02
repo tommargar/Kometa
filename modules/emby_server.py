@@ -218,7 +218,8 @@ class EmbyServer:
         self._items_cache_ts: dict[str, float] = {}
         # anpassbar von außen: self.items_cache_ttl = 0 deaktiviert das Altern (immer frisch)
         self.items_cache_ttl: int = 300
-        self.cached_person_names = []
+        # Cache for person lookup results keyed by normalized name
+        self.cached_person_names: dict[str, list[dict]] = {}
         self._person_name_cache = {}
         self._bulk_person_cache = {}
         self.people_index = {}
@@ -3159,7 +3160,7 @@ class EmbyServer:
 
         return items
 
-    def _get_person_by_name_cached(self, clean_name: str):
+    def _get_person_by_name_cached(self, clean_name: str) -> list[dict]:
         key = (clean_name or "").strip()
         hit = self.cached_person_names.get(key)
         if hit is None:
