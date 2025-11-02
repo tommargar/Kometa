@@ -3274,7 +3274,7 @@ class EmbyServer:
         Liefert dict[tmdb_id:int] -> emby_person_id:str.
         - nutzt self.session (Connection-Pooling)
         - bewertet Dupe-Sets nur pro Batch (kein Mehrfach-Demote)
-        - wählt die kleinste Emby-ID als kanonisch
+        - bevorzugt vorhandene, bereits geprüfte Zuordnungen als kanonische Emby-ID
         - demote pro falscher PID nur einmal (idempotent)
         - behält Dupe-Listen für Logging/Persistenz bei
         """
@@ -3292,6 +3292,39 @@ class EmbyServer:
 
         self._ensure_http_session()
         result: dict[int, str] = {}
+
+        # Bereits bekannte Kanonical-IDs vorab sammeln, damit Dupe-Sets darauf zurückgreifen
+        canonical_hints: dict[int, str] = {}
+        for tid in norm_ids:
+            cached_id = None
+            try:
+                tid_int = int(tid)
+            except Exception:
+                tid_int = None
+            if tid_int is None:
+                continue
+            try:
+                cached_id = self.cached_tmdb_ids.get(tid_int)
+            except Exception:
+                cached_id = None
+            if cached_id:
+                canonical_hints[tid_int] = str(cached_id)
+        if self.config and getattr(self.config, "Cache", None):
+            try:
+                cached_map, _, _ = self.config.Cache.query_tmdb_person_map_bulk(
+                    norm_ids,
+                    getattr(self.config.Cache, "expiration", 30)
+                )
+                for tid, rec in (cached_map or {}).items():
+                    emby_id = rec.get("emby_id") if isinstance(rec, dict) else None
+                    try:
+                        tid_int = int(tid)
+                    except Exception:
+                        continue
+                    if emby_id and tid_int not in canonical_hints:
+                        canonical_hints[tid_int] = str(emby_id)
+            except Exception:
+                pass
 
         base_url = f"{self.emby_server_url}/emby/Users/{self.user_id}/Items"
 
@@ -3356,7 +3389,19 @@ class EmbyServer:
             # Dupe-Bewertung NUR für diesen Batch
             for tid, idset in tmdb_to_ids.items():
                 ids_sorted = sorted({str(x) for x in idset}, key=lambda x: int(x))  # numerische Sortierung
-                chosen = ids_sorted[-1]
+                chosen = None
+                tid_int = None
+                try:
+                    tid_int = int(tid)
+                except Exception:
+                    pass
+                hint = canonical_hints.get(tid_int) if tid_int is not None else None
+                if hint and hint in ids_sorted:
+                    chosen = hint
+                else:
+                    chosen = ids_sorted[-1]
+                if tid_int is not None:
+                    canonical_hints[tid_int] = chosen
                 result[tid] = chosen
 
                 if len(ids_sorted) > 1:
@@ -3381,7 +3426,7 @@ class EmbyServer:
                         pass  # bewusst beibehalten
 
                     # Nicht-kanonische Personen demoten (pro PID nur einmal)
-                    wrong_ids = ids_sorted[:-1]  # alle außer dem letzten
+                    wrong_ids = [pid for pid in ids_sorted if pid != chosen]
                     for wrong_pid in wrong_ids:
                         if wrong_pid in self._person_already_demoted:
                             continue
