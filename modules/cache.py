@@ -1421,7 +1421,7 @@ class Cache:
         self._false_friend_names = names
         return set(names)
 
-    def add_false_friend_name(self, name: str) -> None:
+    def add_false_friend_name(self, name: str) -> bool:
         nm = (name or "").strip()
         if not nm:
             return

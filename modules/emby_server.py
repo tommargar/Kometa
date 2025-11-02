@@ -246,6 +246,7 @@ class EmbyServer:
         self.cached_provider_ids={}
         self.file_names = {}
         self._file_names_fetch_attempted = False
+        self._false_friend_names: set[str] | None = None
 
         self.studio_list =None
         self.media_by_resolution = {}
@@ -275,6 +276,30 @@ class EmbyServer:
                     self.library_id = s['Id']
                     # print(s)
                     break
+
+    def _get_false_friend_names(self) -> set[str]:
+        if self._false_friend_names is None:
+            try:
+                self._false_friend_names = self.config.Cache.query_false_friend_names()
+            except Exception:
+                self._false_friend_names = set()
+        return self._false_friend_names
+
+    def _record_false_friend_name(self, name: str) -> None:
+        nm = (name or "").strip()
+        if not nm:
+            return
+        inserted = False
+        try:
+            inserted = self.config.Cache.add_false_friend_name(nm)
+        except Exception:
+            inserted = False
+        if inserted:
+            cache = self._false_friend_names
+            if cache is None:
+                cache = set()
+                self._false_friend_names = cache
+            cache.add(nm.casefold())
 
         # configuration = emby_client.Configuration()
         # configuration.api_key['api_key'] = self.api_key
@@ -4265,7 +4290,7 @@ class EmbyServer:
                 cur_by_name[base] = pid
 
         # Persistente False-Friend-Namen laden
-        false_friend_names = self.config.Cache.query_false_friend_names()
+        false_friend_names = self._get_false_friend_names()
 
         def _is_false_friend(clean_name: str, wanted_pid: str, wanted_tid):
             cn = (clean_name or "").strip()
@@ -4366,10 +4391,7 @@ class EmbyServer:
                                     pass
                         else:
                             # False Friend (gleicher Name, andere TMDb): NICHT demoten
-                            try:
-                                self.config.Cache.add_false_friend_name(clean)
-                            except Exception:
-                                pass
+                            self._record_false_friend_name(clean)
                     # Wenn pid NICHT numerisch (Alias), grundsätzlich KEIN Demote.
 
             # False-Friend anhand DB/Lokalkontext/Globalcheck ermitteln
@@ -4379,7 +4401,7 @@ class EmbyServer:
             if need_alias or need_alias_ff:
                 # bei neu erkanntem False-Friend sofort persistieren (idempotent)
                 if need_alias_ff and clean.casefold() not in false_friend_names:
-                    self.config.Cache.add_false_friend_name(clean)
+                    self._record_false_friend_name(clean)
 
                 alias = _alias_once(clean, tid) if tid else clean
                 temp_renames[pid] = (alias, clean, tid)
