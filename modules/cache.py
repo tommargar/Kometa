@@ -9,6 +9,7 @@ class Cache:
     def __init__(self, config_path, expiration):
         self.cache_path = f"{os.path.splitext(config_path)[0]}.cache"
         self.expiration = expiration
+        self._false_friend_names: set[str] | None = None
         with sqlite3.connect(self.cache_path) as connection:
             connection.row_factory = sqlite3.Row
             with closing(connection.cursor()) as cursor:
@@ -1404,6 +1405,9 @@ class Cache:
                 )
 
     def query_false_friend_names(self) -> set[str]:
+        if self._false_friend_names is not None:
+            return set(self._false_friend_names)
+
         names = set()
         with sqlite3.connect(self.cache_path) as connection:
             connection.row_factory = sqlite3.Row
@@ -1414,19 +1418,26 @@ class Cache:
                     nm = (row["name"] or "").strip()
                     if nm:
                         names.add(nm.casefold())
-        return names
+        self._false_friend_names = names
+        return set(names)
 
     def add_false_friend_name(self, name: str) -> bool:
         nm = (name or "").strip()
         if not nm:
-            return False
-        inserted = False
+            return
+
+        normalized = nm.casefold()
+        if self._false_friend_names is not None and normalized in self._false_friend_names:
+            return
+
         with sqlite3.connect(self.cache_path) as connection:
             connection.row_factory = sqlite3.Row
             with closing(connection.cursor()) as cursor:
                 cursor.execute("CREATE TABLE IF NOT EXISTS false_friend_names (name TEXT PRIMARY KEY)")
-                cursor.execute("INSERT OR IGNORE INTO false_friend_names(name) VALUES (?)", (nm.casefold(),))
-                inserted = cursor.rowcount > 0
-        if inserted:
-            logger.info(f"Added 'false friend' {name} to alias list.")
-        return inserted
+                cursor.execute("INSERT OR IGNORE INTO false_friend_names(name) VALUES (?)", (normalized,))
+                if cursor.rowcount:
+                    logger.info(f"Added 'false friend' {name} to alias list.")
+                    if self._false_friend_names is None:
+                        self._false_friend_names = {normalized}
+                    else:
+                        self._false_friend_names.add(normalized)
