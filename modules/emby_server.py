@@ -540,9 +540,11 @@ class EmbyServer:
         resolution_patterns = {
             "4k": [r"(?i)(?<!\w)(?:4k|2160p|uhd)(?!\w)"],
             "1080p": [r"(?i)(?<!\w)(?:1080p|2k)(?!\w)"],
-            "720p": [r"(?i)(?<!\w)720p(?!\w)"],
+            # "720p": [r"(?i)(?<!\w)720p(?!\w)"],
+            # "720p": "(?i)\\b720p\\b",
+            "720p": [r"(?i)(?<!\w)(?:720p|720)(?!\w)"],
             "576p": [r"(?i)(?<!\w)(?:576p|576|dvd)(?!\w)"],
-            "480p": [r"(?i)(?<!\w)(?:480p|480|sd)(?!\w)"],
+            "480p": [r"(?i)(?<!\w)(?:480p|480|sd|sdtv)(?!\w)"],
             "hdr": [
                 r"(?i)(?<!\w)hdr(?!10\+?)(?!\d)(?!\w)",
                 r"(?i)(?<!\w)hdr10(?!\+)(?!\w)",
@@ -3509,6 +3511,7 @@ class EmbyServer:
             pass
 
     def _demote_duplicate_person(self, emby_person_id: str) -> None:
+        return
         if not emby_person_id:
             raise Failed("Missing Emby person id for demotion")
 
