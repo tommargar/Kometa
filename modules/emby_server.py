@@ -3547,16 +3547,39 @@ class EmbyServer:
                         pass
             by_id = {str(it.get("Id")): it for it in items if it and it.get("Id") is not None}
             stale = set()
-            provider_key = "Tmdb" if (provider or "").lower() == "tmdb" else provider
+            provider_normalized = (provider or "tmdb").strip() or "tmdb"
+            provider_normalized = provider_normalized.lower()
             for tid, eid in t2e.items():
                 it = by_id.get(str(eid))
                 if not it or it.get("Type") != "Person":
                     stale.add(tid);
                     continue
                 prov = it.get("ProviderIds") or {}
-                v1 = str(prov.get(provider_key))
-                v2 = str(prov.get(provider_key + "Id"))
-                if str(tid) not in {v1, v2}:
+                prov_norm, tmdb_norm = self._norm_provider_ids(prov)
+                expected_values = set()
+                if provider_normalized == "tmdb":
+                    if tmdb_norm is not None:
+                        expected_values.add(str(tmdb_norm))
+                    # Fallbacks for historical key casings
+                    tmdb_raw = prov.get("Tmdb") or prov.get("TmdbId")
+                    if tmdb_raw is not None:
+                        expected_values.add(str(tmdb_raw))
+                else:
+                    provider_candidates = {provider_normalized}
+                    provider_candidates.add(provider_normalized + "id")
+                    provider_candidates |= {
+                        (provider or "").strip(),
+                        (provider or "").strip().title(),
+                    }
+                    for key in list(provider_candidates):
+                        if not key:
+                            continue
+                        val = prov_norm.get(key.lower())
+                        if val is None and key in prov:
+                            val = prov.get(key)
+                        if val is not None:
+                            expected_values.add(str(val))
+                if str(tid) not in expected_values:
                     stale.add(tid)
             for tid in stale:
                 self.cached_tmdb_ids.pop(tid, None)
