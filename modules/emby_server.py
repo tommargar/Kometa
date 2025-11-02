@@ -3509,11 +3509,48 @@ class EmbyServer:
             pass
 
     def _demote_duplicate_person(self, emby_person_id: str) -> None:
-        return
-        try:
-            logger.info(f"Cleared person {emby_person_id} and renamed to 'John Doe'")
+        if not emby_person_id:
+            raise Failed("Missing Emby person id for demotion")
 
-            self.update_item(emby_person_id, {"Id": emby_person_id, "Name": "John Doe", "ProviderIds": {}})
+        person = self.get_item(emby_person_id)
+        if not person:
+            raise Failed(f"Unable to load Emby person {emby_person_id}")
+
+        current_name = (person.get("Name") or "").strip()
+        current_provider_ids = dict(person.get("ProviderIds") or {})
+
+        if current_name == "John Doe" and not current_provider_ids:
+            try:
+                logger.info(
+                    f"[demote_duplicate_person] Emby person {emby_person_id} already cleared; skipping"
+                )
+            except Exception:
+                pass
+            return
+
+        sanitized_person = dict(person)
+        sanitized_person["ProviderIds"] = {}
+
+        response = self.__update_item(
+            emby_person_id,
+            {"Id": emby_person_id, "Name": "John Doe", "ProviderIds": {}},
+            item=sanitized_person,
+        )
+
+        if response is None:
+            raise Failed(f"Failed to demote Emby person {emby_person_id}: no response from server")
+
+        try:
+            response.raise_for_status()
+        except Exception as err:
+            raise Failed(f"Failed to demote Emby person {emby_person_id}: {err}") from err
+
+        self.cached_provider_ids.pop(str(emby_person_id), None)
+
+        try:
+            logger.info(
+                f"[demote_duplicate_person] Cleared provider IDs and renamed Emby person {emby_person_id}"
+            )
         except Exception:
             pass
 
