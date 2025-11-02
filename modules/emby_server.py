@@ -4730,7 +4730,7 @@ class EmbyServer:
             aliases = (p or {}).get("also_known_as") or []
             for alias in aliases:
                 a = (alias or "").strip()
-                if a and self._is_latin_string(self, a):
+                if a and self._is_latin_string(a):
                     return a
         except Exception:
             pass
@@ -4764,11 +4764,10 @@ class EmbyServer:
 
         # 1) Übersetzung (en)
         name = None
-        # name = self._tmdb_person_translated_name_en(tmdb_person_id)
+        name = self._tmdb_person_translated_name_en(tmdb_person_id)
         if not name:
-            pass
             # 2) Alias
-            # name = self._tmdb_person_alias_latin(tmdb_person_id)
+            name = self._tmdb_person_alias_latin(tmdb_person_id)
         if not name:
             # 3) Lokale Transliteration (optional)
             name = self._romanize_local(original_name or "")
