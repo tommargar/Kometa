@@ -4184,6 +4184,20 @@ class EmbyServer:
 
         people_alias_revert = []  # (pid, (alias_name/old_name, clean_name/new_name, tmdb_id))
         _seen_alias_reverts = set()  # (pid, alias_or_old_name)
+        _pending_alias_revert = []
+        _pending_alias_seen = set()
+        alias_revert_needed = False
+
+        def _add_alias_revert(pid: str, alias_name: str, clean_name: str, tid):
+            nonlocal alias_revert_needed, people_alias_revert
+            pid_str = str(pid)
+            alias_str = str(alias_name)
+            key = (pid_str, alias_str)
+            if key in _seen_alias_reverts:
+                return
+            alias_revert_needed = True
+            people_alias_revert.append((pid_str, (alias_str, clean_name, tid)))
+            _seen_alias_reverts.add(key)
 
         # ---- Helpers (keine neuen Imports) ----
         def _alias_parts(name: str):
@@ -4247,10 +4261,10 @@ class EmbyServer:
             if not pid:
                 continue
             key = (pid, nm)
-            if key in _seen_alias_reverts:
+            if key in _pending_alias_seen:
                 continue
-            people_alias_revert.append((pid, (nm, clean, tid)))
-            _seen_alias_reverts.add(key)
+            _pending_alias_revert.append((pid, (nm, clean, tid)))
+            _pending_alias_seen.add(key)
 
         # ---------- Super-schneller Fast-Path (No-Op) ----------
         # Wenn Struktur & Basenamen 1:1 gleich sind, können wir vorzeitig raus.
@@ -4268,7 +4282,7 @@ class EmbyServer:
 
         if _cheap_key(current_people) == _cheap_key(desired_people):
             # Nichts zu tun – auch keine teuren lookups nötig
-            return False, [], people_alias_revert
+            return False, "", []
 
         # ---------- PHASE A: Duplikate (gleiche TMDb) vorbereiten (per Cache) ----------
         numeric_pids = set(
@@ -4541,11 +4555,7 @@ class EmbyServer:
                     log["aliases_prepared"].append((emby_pid, alias_name))
                     changed = True
 
-                key = (str(emby_pid), alias_name)
-                if key not in _seen_alias_reverts:
-                    people_alias_revert.append(
-                        (str(emby_pid), (alias_name, clean_name, str(tid) if tid is not None else None)))
-                    _seen_alias_reverts.add(key)
+                _add_alias_revert(str(emby_pid), alias_name, clean_name, str(tid) if tid is not None else None)
 
             # 2) Film-Update EXAKT (kein Merge), aber nur wenn wirklich unterschiedlich
             _hard_replace_people(emby_item["Id"], people_payload)
@@ -4588,15 +4598,9 @@ class EmbyServer:
                 tid_str = str(tid) if tid is not None else None
                 clean_cur, tid_cur = _alias_parts(cur_name)
                 if clean_cur:
-                    key = (str(pid), cur_name)
-                    if key not in _seen_alias_reverts:
-                        people_alias_revert.append((str(pid), (cur_name, clean_cur, tid_cur or tid_str)))
-                        _seen_alias_reverts.add(key)
+                    _add_alias_revert(str(pid), cur_name, clean_cur, tid_cur or tid_str)
                     continue
-                key = (str(pid), cur_name)
-                if key not in _seen_alias_reverts:
-                    people_alias_revert.append((str(pid), (cur_name, new_name, tid_str)))
-                    _seen_alias_reverts.add(key)
+                _add_alias_revert(str(pid), cur_name, new_name, tid_str)
                 # kein sofortiges Update
 
         # ---------- Defensiver Fallback: finalen Payload scannen ----------
@@ -4606,12 +4610,13 @@ class EmbyServer:
                 nm = (p.get("Name") or "").strip()
                 clean, tid = _alias_parts(nm)
                 if pid.isdigit() and clean and tid:
-                    key = (pid, nm)
-                    if key not in _seen_alias_reverts:
-                        people_alias_revert.append((pid, (nm, clean, tid)))
-                        _seen_alias_reverts.add(key)
+                    _add_alias_revert(pid, nm, clean, tid)
         except Exception:
             pass
+
+        if alias_revert_needed and _pending_alias_revert:
+            for pid, (alias_name, clean_name, tid) in _pending_alias_revert:
+                _add_alias_revert(pid, alias_name, clean_name, tid)
 
         # ---------- Zusammenfassung ----------
         def build_people_change_events(current_people, desired_people, log=None):
@@ -4737,6 +4742,9 @@ class EmbyServer:
             return events
 
         # ---------- Return ----------
+        if not alias_revert_needed:
+            people_alias_revert = []
+
         # dedupe & sort für saubere Downstream-Liste
         if people_alias_revert:
             dedup = []
