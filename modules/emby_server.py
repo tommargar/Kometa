@@ -3302,8 +3302,8 @@ class EmbyServer:
         Liefert dict[tmdb_id:int] -> emby_person_id:str.
         - nutzt self.session (Connection-Pooling)
         - bewertet Dupe-Sets nur pro Batch (kein Mehrfach-Demote)
-        - bevorzugt vorhandene, bereits geprüfte Zuordnungen als kanonische Emby-ID
-        - demote pro falscher PID nur einmal (idempotent)
+        - verwendet stets die numerisch kleinste Emby-ID als kanonische Zuordnung
+        - führt keine automatischen Demotions mehr durch
         - behält Dupe-Listen für Logging/Persistenz bei
         """
         if not tmdb_ids:
@@ -3423,11 +3423,8 @@ class EmbyServer:
                     tid_int = int(tid)
                 except Exception:
                     pass
-                hint = canonical_hints.get(tid_int) if tid_int is not None else None
-                if hint and hint in ids_sorted:
-                    chosen = hint
-                else:
-                    chosen = ids_sorted[-1]
+                # Always prefer the numerically smallest Emby ID to remain stable across caches
+                chosen = ids_sorted[0]
                 if tid_int is not None:
                     canonical_hints[tid_int] = chosen
                 result[tid] = chosen
@@ -3453,31 +3450,14 @@ class EmbyServer:
                         raise Failed
                         pass  # bewusst beibehalten
 
-                    # Nicht-kanonische Personen demoten (pro PID nur einmal)
-                    wrong_ids = [pid for pid in ids_sorted if pid != chosen]
-                    for wrong_pid in wrong_ids:
-                        if wrong_pid in self._person_already_demoted:
-                            continue
-                        try:
-                            self._demote_duplicate_person(wrong_pid)
-                            self._person_already_demoted.append(wrong_pid)
-                            try:
-                                logger.info(f"[get_person_info_bulk] Demoted person Emby id {wrong_pid}")
-                            except Exception:
-                                pass
-                        except Exception as e:
-                            try:
-                                logger.warning(f"[get_person_info_bulk] demote failed for pid={wrong_pid}: {e}")
-                            except Exception:
-                                pass
-
                     # Zusammenfassung loggen
+                    wrong_ids = [pid for pid in ids_sorted if pid != chosen]
                     pname = tid_to_name.get(tid)
                     label = f"{tid} - {pname}" if pname else f"{tid}"
                     try:
                         logger.warning(
                             f"[get_person_info_bulk] TMDb-Person-ID {label} ist mehreren Emby-IDs zugeordnet: "
-                            f"{ids_sorted}. Verwende {chosen}; demoted {wrong_ids}"
+                            f"{ids_sorted}. Verwende niedrigste ID {chosen}; ignoriere {wrong_ids}"
                         )
                     except Exception:
                         pass
