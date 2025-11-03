@@ -3612,6 +3612,42 @@ class EmbyServer:
         ordered_cast = []
         crew_buckets = {"Director": [], "Writer": [], "Producer": [], "Composer": [], "Conductor": [], "Lyricist": []}
 
+        crew_role_priority = {
+            "Director": [None],
+            "Writer": [
+                "Autor",
+                "Romanvorlage",
+                "Adaption",
+                "Story",
+                "Comicvorlage",
+                "Charaktere",
+                None,
+            ],
+            "Producer": [None],
+            "Composer": ["Filmmusik", None],
+            "Conductor": [None],
+            "Lyricist": ["Songs", "Theme Song", None],
+        }
+        crew_role_priority_index = {
+            bucket_type: {role: idx for idx, role in enumerate(order)}
+            for bucket_type, order in crew_role_priority.items()
+        }
+
+        def crew_bucket_sort_key(entry: dict):
+            bucket_type = entry.get("Type")
+            role = entry.get("Role")
+            priority_map = crew_role_priority_index.get(bucket_type, {})
+            default_priority = len(priority_map)
+            role_key = (role or "").casefold()
+            name_key = (entry.get("Name") or "").casefold()
+            identifier_key = (str(entry.get("Id")) if entry.get("Id") is not None else "").casefold()
+            return (
+                priority_map.get(role, default_priority),
+                role_key,
+                name_key,
+                identifier_key,
+            )
+
         # --- Robuste Filter ---
         cast_filtered = [
             a for a in (my_cast or [])
@@ -3875,7 +3911,10 @@ class EmbyServer:
         desired = []
         desired.extend(ordered_cast)
         for t in ("Director", "Writer", "Producer", "Composer", "Conductor", "Lyricist"):
-            desired.extend(crew_buckets[t])
+            bucket = crew_buckets[t]
+            if bucket:
+                bucket.sort(key=crew_bucket_sort_key)
+            desired.extend(bucket)
 
         return desired
 
