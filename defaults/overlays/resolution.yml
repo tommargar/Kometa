@@ -197,7 +197,7 @@ templates:
           - key: 1080p
             value: "(?i)1080|2k"
           - key: 720p
-            value: '(?i)\b720\b|\bHD(?!R)\b'
+            value: "(?i)720"
           - key: 576p
             value: "(?i)576"
           - key: 480p
