@@ -18,6 +18,273 @@ class Overlays:
         self.library = library
         self.overlays = []
 
+    def _resolve_text_overlay(self, item, text_overlay, trakt_ratings, update_cache=False):
+        full_text = text_overlay.name[5:-1]
+        cache_values = {}
+
+        for lookup_var in overlay.vars_by_type[text_overlay.level]:
+            mod = ""
+            sub_value = None
+            format_var = lookup_var
+            if f"<<{lookup_var}" in full_text and lookup_var == "originally_available[":
+                mod = re.search("<<originally_available\\[(.+)]>>", full_text).group(1)
+                format_var = "originally_available"
+            elif f"<<{lookup_var}>>" in full_text and lookup_var.endswith(tuple(m for m in overlay.double_mods)):
+                mod = lookup_var[-2:]
+                format_var = lookup_var[:-2]
+            elif f"<<{lookup_var}>>" in full_text and lookup_var.endswith(tuple(m for m in overlay.single_mods)):
+                mod = lookup_var[-1]
+                format_var = lookup_var[:-1]
+            elif f"<<{lookup_var}>>" in full_text:
+                format_var = lookup_var
+            else:
+                continue
+
+            if format_var == "show_title":
+                actual_attr = "parentTitle" if text_overlay.level == "season" else "grandparentTitle"
+            elif format_var in plex.attribute_translation:
+                actual_attr = plex.attribute_translation[format_var]
+            else:
+                actual_attr = format_var
+
+            actual_value = None
+            if format_var == "bitrate":
+                for media in item.media:
+                    current = int(media.bitrate)
+                    if actual_value is None:
+                        actual_value = current
+                        if mod == "":
+                            break
+                    elif mod == "H" and current > actual_value:
+                        actual_value = current
+                    elif mod == "L" and current < actual_value:
+                        actual_value = current
+            elif format_var in overlay.rating_sources:
+                found_rating = None
+                try:
+                    item_to_id = item.show() if isinstance(item, (Season, Episode)) else item
+                    tmdb_id, tvdb_id, imdb_id = self.library.get_ids(item_to_id)
+                    if format_var == "tmdb_rating":
+                        _item = self.config.TMDb.get_item(item_to_id, tmdb_id, tvdb_id, imdb_id, is_movie=self.library.is_movie)
+                        if _item:
+                            if isinstance(item, Episode):
+                                found_rating = self.config.TMDb.get_episode(_item.tmdb_id, item.seasonNumber, item.episodeNumber).vote_average
+                            elif isinstance(item, Season):
+                                for season in _item.seasons:
+                                    if item.seasonNumber == season.season_number:
+                                        found_rating = season.average
+                                        break
+                            else:
+                                found_rating = _item.vote_average
+                        else:
+                            raise Failed(f"No TMDb ID for Guid: {item.guid}")
+                    elif format_var == "imdb_rating":
+                        if isinstance(item, Episode):
+                            found_rating = self.config.IMDb.get_episode_rating(imdb_id, item.seasonNumber, item.episodeNumber)
+                        else:
+                            found_rating = self.config.IMDb.get_rating(imdb_id)
+                    elif format_var == "trakt_user_rating":
+                        _ratings = trakt_ratings()
+                        _id = tmdb_id if self.library.is_movie else tvdb_id
+                        if _id in _ratings:
+                            found_rating = _ratings[_id]
+                        else:
+                            raise Failed("No Trakt User Rating Found")
+                    elif format_var == "trakt_rating":
+                        if self.config.Trakt:
+                            found_rating = self.config.Trakt.get_rating(imdb_id, self.library.is_movie)
+                        else:
+                            raise Failed("No Trakt Rating Found")
+                    elif str(format_var).startswith("mdb"):
+                        mdb_item = None
+                        if self.config.MDBList.limit is False:
+                            if self.library.is_show and tvdb_id:
+                                try:
+                                    mdb_item = self.config.MDBList.get_series(tvdb_id)
+                                except LimitReached as err:
+                                    logger.debug(err)
+                                except Failed as err:
+                                    logger.error(str(err))
+                                except Exception:
+                                    logger.trace(f"TVDb ID: {tvdb_id}")
+                                    raise
+                            if self.library.is_movie and tmdb_id:
+                                try:
+                                    mdb_item = self.config.MDBList.get_movie(tmdb_id)
+                                except LimitReached as err:
+                                    logger.debug(err)
+                                except Failed as err:
+                                    logger.error(str(err))
+                                except Exception:
+                                    logger.trace(f"TMDb ID: {tmdb_id}")
+                                    raise
+                            if imdb_id and not mdb_item:
+                                try:
+                                    mdb_item = self.config.MDBList.get_imdb(imdb_id)
+                                except LimitReached as err:
+                                    logger.debug(err)
+                                except Failed as err:
+                                    logger.error(str(err))
+                                except Exception:
+                                    logger.trace(f"IMDb ID: {imdb_id}")
+                                    raise
+                            if not mdb_item:
+                                raise Failed(f"No MdbItem for {item.title} (Guid: {item.guid})")
+                        if format_var == "mdb_average_rating":
+                            found_rating = mdb_item.average / 10 if mdb_item.average else None
+                        elif format_var == "mdb_imdb_rating":
+                            found_rating = mdb_item.imdb_rating if mdb_item.imdb_rating else None
+                        elif format_var == "mdb_metacritic_rating":
+                            found_rating = mdb_item.metacritic_rating / 10 if mdb_item.metacritic_rating else None
+                        elif format_var == "mdb_metacriticuser_rating":
+                            found_rating = mdb_item.metacriticuser_rating if mdb_item.metacriticuser_rating else None
+                        elif format_var == "mdb_trakt_rating":
+                            found_rating = mdb_item.trakt_rating / 10 if mdb_item.trakt_rating else None
+                        elif format_var == "mdb_tomatoes_rating":
+                            found_rating = mdb_item.tomatoes_rating / 10 if mdb_item.tomatoes_rating else None
+                        elif format_var == "mdb_tomatoesaudience_rating":
+                            found_rating = mdb_item.tomatoesaudience_rating / 10 if mdb_item.tomatoesaudience_rating else None
+                        elif format_var == "mdb_tmdb_rating":
+                            found_rating = mdb_item.tmdb_rating / 10 if mdb_item.tmdb_rating else None
+                        elif format_var == "mdb_letterboxd_rating":
+                            found_rating = mdb_item.letterboxd_rating * 2 if mdb_item.letterboxd_rating else None
+                        elif format_var == "mdb_myanimelist_rating":
+                            found_rating = mdb_item.myanimelist_rating if mdb_item.myanimelist_rating else None
+                        else:
+                            found_rating = mdb_item.score / 10 if mdb_item.score else None
+                    elif str(format_var).startswith("omdb"):
+                        if self.config.OMDb.limit is not False:
+                            raise Failed("Daily OMDb Limit Reached")
+                        elif not imdb_id:
+                            raise Failed(f"No IMDb ID for Guid: {item.guid}")
+                        else:
+                            try:
+                                omdb_obj = self.config.OMDb.get_omdb(imdb_id, True)
+                                if format_var == "omdb_metascore_rating":
+                                    found_rating = omdb_obj.metacritic_rating / 10 if omdb_obj.metacritic_rating else None
+                                elif format_var == "omdb_tomatoes_rating":
+                                    found_rating = omdb_obj.rotten_tomatoes / 10 if omdb_obj.rotten_tomatoes else None
+                                else:
+                                    found_rating = omdb_obj.imdb_rating if omdb_obj.imdb_rating else None
+                            except Exception:
+                                logger.error(f"Cannot retrieve {format_var} for: {imdb_id}")
+                                raise
+                    elif str(format_var).startswith(("anidb", "mal")):
+                        anidb_id = self.config.Convert.ids_to_anidb(self.library, item.ratingKey, tvdb_id, imdb_id, tmdb_id)
+
+                        if str(format_var).startswith("anidb"):
+                            if anidb_id:
+                                anidb_obj = self.config.AniDB.get_anime(anidb_id)
+                                if format_var == "anidb_rating_rating":
+                                    found_rating = anidb_obj.rating
+                                elif format_var == "anidb_average_rating":
+                                    found_rating = anidb_obj.average
+                                elif format_var == "anidb_score_rating":
+                                    found_rating = anidb_obj.score
+                            else:
+                                raise Failed(f"No AniDB ID for Guid: {item.guid}")
+                        else:
+                            if item.ratingKey in self.library.reverse_mal:
+                                mal_id = self.library.reverse_mal[item.ratingKey]
+                            elif not anidb_id:
+                                raise Failed(f"Convert Warning: No AniDB ID to Convert to MyAnimeList ID for Guid: {item.guid}")
+                            else:
+                                try:
+                                    mal_id = self.config.Convert.anidb_to_mal(anidb_id)
+                                except Failed as errr:
+                                    raise Failed(f"{errr} of Guid: {item.guid}")
+                            if mal_id:
+                                found_rating = self.config.MyAnimeList.get_anime(mal_id).score
+                    elif str(format_var).startswith("plex"):
+                        ratings = self.library.get_ratings(item)
+                        rating_key = format_var.replace("_rating", "")
+                        try:
+                            found_rating = ratings[rating_key]  # noqa
+                        except KeyError:
+                            found_rating = None
+                except Failed as err:
+                    logger.error(err)
+                if found_rating:
+                    actual_value = found_rating
+                    logger.trace(f"{format_var}: {actual_value}")
+                else:
+                    raise Failed(f"No {format_var} found for {self.library.get_item_display_title(item)}")
+            elif format_var == "runtime" and text_overlay.level in ["show", "season", "artist", "album"]:
+                if hasattr(item, "duration") and item.duration:
+                    actual_value = item.duration
+                else:
+                    sub_items = item.episodes() if text_overlay.level in ["show", "season"] else item.tracks()
+                    sub_items = [ep.duration for ep in sub_items if hasattr(ep, "duration") and ep.duration]
+                    actual_value = sum(sub_items) / len(sub_items)
+            elif format_var == "total_runtime":
+                sub_items = item.episodes() if text_overlay.level in ["show", "season"] else item.tracks()
+                sub_items = [ep.duration for ep in sub_items if hasattr(ep, "duration") and ep.duration]
+                actual_value = sum(sub_items)
+            else:
+                if not hasattr(item, actual_attr) or getattr(item, actual_attr) is None:
+                    raise Failed(f"Overlay Warning: No {full_text} found")
+                actual_value = getattr(item, actual_attr)
+                if format_var == "versions":
+                    actual_value = len(actual_value)
+
+            if actual_value is None:
+                continue
+
+            cache_values[format_var] = actual_value
+
+            if format_var == "originally_available":
+                if mod:
+                    sub_value = "<<originally_available\\[(.+)]>>"
+                    final_value = actual_value.strftime(mod)
+                else:
+                    final_value = actual_value.strftime("%Y-%m-%d")
+            elif format_var in ["runtime", "total_runtime"]:
+                if mod == "H":
+                    final_value = int((actual_value / 60000) // 60)
+                elif mod == "M":
+                    final_value = int((actual_value / 60000) % 60)
+                else:
+                    final_value = int(actual_value / 60000)
+            elif mod == "%":
+                final_value = int(float(actual_value) * 10)
+            elif mod == "#":
+                actual_value = f"{float(actual_value):.1f}"
+                final_value = actual_value[:-2] if actual_value.endswith(".0") else actual_value
+            elif mod == "/":
+                final_value = f"{float(actual_value) / 2:.1f}"
+            elif mod == "W":
+                final_value = num2words(int(actual_value))
+            elif mod == "WU":
+                final_value = num2words(int(actual_value)).upper()
+            elif mod == "WL":
+                final_value = num2words(int(actual_value)).lower()
+            elif mod == "0":
+                final_value = f"{int(actual_value):02}"
+            elif mod == "00":
+                final_value = f"{int(actual_value):03}"
+            elif mod == "U":
+                final_value = str(actual_value).upper()
+            elif mod == "L":
+                final_value = str(actual_value).lower()
+            elif mod == "P":
+                final_value = str(actual_value).title()
+            elif format_var in overlay.rating_sources:
+                final_value = f"{float(actual_value):.1f}"
+            else:
+                final_value = actual_value
+
+            if sub_value:
+                full_text = re.sub(sub_value, str(final_value), full_text)
+            else:
+                full_text = full_text.replace(f"<<{format_var}{mod}>>", str(final_value))
+
+        if update_cache and self.cache:
+            for cache_var, cache_value in cache_values.items():
+                cache_store = cache_value.strftime("%Y-%m-%d") if cache_var in overlay.date_vars and hasattr(cache_value, "strftime") else cache_value
+                self.cache.update_overlay_special_text(item.ratingKey, cache_var, cache_store)
+
+        return str(full_text), cache_values
+
     def run_overlays(self):
         overlay_start = datetime.now()
         logger.info("")
@@ -160,62 +427,21 @@ class Overlays:
                                 continue
                             if "<<" not in current_overlay.name:
                                 continue
-                            full_text = current_overlay.name[5:-1]
-                            matches = re.findall(r"<<([^<>]+)>>", full_text)
-                            if not matches:
+                            try:
+                                _, computed_values = self._resolve_text_overlay(item, current_overlay, trakt_ratings, update_cache=False)
+                            except Failed as err:
+                                overlay_change = str(err)
+                                break
+                            if not computed_values:
                                 continue
-                            expected_vars = set()
-                            for match in matches:
-                                base_var = match
-                                if base_var.startswith("originally_available["):
-                                    base_var = "originally_available"
-                                else:
-                                    stripped = False
-                                    for mod in overlay.double_mods:
-                                        if base_var.endswith(mod):
-                                            base_var = base_var[:-len(mod)]
-                                            stripped = True
-                                            break
-                                    if not stripped:
-                                        for mod in overlay.single_mods:
-                                            if base_var.endswith(mod):
-                                                base_var = base_var[:-len(mod)]
-                                                break
-                                expected_vars.add(base_var)
-                            for format_var in expected_vars:
+                            for format_var, real_value in computed_values.items():
                                 if overlay_change:
                                     break
                                 cached_value = special_text_cache.get(format_var) if special_text_cache else None
                                 if cached_value is None:
                                     overlay_change = f"Missing Special Text Cache for {format_var}"
                                     break
-                                real_value = None
-                                if format_var == "show_title":
-                                    attr = "parentTitle" if current_overlay.level == "season" else "grandparentTitle"
-                                    real_value = getattr(item, attr, None)
-                                elif format_var == "runtime" and current_overlay.level in ["show", "season", "artist", "album"]:
-                                    if hasattr(item, "duration") and item.duration:
-                                        real_value = item.duration
-                                    else:
-                                        sub_items = item.episodes() if current_overlay.level in ["show", "season"] else item.tracks()
-                                        durations = [getattr(ep, "duration", None) for ep in sub_items]
-                                        durations = [d for d in durations if d]
-                                        if durations:
-                                            real_value = sum(durations) / len(durations)
-                                elif format_var == "total_runtime":
-                                    sub_items = item.episodes() if current_overlay.level in ["show", "season"] else item.tracks()
-                                    durations = [getattr(ep, "duration", None) for ep in sub_items]
-                                    durations = [d for d in durations if d]
-                                    if durations:
-                                        real_value = sum(durations)
-                                else:
-                                    actual_attr = plex.attribute_translation.get(format_var, format_var)
-                                    if hasattr(item, actual_attr):
-                                        real_value = getattr(item, actual_attr)
-                                if real_value is None:
-                                    continue
-                                if format_var == "versions":
-                                    real_value = len(real_value) if isinstance(real_value, (list, tuple, set)) else real_value
+                                compare_value = cached_value
                                 try:
                                     if format_var in overlay.float_vars:
                                         real_value = float(real_value)
@@ -223,12 +449,10 @@ class Overlays:
                                     elif format_var in overlay.int_vars:
                                         real_value = int(real_value)
                                         compare_value = int(cached_value)
-                                    else:
-                                        compare_value = cached_value
-                                    if format_var in overlay.date_vars and hasattr(real_value, "strftime"):
-                                        real_value = real_value.strftime("%Y-%m-%d")
                                 except (TypeError, ValueError):
                                     continue
+                                if format_var in overlay.date_vars and hasattr(real_value, "strftime"):
+                                    real_value = real_value.strftime("%Y-%m-%d")
                                 if real_value != compare_value:
                                     overlay_change = f"Special Text Changed from {cached_value} to {real_value}"
                                     break
@@ -288,260 +512,8 @@ class Overlays:
                                     new_poster = new_poster.filter(ImageFilter.GaussianBlur(blur_num))
 
                                 def get_text(text_overlay):
-                                    full_text = text_overlay.name[5:-1]
-                                    for format_var in overlay.vars_by_type[text_overlay.level]:
-                                        if f"<<{format_var}" in full_text and format_var == "originally_available[":
-                                            mod = re.search("<<originally_available\\[(.+)]>>", full_text).group(1)
-                                            format_var = "originally_available"
-                                        elif f"<<{format_var}>>" in full_text and format_var.endswith(tuple(m for m in overlay.double_mods)):
-                                            mod = format_var[-2:]
-                                            format_var = format_var[:-2]
-                                        elif f"<<{format_var}>>" in full_text and format_var.endswith(tuple(m for m in overlay.single_mods)):
-                                            mod = format_var[-1]
-                                            format_var = format_var[:-1]
-                                        elif f"<<{format_var}>>" in full_text:
-                                            mod = ""
-                                        else:
-                                            continue
-                                        if format_var == "show_title":
-                                            actual_attr = "parentTitle" if text_overlay.level == "season" else "grandparentTitle"
-                                        elif format_var in plex.attribute_translation:
-                                            actual_attr = plex.attribute_translation[format_var]
-                                        else:
-                                            actual_attr = format_var
-                                        if format_var == "bitrate":
-                                            actual_value = None
-                                            # ToDo
-                                            for media in item.media:
-                                                current = int(media.bitrate)
-                                                if actual_value is None:
-                                                    actual_value = current
-                                                    if mod == "":
-                                                        break
-                                                elif mod == "H" and current > actual_value:
-                                                    actual_value = current
-                                                elif mod == "L" and current < actual_value:
-                                                    actual_value = current
-                                        elif format_var in overlay.rating_sources:
-                                            found_rating = None
-                                            try:
-                                                item_to_id = item.show() if isinstance(item, (Season, Episode)) else item
-                                                tmdb_id, tvdb_id, imdb_id = self.library.get_ids(item_to_id)
-                                                if format_var == "tmdb_rating":
-                                                    _item = self.config.TMDb.get_item(item_to_id, tmdb_id, tvdb_id, imdb_id, is_movie=self.library.is_movie)
-                                                    if _item:
-                                                        if isinstance(item, Episode):
-                                                            found_rating = self.config.TMDb.get_episode(_item.tmdb_id, item.seasonNumber, item.episodeNumber).vote_average
-                                                        elif isinstance(item, Season):
-                                                            for season in _item.seasons:
-                                                                if item.seasonNumber == season.season_number:
-                                                                    found_rating = season.average
-                                                                    break
-                                                        else:
-                                                            found_rating = _item.vote_average
-                                                    else:
-                                                        raise Failed(f"No TMDb ID for Guid: {item.guid}")
-                                                elif format_var == "imdb_rating":
-                                                    if isinstance(item, Episode):
-                                                        found_rating = self.config.IMDb.get_episode_rating(imdb_id, item.seasonNumber, item.episodeNumber)
-                                                    else:
-                                                        found_rating = self.config.IMDb.get_rating(imdb_id)
-                                                elif format_var == "trakt_user_rating":
-                                                    _ratings = trakt_ratings()
-                                                    _id = tmdb_id if self.library.is_movie else tvdb_id
-                                                    if _id in _ratings:
-                                                        found_rating = _ratings[_id]
-                                                    else:
-                                                        raise Failed("No Trakt User Rating Found")
-                                                elif format_var == "trakt_rating":
-                                                    if self.config.Trakt:
-                                                        found_rating = self.config.Trakt.get_rating(imdb_id, self.library.is_movie)
-                                                    else:
-                                                        raise Failed("No Trakt Rating Found")
-                                                elif str(format_var).startswith("mdb"):
-                                                    mdb_item = None
-                                                    if self.config.MDBList.limit is False:
-                                                        if self.library.is_show and tvdb_id:
-                                                            try:
-                                                                mdb_item = self.config.MDBList.get_series(tvdb_id)
-                                                            except LimitReached as err:
-                                                                logger.debug(err)
-                                                            except Failed as err:
-                                                                logger.error(str(err))
-                                                            except Exception:
-                                                                logger.trace(f"TVDb ID: {tvdb_id}")
-                                                                raise
-                                                        if self.library.is_movie and tmdb_id:
-                                                            try:
-                                                                mdb_item = self.config.MDBList.get_movie(tmdb_id)
-                                                            except LimitReached as err:
-                                                                logger.debug(err)
-                                                            except Failed as err:
-                                                                logger.error(str(err))
-                                                            except Exception:
-                                                                logger.trace(f"TMDb ID: {tmdb_id}")
-                                                                raise
-                                                        if imdb_id and not mdb_item:
-                                                            try:
-                                                                mdb_item = self.config.MDBList.get_imdb(imdb_id)
-                                                            except LimitReached as err:
-                                                                logger.debug(err)
-                                                            except Failed as err:
-                                                                logger.error(str(err))
-                                                            except Exception:
-                                                                logger.trace(f"IMDb ID: {imdb_id}")
-                                                                raise
-                                                        if not mdb_item:
-                                                            raise Failed(f"No MdbItem for {item.title} (Guid: {item.guid})")
-                                                    if format_var == "mdb_average_rating":
-                                                        found_rating = mdb_item.average / 10 if mdb_item.average else None
-                                                    elif format_var == "mdb_imdb_rating":
-                                                        found_rating = mdb_item.imdb_rating if mdb_item.imdb_rating else None
-                                                    elif format_var == "mdb_metacritic_rating":
-                                                        found_rating = mdb_item.metacritic_rating / 10 if mdb_item.metacritic_rating else None
-                                                    elif format_var == "mdb_metacriticuser_rating":
-                                                        found_rating = mdb_item.metacriticuser_rating if mdb_item.metacriticuser_rating else None
-                                                    elif format_var == "mdb_trakt_rating":
-                                                        found_rating = mdb_item.trakt_rating / 10 if mdb_item.trakt_rating else None
-                                                    elif format_var == "mdb_tomatoes_rating":
-                                                        found_rating = mdb_item.tomatoes_rating / 10 if mdb_item.tomatoes_rating else None
-                                                    elif format_var == "mdb_tomatoesaudience_rating":
-                                                        found_rating = mdb_item.tomatoesaudience_rating / 10 if mdb_item.tomatoesaudience_rating else None
-                                                    elif format_var == "mdb_tmdb_rating":
-                                                        found_rating = mdb_item.tmdb_rating / 10 if mdb_item.tmdb_rating else None
-                                                    elif format_var == "mdb_letterboxd_rating":
-                                                        found_rating = mdb_item.letterboxd_rating * 2 if mdb_item.letterboxd_rating else None
-                                                    elif format_var == "mdb_myanimelist_rating":
-                                                        found_rating = mdb_item.myanimelist_rating if mdb_item.myanimelist_rating else None
-                                                    else:
-                                                        found_rating = mdb_item.score / 10 if mdb_item.score else None
-                                                elif str(format_var).startswith("omdb"):
-                                                    if self.config.OMDb.limit is not False:
-                                                        raise Failed("Daily OMDb Limit Reached")
-                                                    elif not imdb_id:
-                                                        raise Failed(f"No IMDb ID for Guid: {item.guid}")
-                                                    else:
-                                                        try:
-                                                            omdb_obj = self.config.OMDb.get_omdb(imdb_id, True)
-                                                            if format_var == "omdb_metascore_rating":
-                                                                found_rating = omdb_obj.metacritic_rating / 10 if omdb_obj.metacritic_rating else None
-                                                            elif format_var == "omdb_tomatoes_rating":
-                                                                found_rating = omdb_obj.rotten_tomatoes / 10 if omdb_obj.rotten_tomatoes else None
-                                                            else:
-                                                                found_rating = omdb_obj.imdb_rating if omdb_obj.imdb_rating else None
-                                                        except Exception:
-                                                            logger.error(f"Cannot retrieve {format_var} for: {imdb_id}")
-                                                            raise
-                                                elif str(format_var).startswith(("anidb", "mal")):
-                                                    anidb_id = self.config.Convert.ids_to_anidb(self.library, item.ratingKey, tvdb_id, imdb_id, tmdb_id)
-
-                                                    if str(format_var).startswith("anidb"):
-                                                        if anidb_id:
-                                                            anidb_obj = self.config.AniDB.get_anime(anidb_id)
-                                                            if format_var == "anidb_rating_rating":
-                                                                found_rating = anidb_obj.rating
-                                                            elif format_var == "anidb_average_rating":
-                                                                found_rating = anidb_obj.average
-                                                            elif format_var == "anidb_score_rating":
-                                                                found_rating = anidb_obj.score
-                                                        else:
-                                                            raise Failed(f"No AniDB ID for Guid: {item.guid}")
-                                                    else:
-                                                        if item.ratingKey in self.library.reverse_mal:
-                                                            mal_id = self.library.reverse_mal[item.ratingKey]
-                                                        elif not anidb_id:
-                                                            raise Failed(f"Convert Warning: No AniDB ID to Convert to MyAnimeList ID for Guid: {item.guid}")
-                                                        else:
-                                                            try:
-                                                                mal_id = self.config.Convert.anidb_to_mal(anidb_id)
-                                                            except Failed as errr:
-                                                                raise Failed(f"{errr} of Guid: {item.guid}")
-                                                        if mal_id:
-                                                            found_rating = self.config.MyAnimeList.get_anime(mal_id).score
-                                                elif str(format_var).startswith("plex"):
-                                                    ratings = self.library.get_ratings(item)
-                                                    rating_key = format_var.replace("_rating", "")
-                                                    try:
-                                                        found_rating = ratings[rating_key] # noqa
-                                                    except KeyError:
-                                                        found_rating = None
-                                            except Failed as err:
-                                                logger.error(err)
-                                            if found_rating:
-                                                actual_value = found_rating
-                                                logger.trace(f"{format_var}: {actual_value}")
-                                            else:
-                                                raise Failed(f"No {format_var} found for {item_title}")
-                                        elif format_var == "runtime" and text_overlay.level in ["show", "season", "artist", "album"]:
-                                            if hasattr(item, "duration") and item.duration:
-                                                actual_value = item.duration
-                                            else:
-                                                sub_items = item.episodes() if text_overlay.level in ["show", "season"] else item.tracks()
-                                                sub_items = [ep.duration for ep in sub_items if hasattr(ep, "duration") and ep.duration]
-                                                actual_value = sum(sub_items) / len(sub_items)
-                                        elif format_var == "total_runtime":
-                                            # ToDo
-                                            sub_items = item.episodes() if text_overlay.level in ["show", "season"] else item.tracks()
-                                            sub_items = [ep.duration for ep in sub_items if hasattr(ep, "duration") and ep.duration]
-                                            actual_value = sum(sub_items)
-                                        else:
-                                            # match actual_attr:
-                                            #     case 'rating':
-
-                                            if not hasattr(item, actual_attr) or getattr(item, actual_attr) is None:
-                                                raise Failed(f"Overlay Warning: No {full_text} found")
-                                            actual_value = getattr(item, actual_attr)
-                                            if format_var == "versions":
-                                                actual_value = len(actual_value)
-                                        if self.cache:
-                                            cache_store = actual_value.strftime("%Y-%m-%d") if format_var in overlay.date_vars else actual_value
-                                            self.cache.update_overlay_special_text(item.ratingKey, format_var, cache_store)
-                                        sub_value = None
-                                        if format_var == "originally_available":
-                                            if mod:
-                                                sub_value = "<<originally_available\\[(.+)]>>"
-                                                final_value = actual_value.strftime(mod)
-                                            else:
-                                                final_value = actual_value.strftime("%Y-%m-%d")
-                                        elif format_var in ["runtime", "total_runtime"]:
-                                            if mod == "H":
-                                                final_value = int((actual_value / 60000) // 60)
-                                            elif mod == "M":
-                                                final_value = int((actual_value / 60000) % 60)
-                                            else:
-                                                final_value = int(actual_value / 60000)
-                                        elif mod == "%":
-                                            final_value = int(float(actual_value) * 10)
-                                        elif mod == "#":
-                                            actual_value = f"{float(actual_value):.1f}"
-                                            final_value = actual_value[:-2] if actual_value.endswith(".0") else actual_value
-                                        elif mod == "/":
-                                            final_value = f"{float(actual_value) / 2:.1f}"
-                                        elif mod == "W":
-                                            final_value = num2words(int(actual_value))
-                                        elif mod == "WU":
-                                            final_value = num2words(int(actual_value)).upper()
-                                        elif mod == "WL":
-                                            final_value = num2words(int(actual_value)).lower()
-                                        elif mod == "0":
-                                            final_value = f"{int(actual_value):02}"
-                                        elif mod == "00":
-                                            final_value = f"{int(actual_value):03}"
-                                        elif mod == "U":
-                                            final_value = str(actual_value).upper()
-                                        elif mod == "L":
-                                            final_value = str(actual_value).lower()
-                                        elif mod == "P":
-                                            final_value = str(actual_value).title()
-                                        elif format_var in overlay.rating_sources:
-                                            final_value = f"{float(actual_value):.1f}"
-                                        else:
-                                            final_value = actual_value
-                                        if sub_value:
-                                            full_text = re.sub(sub_value, str(final_value), full_text)
-                                        else:
-                                            full_text = full_text.replace(f"<<{format_var}{mod}>>", str(final_value))
-                                    return str(full_text)
+                                    text, _ = self._resolve_text_overlay(item, text_overlay, trakt_ratings, update_cache=True)
+                                    return text
 
                                 for over_name in applied_names:
                                     current_overlay = properties[over_name]
