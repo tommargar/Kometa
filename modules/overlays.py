@@ -510,7 +510,6 @@ class Overlays:
 
                                 if blur_num > 0:
                                     new_poster = new_poster.filter(ImageFilter.GaussianBlur(blur_num))
-
                                 def get_text(text_overlay):
                                     text, _ = self._resolve_text_overlay(item, text_overlay, trakt_ratings, update_cache=True)
                                     return text
