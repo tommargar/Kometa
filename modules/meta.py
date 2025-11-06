@@ -18,6 +18,7 @@ auto = {
     "Artist": ["mood", "style", "country", "album_genre", "album_mood", "album_style", "track_mood"] + all_auto,
     "Video": ["country", "content_rating"] + all_auto
 }
+people_auto_types = {"actor", "director", "writer", "producer", "composer"}
 dynamic_attributes = [
     "type", "data", "exclude", "addons", "template", "template_variables", "other_template", "remove_suffix", "custom_keys",
     "remove_prefix", "title_format", "key_name_override", "title_override", "test", "sync", "include", "other_name"
@@ -1255,11 +1256,11 @@ class MetadataFile(DataFile):
                             test = util.parse("Config", "test", self.temp_vars["test"], parent="template_variables", datatype="bool")
                         elif "test" in methods:
                             test = util.parse("Config", "test", dynamic, parent=map_name, methods=methods, default=False, datatype="bool")
-                        sync = False
+                        sync_enabled = False
                         if "sync" in self.temp_vars:
-                            sync = util.parse("Config", "sync", self.temp_vars["sync"], parent="template_variables", datatype="bool")
+                            sync_enabled = util.parse("Config", "sync", self.temp_vars["sync"], parent="template_variables", datatype="bool")
                         elif "sync" in methods:
-                            sync = util.parse("Config", "sync", dynamic, parent=map_name, methods=methods, default=False, datatype="bool")
+                            sync_enabled = util.parse("Config", "sync", dynamic, parent=map_name, methods=methods, default=False, datatype="bool")
                         if "<<library_type>>" in title_format:
                             title_format = title_format.replace("<<library_type>>", library.type.lower())
                         if "<<library_typeU>>" in title_format:
@@ -1293,7 +1294,10 @@ class MetadataFile(DataFile):
                             remove_suffix = util.parse("Config", "remove_suffix", self.temp_vars["remove_suffix"], parent="template_variables", datatype="commalist")
                         elif "remove_suffix" in methods:
                             remove_suffix = util.parse("Config", "remove_suffix", dynamic, parent=map_name, methods=methods, datatype="commalist")
-                        sync = {i.title: i for i in self.library.get_all_collections(label=str(map_name))} if sync else {}
+                        manage_collections = {}
+                        if sync_enabled or auto_type in people_auto_types:
+                            manage_collections = {i.title: i for i in self.library.get_all_collections(label=str(map_name))}
+                        generated_titles = set()
                         other_name = None
                         if "other_name" in self.temp_vars and include:
                             other_name = util.parse("Config", "other_name", self.temp_vars["remove_suffix"], parent="template_variables")
@@ -1324,7 +1328,8 @@ class MetadataFile(DataFile):
                         logger.debug(f"Title Override: {title_override}")
                         logger.debug(f"Custom Keys: {custom_keys}")
                         logger.debug(f"Test: {test}")
-                        logger.debug(f"Sync: {sync}")
+                        logger.debug(f"Sync: {sync_enabled}")
+                        logger.debug(f"Managed Collections: {list(manage_collections.keys())}")
                         logger.debug(f"Include: {include}")
 
                         if other_name:
@@ -1385,8 +1390,9 @@ class MetadataFile(DataFile):
                                 col = {"template": template_call, "append_label": str(map_name)}
                                 if test:
                                     col["test"] = True
-                                if collection_title in sync:
-                                    sync.pop(collection_title)
+                                generated_titles.add(collection_title)
+                                if collection_title in manage_collections:
+                                    manage_collections.pop(collection_title)
                                 col_names.append(collection_title)
                                 self.collections[collection_title] = col
                         if other_name and not other_keys:
@@ -1413,13 +1419,19 @@ class MetadataFile(DataFile):
                             col = {"template": other_call, "append_label": str(map_name)}
                             if test:
                                 col["test"] = True
-                            if other_name in sync:
-                                sync.pop(other_name)
+                            generated_titles.add(other_name)
+                            if other_name in manage_collections:
+                                manage_collections.pop(other_name)
                             self.collections[other_name] = col
-                        for col_title, col in sync.items():
+                        logger.debug(f"Generated Titles This Run: {sorted(generated_titles)}")
+                        for col_title, col in manage_collections.items():
                             try:
                                 self.library.delete(col)
-                                logger.info(f"{map_name} Dynamic Collection: {col_title} Deleted")
+                                reason = "not generated this run"
+                                if col_title in generated_titles:
+                                    reason = "replaced during build"
+                                cleanup_note = " [people collection cleanup]" if auto_type in people_auto_types else ""
+                                logger.info(f"{map_name} Dynamic Collection: {col_title} Deleted ({reason}){cleanup_note}")
                             except Failed as e:
                                 logger.error(e)
                     except Failed as e:
