@@ -1,3 +1,4 @@
+import base64
 import math, operator, os, re
 from datetime import datetime
 from modules import plex, ergast, util, letterboxd
@@ -37,6 +38,96 @@ default_templates = {
     "tmdb_popular_people": {"tmdb_person": "<<value>>", "plex_search": {"all": {"actor": "tmdb"}}},
     "trakt_people_list": {"tmdb_person": "<<value>>", "plex_search": {"all": {"actor": "tmdb"}}}
 }
+
+PEOPLE_AUTO_TYPES = {
+    "actor", "director", "writer", "producer", "composer",
+    "tmdb_popular_people", "trakt_people_list"
+}
+
+TMDB_PERSON_ID_LABEL_PREFIX = "KOMETA_PERSON_ID-"
+TMDB_PERSON_NAME_LABEL_PREFIX = "KOMETA_PERSON_NAME-"
+
+
+def _template_requires_tmdb_person(template):
+    if isinstance(template, dict):
+        for key, value in template.items():
+            if str(key).lower() == "tmdb_person":
+                return True
+            if _template_requires_tmdb_person(value):
+                return True
+    elif isinstance(template, list):
+        for entry in template:
+            if _template_requires_tmdb_person(entry):
+                return True
+    return False
+
+
+def templates_require_tmdb_person(templates, template_names):
+    for template_name in template_names:
+        if template_name in templates and _template_requires_tmdb_person(templates[template_name][0]):
+            return True
+    return False
+
+
+def encode_tmdb_person_labels(tmdb_id, name):
+    if not tmdb_id:
+        return []
+    labels = [f"{TMDB_PERSON_ID_LABEL_PREFIX}{tmdb_id}"]
+    if name:
+        encoded_name = base64.urlsafe_b64encode(str(name).encode("utf-8")).decode("utf-8").rstrip("=")
+        labels.append(f"{TMDB_PERSON_NAME_LABEL_PREFIX}{encoded_name}")
+    return labels
+
+
+def decode_tmdb_person_labels(labels):
+    tmdb_id = None
+    tmdb_name = None
+    for label in labels:
+        if not label:
+            continue
+        if label.startswith(TMDB_PERSON_ID_LABEL_PREFIX):
+            tmdb_id = label[len(TMDB_PERSON_ID_LABEL_PREFIX):]
+        elif label.startswith(TMDB_PERSON_NAME_LABEL_PREFIX):
+            encoded = label[len(TMDB_PERSON_NAME_LABEL_PREFIX):]
+            padding = "=" * (-len(encoded) % 4)
+            try:
+                tmdb_name = base64.urlsafe_b64decode(f"{encoded}{padding}").decode("utf-8")
+            except Exception:
+                tmdb_name = None
+    return tmdb_id, tmdb_name
+
+
+def merge_tmdb_person_labels(library, map_name, auto_list, all_keys, exclude, existing_collections=None):
+    tmdb_key_map = {}
+    exclude_set = {str(e) for e in exclude}
+    if not library:
+        return tmdb_key_map
+    if existing_collections is None:
+        existing_collections = library.get_all_collections(label=str(map_name))
+    for collection in existing_collections:
+        try:
+            raw_labels = library.item_labels(collection)
+        except Failed:
+            raw_labels = []
+        labels = []
+        for raw_label in raw_labels:
+            if hasattr(raw_label, "tag"):
+                labels.append(str(raw_label.tag))
+            else:
+                labels.append(str(raw_label))
+        tmdb_id, tmdb_name = decode_tmdb_person_labels(labels)
+        if not tmdb_id:
+            continue
+        if tmdb_id in exclude_set or (tmdb_name and tmdb_name in exclude_set):
+            continue
+        key = str(tmdb_id)
+        if key not in auto_list:
+            fallback_name = tmdb_name or all_keys.get(key) or getattr(collection, "title", key)
+            auto_list[key] = fallback_name
+        if key not in all_keys:
+            all_keys[key] = auto_list[key]
+        tmdb_key_map[key] = str(tmdb_id)
+    return tmdb_key_map
 
 def get_dict(attribute, attr_data, check_list=None, make_str=False):
     if check_list is None:
@@ -1268,6 +1359,7 @@ class MetadataFile(DataFile):
                         if "limit" in self.temp_vars and "<<limit>>" in title_format:
                             title_format = title_format.replace("<<limit>>", str(self.temp_vars["limit"]))
                         template_variables = util.parse("Config", "template_variables", dynamic, parent=map_name, methods=methods, datatype="dictdict") if "template_variables" in methods else {}
+                        uses_tmdb_person = auto_type in PEOPLE_AUTO_TYPES
                         if "template" in methods:
                             template_names = util.parse("Config", "template", dynamic, parent=map_name, methods=methods, datatype="strlist")
                             has_var = False
@@ -1278,11 +1370,15 @@ class MetadataFile(DataFile):
                                     has_var = True
                             if not has_var:
                                 raise Failed(f"Config Error: One {map_name} template: {template_names} is required to have the Template Variable <<value>>")
+                            if not uses_tmdb_person:
+                                uses_tmdb_person = templates_require_tmdb_person(self.templates, template_names)
                         elif auto_type in ["number", "list"]:
                             raise Failed(f"Config Error: {map_name} template required for type: {auto_type}")
                         else:
                             self.templates[map_name] = (default_template if default_template else default_templates[auto_type], {})
                             template_names = [map_name]
+                            if not uses_tmdb_person:
+                                uses_tmdb_person = templates_require_tmdb_person(self.templates, template_names)
                         remove_prefix = []
                         if "remove_prefix" in self.temp_vars:
                             remove_prefix = util.parse("Config", "remove_prefix", self.temp_vars["remove_prefix"], parent="template_variables", datatype="commalist")
@@ -1293,19 +1389,23 @@ class MetadataFile(DataFile):
                             remove_suffix = util.parse("Config", "remove_suffix", self.temp_vars["remove_suffix"], parent="template_variables", datatype="commalist")
                         elif "remove_suffix" in methods:
                             remove_suffix = util.parse("Config", "remove_suffix", dynamic, parent=map_name, methods=methods, datatype="commalist")
-                        sync = {i.title: i for i in self.library.get_all_collections(label=str(map_name))} if sync else {}
+                        if "other_template" in methods and include:
+                            other_templates = util.parse("Config", "other_template", dynamic, parent=map_name, methods=methods, datatype="strlist")
+                            uses_tmdb_person = uses_tmdb_person or templates_require_tmdb_person(self.templates, other_templates)
+                        else:
+                            other_templates = template_names
+                        sync_mode = sync
+                        existing_collections = self.library.get_all_collections(label=str(map_name)) if sync_mode or uses_tmdb_person else []
+                        sync = {i.title: i for i in existing_collections} if sync_mode else {}
                         other_name = None
                         if "other_name" in self.temp_vars and include:
                             other_name = util.parse("Config", "other_name", self.temp_vars["remove_suffix"], parent="template_variables")
                         elif "other_name" in methods and include:
                             other_name = util.parse("Config", "other_name", dynamic, parent=map_name, methods=methods)
-                        other_templates = util.parse("Config", "other_template", dynamic, parent=map_name, methods=methods, datatype="strlist") if "other_template" in methods and include else None
                         if other_templates:
                             for other_template in other_templates:
                                 if other_template not in self.templates:
                                     raise Failed(f"Config Error: {map_name} other template: {other_template} not found")
-                        else:
-                            other_templates = template_names
                         other_keys = []
                         logger.debug(f"Mapping Name: {map_name}")
                         logger.debug(f"Type: {auto_type}")
@@ -1331,6 +1431,13 @@ class MetadataFile(DataFile):
                             other_name = other_name.replace("<<library_typeU>>", library.type)
 
                         logger.debug(f"Other Name: {other_name}")
+                        tmdb_person_key_map = {}
+                        if uses_tmdb_person:
+                            tmdb_person_key_map = merge_tmdb_person_labels(self.library, map_name, auto_list, all_keys, exclude, existing_collections)
+                            for tmdb_key in list(auto_list.keys()):
+                                tmdb_key_str = str(tmdb_key)
+                                if tmdb_key_str not in tmdb_person_key_map and tmdb_key_str.isdigit():
+                                    tmdb_person_key_map[tmdb_key_str] = tmdb_key_str
                         logger.debug(f"All Keys: {all_keys.keys()}")
                         if not auto_list:
                             raise Failed("No Keys found to create a set of Dynamic Collections")
@@ -1382,7 +1489,12 @@ class MetadataFile(DataFile):
                                 logger.warning(f"Config Warning: Skipping duplicate collection: {collection_title}")
                             else:
                                 logger.info(template_call)
-                                col = {"template": template_call, "append_label": str(map_name)}
+                                append_label = str(map_name)
+                                if key in tmdb_person_key_map:
+                                    label_list = [str(map_name)]
+                                    label_list.extend(encode_tmdb_person_labels(tmdb_person_key_map[key], auto_list.get(key) or all_keys.get(key)))
+                                    append_label = label_list
+                                col = {"template": template_call, "append_label": append_label}
                                 if test:
                                     col["test"] = True
                                 if collection_title in sync:
