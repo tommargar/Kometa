@@ -73,6 +73,7 @@ class MDbObj:
 
 class MDBList:
     def __init__(self, requests, cache):
+        self.api_limit = None
         self.requests = requests
         self.cache = cache
         self.apikey = None

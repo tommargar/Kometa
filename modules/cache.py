@@ -1,6 +1,10 @@
-import json, os, random, sqlite3
+import json
+import os
+import random
+import sqlite3
 from contextlib import closing
 from datetime import datetime, timedelta
+
 from modules import util
 
 logger = util.logger
@@ -671,8 +675,6 @@ class Cache:
                     mal.title, mal.title_english, mal.title_japanese, mal.status, mal.airing, mal.aired.strftime("%Y-%m-%d") if mal.aired else None,
                     mal.rating, mal.score, mal.rank, mal.popularity, "|".join(mal.genres), mal.studio, expiration_date.strftime("%Y-%m-%d"), mal_id
                 ))
-
-    import json
 
     def query_tmdb_movie(self, tmdb_id, expiration):
         tmdb_dict = {}
