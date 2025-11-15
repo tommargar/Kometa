@@ -518,6 +518,10 @@ class Plex(Library):
                     uc_str = f"Public update channel."
                 elif chl_num == "8":
                     uc_str = f"PlexPass update channel."
+
+    def _clear_search_choices_cache(self):
+        if hasattr(self, "_search_choices_cache") and isinstance(self._search_choices_cache, dict):
+            self._search_choices_cache.clear()
                 else:
                     uc_str = f"Unknown update channel: {chl_num}."
             except NotFound:
@@ -2334,6 +2338,8 @@ class Plex(Library):
                         self.EmbyServer.add_remove_plex_object_from_collection(collection, _items, 'delete')
 
 
+                    self._clear_search_choices_cache()
+
                 # Traditionelle Sammlungen (BoxSets in Emby)
                 elif add:
                     added = self.EmbyServer.add_to_collection(collection, [item.ratingKey for item in _items])
@@ -2808,8 +2814,7 @@ class Plex(Library):
                     self.EmbyServer.set_genres(obj.ratingKey, final_tags)
                 else:
                     raise WARNING(f"edit_tags: I won't edit {attr} with {final_tags}")
-                if hasattr(self, "_search_choices_cache") and isinstance(self._search_choices_cache, dict):
-                    self._search_choices_cache.clear()
+                self._clear_search_choices_cache()
 
             if _add:
                 display += f"+{', +'.join(_add)}"
