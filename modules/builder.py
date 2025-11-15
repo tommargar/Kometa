@@ -1,18 +1,21 @@
-import os, re, time
-
-import requests
-from arrapi import ArrException
+import os
+import re
+import time
 from datetime import datetime, timedelta
+
+from arrapi import ArrException
 from dateutil.relativedelta import relativedelta
-from modules import anidb, anilist, icheckmovies, imdb, letterboxd, mal, mojo, plex, radarr, reciperr, sonarr, tautulli, tmdb, trakt, tvdb, mdblist, util
-from modules.util import Failed, FilterFailed, NonExisting, NotScheduled, NotScheduledRange, Deleted
-from modules.overlay import Overlay
-from modules.poster import KometaImage
-from modules.request import quote
 from plexapi.audio import Artist, Album, Track
 from plexapi.exceptions import NotFound
 from plexapi.video import Movie, Show, Season, Episode
 from tmdbapis.tmdb import discover_movie_sort_options, discover_tv_sort_options
+
+from modules import anidb, anilist, icheckmovies, imdb, letterboxd, mal, mojo, plex, radarr, reciperr, sonarr, tautulli, \
+    tmdb, trakt, tvdb, mdblist, util
+from modules.overlay import Overlay
+from modules.poster import KometaImage
+from modules.request import quote
+from modules.util import Failed, FilterFailed, NonExisting, NotScheduled, NotScheduledRange, Deleted
 
 logger = util.logger
 
