@@ -496,6 +496,7 @@ class Plex(Library):
         except:
             logger.error(f"Failed to connect to Emby server.")
             pass
+
         try:
             self.PlexServer = PlexServer(baseurl=self.url, token=self.token, session=self.session, timeout=self.timeout)
             plexapi.server.TIMEOUT = self.timeout
@@ -540,6 +541,7 @@ class Plex(Library):
             logger.info(f"Plex Error: Plex connection attempt returned 'ConnectionError' or 'ParseError'")
             logger.stacktrace()
             raise Failed("Plex Error: Plex URL is probably invalid")
+
         self.Plex = None
         library_names = []
         for s in self.PlexServer.library.sections():
@@ -642,6 +644,13 @@ class Plex(Library):
         logger.info(f"Agent: {self.agent}")
         logger.info(f"Scanner: {self.scanner}")
         logger.info(f"Ratings Source: {self.ratings_source}")
+
+    def _invalidate_metadata_caches(self, rating_key=None):
+        """Clear search/filter caches for a specific item after metadata mutations."""
+        if hasattr(self, "_search_choices_cache") and isinstance(self._search_choices_cache, dict):
+            self._search_choices_cache.clear()
+        if rating_key is not None and hasattr(self, "filter_items_cache") and isinstance(self.filter_items_cache, dict):
+            self.filter_items_cache.pop(rating_key, None)
 
     def notify(self, text, collection=None, critical=True):
         self.config.notify(text, server=self.PlexServer.friendlyName, library=self.name, collection=collection, critical=critical)
@@ -2319,6 +2328,7 @@ class Plex(Library):
                         for item in _items:
                             # Füge ein Label hinzu
                             self.EmbyServer.add_tags(item.ratingKey,[collection])
+                            self._invalidate_metadata_caches(item.ratingKey)
 
                                 # add_label(kometa_labels, item.ratingKey, collection)
                                 # save_labels_to_file(file_path_kometa, kometa_labels)
@@ -2329,6 +2339,7 @@ class Plex(Library):
                         for item in _items:
                             # Entferne ein Label (JSON-basiert)
                             self.EmbyServer.remove_tags(item.ratingKey, [collection])
+                            self._invalidate_metadata_caches(item.ratingKey)
                             # remove_label(kometa_labels, item.ratingKey, collection)
                             # save_labels_to_file(file_path_kometa, kometa_labels)
                         self.EmbyServer.add_remove_plex_object_from_collection(collection, _items, 'delete')
@@ -2336,14 +2347,18 @@ class Plex(Library):
 
                 # Traditionelle Sammlungen (BoxSets in Emby)
                 elif add:
-                    added = self.EmbyServer.add_to_collection(collection, [item.ratingKey for item in _items])
+                    rating_keys = [item.ratingKey for item in _items]
+                    added = self.EmbyServer.add_to_collection(collection, rating_keys)
                     # Sammlung erstellen oder Medien hinzufügen
                     if not added:
-                        self.EmbyServer.create_collection(collection, [item.ratingKey for item in _items], locked=locked, parent_id= self.Emby.get("Id"))
+                        self.EmbyServer.create_collection(collection, rating_keys, locked=locked, parent_id= self.Emby.get("Id"))
+                    for rating_key in rating_keys:
+                        self._invalidate_metadata_caches(rating_key)
                 else:
                     # Tags entfernen und Sammlung löschen
                     for item in _items:
                         self.EmbyServer.remove_tags(item.ratingKey, [collection])
+                        self._invalidate_metadata_caches(item.ratingKey)
                     # self.EmbyServer.remove_boxset(collection, collection_id)
                     self.EmbyServer.add_remove_plex_object_from_collection(collection, items, 'delete')
 
@@ -2808,8 +2823,7 @@ class Plex(Library):
                     self.EmbyServer.set_genres(obj.ratingKey, final_tags)
                 else:
                     raise WARNING(f"edit_tags: I won't edit {attr} with {final_tags}")
-                if hasattr(self, "_search_choices_cache") and isinstance(self._search_choices_cache, dict):
-                    self._search_choices_cache.clear()
+                self._invalidate_metadata_caches(getattr(obj, "ratingKey", None))
 
             if _add:
                 display += f"+{', +'.join(_add)}"
