@@ -1,24 +1,24 @@
-import os, plexapi, re, time, random
+import os
+import plexapi
+import random
+import re
+import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import unquote
+from xml.etree.ElementTree import ParseError
+
 import requests
-from modules import builder, util
-from modules.library import Library
-from modules.poster import ImageData
-from modules.request import parse_qs, quote_plus, urlparse
-from modules.util import Failed
 from PIL import Image
 from plexapi import utils
 from plexapi.audio import Artist, Track, Album
-from plexapi.exceptions import BadRequest, NotFound, Unauthorized
 from plexapi.collection import Collection
+from plexapi.exceptions import BadRequest, NotFound, Unauthorized
 from plexapi.library import Role, FilterChoice
 from plexapi.playlist import Playlist
 from plexapi.server import PlexServer
 from plexapi.video import Movie, Show, Season, Episode
 from requests.exceptions import ConnectionError, ConnectTimeout
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_not_exception_type
-from xml.etree.ElementTree import ParseError
 
 from modules import builder, util
 from modules.emby_server import EmbyServer, FilterChoiceEmby
@@ -737,7 +737,7 @@ class Plex(Library):
         return self.PlexServer.fetchItem(data)
 
     # modules/plex.py
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     def _to_aware_utc(self, dt: datetime | None) -> datetime | None:
         if dt is None:

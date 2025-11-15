@@ -2265,7 +2265,7 @@ class EmbyServer:
 
         return affected_count
 
-    def delete_collection(self, collection,is_id = False):
+    def delete_collection(self, collection: Collection, is_id: bool = False) -> None:
         if is_id:
             collection_id = collection
         else:
