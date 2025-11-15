@@ -519,6 +519,10 @@ class Plex(Library):
                     uc_str = f"Public update channel."
                 elif chl_num == "8":
                     uc_str = f"PlexPass update channel."
+
+    def _clear_search_choices_cache(self):
+        if hasattr(self, "_search_choices_cache") and isinstance(self._search_choices_cache, dict):
+            self._search_choices_cache.clear()
                 else:
                     uc_str = f"Unknown update channel: {chl_num}."
             except NotFound:
@@ -2344,6 +2348,8 @@ class Plex(Library):
                             # save_labels_to_file(file_path_kometa, kometa_labels)
                         self.EmbyServer.add_remove_plex_object_from_collection(collection, _items, 'delete')
 
+
+                    self._clear_search_choices_cache()
 
                 # Traditionelle Sammlungen (BoxSets in Emby)
                 elif add:
