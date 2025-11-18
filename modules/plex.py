@@ -3182,10 +3182,11 @@ class Plex(Library):
                 emby_item = self.EmbyServer.get_item(item.ratingKey)
                 emby_images = emby_item.get("ImageTags")
                 emby_poster_compare = emby_images.get("Primary") if emby_images else None
+                poster_key = f"{poster.compare}-{emby_poster_compare}" if emby_poster_compare else poster.compare
                 image_compare = None
                 if self.config.Cache:
                     _, image_compare, _ = self.config.Cache.query_image_map(item.ratingKey, self.image_table_name)
-                if not image_compare or str(f"{poster.compare}-{emby_poster_compare}") != str(image_compare):
+                if not image_compare or not emby_poster_compare or str(poster_key) != str(image_compare):
                     if overlay:
                         # self.reload(item, force=True)
                         if overlay and "Overlay" in [la.tag for la in self.item_labels(item)]:
@@ -3234,8 +3235,9 @@ class Plex(Library):
                 emby_item = self.EmbyServer.get_item(item.ratingKey, force_refresh=True)
                 emby_images = emby_item.get("ImageTags")
                 emby_poster_compare = emby_images.get("Primary") if emby_images else None
+                poster_key = f"{poster.compare}-{emby_poster_compare}" if emby_poster_compare else poster.compare
 
-                self.config.Cache.update_image_map(item.ratingKey, self.image_table_name, "", f"{poster.compare}-{emby_poster_compare}" if poster else "")
+                self.config.Cache.update_image_map(item.ratingKey, self.image_table_name, "", poster_key if poster else "")
             if background_uploaded:
                 self.config.Cache.update_image_map(item.ratingKey, f"{self.image_table_name}_backgrounds", "", background.compare)
             if logo_uploaded:
