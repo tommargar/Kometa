@@ -88,20 +88,25 @@ class Overlays:
 
             total_keys = len(key_to_overlays)
             for i, (over_key, (item, over_names)) in enumerate(sorted(key_to_overlays.items(), key=lambda io: self.library.get_item_display_title(io[1][0], sort=True)), 1):
-                # item_title = self.library.get_item_display_title(item)
-                # emby_item = self.library.EmbyServer.get_item(item.ratingKey)
-                # emby_images = self.library.EmbyServer.get_item_images(item.ratingKey)
-                # emby_poster = None
-                # emby_thumb = None
-                # if emby_images:
-                #     for image in emby_images:
-                #         match image.get('ImageType', None):
-                #             case 'Primary':
-                #                 emby_poster = image
-                #             case 'Thumb':
-                #                 emby_thumb = image
+                emby_server = getattr(self.library, "EmbyServer", None)
+                if emby_server and getattr(item, "ratingKey", None):
+                    item_id = getattr(item, "ratingKey", None)
+                    try:
+                        item_id_int = int(item_id)
+                    except (TypeError, ValueError):
+                        item_id_int = None
 
-                # item_title = emby_item.get("Name",'')
+                    force_refresh = bool(self.library.overlay_refresh_emby_items)
+                    perform_refresh = force_refresh or (item_id_int is not None and item_id_int in emby_server.dirty_items)
+
+                    if perform_refresh:
+                        refreshed_data = emby_server.get_item(item_id, force_refresh=force_refresh or item_id_int in emby_server.dirty_items)
+                        if refreshed_data:
+                            refreshed_items = emby_server.convert_emby_to_plex([refreshed_data])
+                            if refreshed_items:
+                                item = refreshed_items[0]
+                                key_to_overlays[over_key] = (item, over_names)
+
                 item_title = self.library.get_item_display_title(item)
 
                 try:

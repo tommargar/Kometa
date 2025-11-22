@@ -534,6 +534,7 @@ class ConfigFile:
             "custom_repo": check_for_attribute(self.data, "custom_repo", parent="settings", default_is_none=True),
             "overlay_artwork_filetype": check_for_attribute(self.data, "overlay_artwork_filetype", parent="settings", test_list=filetype_list, translations={"webp": "webp_lossy"}, default="webp_lossy"),
             "overlay_artwork_quality": check_for_attribute(self.data, "overlay_artwork_quality", parent="settings", var_type="int", default=90, int_min=1, int_max=100),
+            "overlay_refresh_emby_items": check_for_attribute(self.data, "overlay_refresh_emby_items", parent="settings", var_type="bool", default=False),
             "assets_for_all": check_for_attribute(self.data, "assets_for_all", parent="settings", var_type="bool", default=False, save=False, do_print=False),
             "assets_for_all_collections": check_for_attribute(self.data, "assets_for_all_collections", parent="settings", var_type="bool", default=False, save=False, do_print=False)
         }
@@ -949,6 +950,7 @@ class ConfigFile:
                 params["ignore_imdb_ids"].extend([i for i in self.general["ignore_imdb_ids"] if i not in params["ignore_imdb_ids"]])
                 params["overlay_artwork_filetype"] = check_for_attribute(lib, "overlay_artwork_filetype", parent="settings", test_list=filetype_list, translations={"webp": "webp_lossy"}, default=self.general["overlay_artwork_filetype"], do_print=False, save=False)
                 params["overlay_artwork_quality"] = check_for_attribute(lib, "overlay_artwork_quality", parent="settings", var_type="int", default=self.general["overlay_artwork_quality"], default_is_none=True, int_min=1, int_max=100, do_print=False, save=False)
+                params["overlay_refresh_emby_items"] = check_for_attribute(lib, "overlay_refresh_emby_items", parent="settings", var_type="bool", default=self.general["overlay_refresh_emby_items"], do_print=False, save=False)
                 params["changes_webhooks"] = check_for_attribute(lib, "changes", parent="webhooks", var_type="list", default=self.webhooks["changes"], do_print=False, save=False, default_is_none=True)
                 params["report_path"] = None
                 if lib and "report_path" in lib and lib["report_path"]:

@@ -93,6 +93,7 @@ class Library(ABC):
         self.ignore_imdb_ids = params["ignore_imdb_ids"]
         self.overlay_artwork_quality = params["overlay_artwork_quality"]
         self.overlay_artwork_filetype = params["overlay_artwork_filetype"]
+        self.overlay_refresh_emby_items = params.get("overlay_refresh_emby_items")
         self.assets_for_all = params["assets_for_all"]
         self.assets_for_all_collections = params["assets_for_all_collections"]
         self.delete_collections = params["delete_collections"]

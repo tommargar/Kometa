@@ -211,13 +211,14 @@ class EmbyServer:
 
     def __init__(self, server_url, user_id, api_key, config, library_name = None):
 
-        # ToDo: Merge the cache
         self._person_already_demoted = []
         self._items_cache: dict[str, dict] = {}
         self._items_cache_fields: dict[str, set[str]] = {}
         self._items_cache_ts: dict[str, float] = {}
         # anpassbar von außen: self.items_cache_ttl = 0 deaktiviert das Altern (immer frisch)
         self.items_cache_ttl: int = 300
+        # Unified single-item cache reference (legacy compatibility: item_cache == _items_cache)
+        self.item_cache: dict[str, dict] = self._items_cache
         # Cache for person lookup results keyed by normalized name
         self.cached_person_names: dict[str, list[dict]] = {}
         self._person_name_cache = {}
@@ -234,8 +235,7 @@ class EmbyServer:
         self.people_cache = {}
         self._image_hash_cache = {}
         self.people_lib_cache = {}
-        self.item_cache: dict[int, dict] = {}
-        self.dirty_items: set[int] = set()   # statt Liste        self.people_lib_cache = {}
+        self.dirty_items: set[int] = set()
         self.emby_genres = None
         self.cached_plex_objects = {}
         self.all_tags = None
@@ -1414,6 +1414,15 @@ class EmbyServer:
         response.raise_for_status()
         return response.json()
 
+    def _purge_cached_item(self, item_id: str | int) -> None:
+        """Remove a single item from all local caches (data + object)."""
+
+        item_id_str = str(item_id)
+        self._items_cache.pop(item_id_str, None)
+        self._items_cache_fields.pop(item_id_str, None)
+        self._items_cache_ts.pop(item_id_str, None)
+        self.cached_plex_objects.pop(item_id_str, None)
+
     def invalidate_item(self, item_id: int | str) -> None:
         """Von außen aufrufen, wenn du ein Item (z.B. Genres) geändert hast."""
 
@@ -1426,14 +1435,7 @@ class EmbyServer:
 
         if item_id_int is not None:
             self.dirty_items.add(item_id_int)
-            self.item_cache.pop(item_id_int, None)
-        # Manche Call-Sites benutzen evtl. str-Ids im item_cache.
-        self.item_cache.pop(item_id_str, None)
-
-        # Auch den Bulk-Cache für diese ID leeren.
-        self._items_cache.pop(item_id_str, None)
-        self._items_cache_fields.pop(item_id_str, None)
-        self._items_cache_ts.pop(item_id_str, None)
+        self._purge_cached_item(item_id_str)
 
     def _resolve_item_id(self, plex_object) -> int:
         # ratingKey auf Plex-Objekten
@@ -1449,28 +1451,25 @@ class EmbyServer:
         # Korrekt: echten Exception-Typ werfen, NICHT WARNING (logging-level int)
         raise Failed(f"Cannot resolve Emby item id from type={type(plex_object).__name__}: {plex_object!r}")
 
-    # ToDo: Merge with fetch_item, also merge item cache
-    def get_item(self, item_id: int | str, *, force_refresh: bool = False) -> dict | None:
+    def get_item(self, item_id: int | str, *, force_refresh: bool = False, fields: list[str] | None = None) -> dict | None:
+        item_id_str = str(item_id)
         try:
-            item_id = int(item_id)
-        except: # will be triggered if item doesnt exist yet
-            return None
+            item_id_int = int(item_id_str)
+        except (TypeError, ValueError):
+            item_id_int = None
 
-        if not force_refresh and item_id in self.item_cache and item_id not in self.dirty_items:
-            return self.item_cache[item_id]
+        if force_refresh and item_id_int is not None:
+            self.dirty_items.add(item_id_int)
 
-        endpoint = f"/emby/users/{self.user_id}/Items/{item_id}?api_key={self.api_key}"
-        url = self.emby_server_url + endpoint
-        try:
-            resp = requests.get(url, headers=self.headers)
-            resp.raise_for_status()
-            data = resp.json()
-            self.item_cache[item_id] = data
-            self.dirty_items.discard(item_id)  # wieder „sauber“
-            return data
-        except Exception as e:
-            logger.ghost(f"Error occurred while getting item: {e}. URL: {url}.")
-            return None
+        items = self.get_items_bulk([item_id_str], fields=fields, force_refresh=force_refresh) or {}
+        item = items.get(item_id_str)
+        if item is None and item_id_int is not None:
+            item = items.get(str(item_id_int))
+
+        if item is not None and item_id_int is not None:
+            self.dirty_items.discard(item_id_int)
+
+        return item
 
     def get_item_images(self, item_id) -> dict:
         endpoint = f"/emby/Items/{item_id}/Images?api_key={self.api_key}"
@@ -1895,8 +1894,17 @@ class EmbyServer:
             if item is None:
                 logger.info("Item is None")
                 continue
-            if item.get("Id") in self.cached_plex_objects:
-                plex_object = self.cached_plex_objects[item.get("Id")]
+            item_id = item.get("Id")
+            try:
+                item_id_int = int(item_id) if item_id is not None else None
+            except (TypeError, ValueError):
+                item_id_int = None
+
+            if item_id_int is not None and item_id_int in self.dirty_items:
+                self.cached_plex_objects.pop(str(item_id), None)
+
+            if item_id in self.cached_plex_objects:
+                plex_object = self.cached_plex_objects[item_id]
             else:
 
                 # if isinstance(item, str):
@@ -3965,7 +3973,7 @@ class EmbyServer:
 
     # ==== Bulk-Fetch: /emby/Items?Ids=...&Fields=... ====
     # ==== Bulk-Fetch: /emby/Items?Ids=...&Fields=... ====
-    def get_items_bulk(self, ids: list[str], fields: list[str] | None = None) -> dict[str, dict]:
+    def get_items_bulk(self, ids: list[str], fields: list[str] | None = None, *, force_refresh: bool = False) -> dict[str, dict]:
         """
         Holt Emby-Items in Batches (Ids=...), gibt dict[id] -> item zurück.
         Nutzt einen lokalen Cache, lädt nur fehlende/abgelaufene/unvollständige Einträge nach.
@@ -4010,15 +4018,17 @@ class EmbyServer:
             cached_fields = self._items_cache_fields.get(id_, set())
             ts = self._items_cache_ts.get(id_, 0.0)
 
-            if (
-                cached_item
-                and (id_int is None or id_int not in self.dirty_items)
-                and is_fresh(ts)
-                and req_fields_set.issubset(cached_fields)
-            ):
-                out[id_] = cached_item
-            else:
+            needs_refresh = force_refresh
+            if not needs_refresh:
+                needs_refresh = not cached_item or not is_fresh(ts)
+                needs_refresh = needs_refresh or (id_int is not None and id_int in self.dirty_items)
+                needs_refresh = needs_refresh or not req_fields_set.issubset(cached_fields)
+
+            if needs_refresh:
                 to_fetch.append(id_)
+                self._purge_cached_item(id_)
+            else:
+                out[id_] = cached_item
 
         # 2) Fehlende/nicht vollständige Items in Batches nachladen
         if to_fetch:
