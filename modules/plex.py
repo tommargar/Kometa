@@ -669,9 +669,6 @@ class Plex(Library):
     # not needed, refer to fetchItems
     def get_all_collections(self, label=None):
 
-        lib_id = self.Emby.get("Id")
-        return self.EmbyServer.get_boxsets_from_library(library_id = lib_id, label=label, native=True)
-
         args = "?type=18"
         if label:
             label_id = next((c.key for c in self.get_tags("label") if c.title == label), None) # noqa
@@ -1655,21 +1652,7 @@ class Plex(Library):
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type((BadRequest, NotFound, Unauthorized)))
     def item_labels(self, item):
         try:
-            # Prüfe, ob das Plex/Emby-Objekt ein `ratingKey` hat
-            rating_key = getattr(item, "ratingKey", None)
-            if not rating_key:
-                raise Failed(f"Item: {getattr(item, 'title', 'Unknown')} does not have a valid ratingKey.")
-
-            # Hole die Labels/Tags vom Emby-Server
-            tags = self.EmbyServer.get_emby_item_tags(item, self.Emby.get("Id"))
-
-            # Wrappe jeden Tag in ein Objekt mit Attribut .tag
-            class Label:
-                def __init__(self, tag):
-                    self.tag = tag
-
-            return [Label(t) for t in tags]
-
+            return item.labels
         except BadRequest:
             raise Failed(f"Item: {item.title} Labels failed to load")
 
@@ -2481,33 +2464,16 @@ class Plex(Library):
         elif isinstance(data, int) and not force_search:
             return self.fetchItem(data)
         else:
-            lib_id = self.Emby.get("Id")
-            # my_cols = self.EmbyServer.get_boxsets_from_library(str(data), library_id=lib_id )
-            # my_col = self.EmbyServer.get_boxsets_from_library(str(data))
-            col_id= self.EmbyServer.get_collection_id(str(data))
-            if col_id:
-                emby_col = self.EmbyServer.get_item(col_id)
-                return self.EmbyServer.convert_emby_to_plex([emby_col])[0]
-
-            # Rest fails
-            raise Failed(f"Emby Error: Collection {data} not found")
-            if col_id:
-                my_cols = self.EmbyServer.get_boxset_by_title(str(data))
-            # print(my_cols)
-            if len(my_cols) > 0:
-                return  my_cols[0]
-
+            cols = self.search(title=str(data), libtype="collection")
+            for d in cols:
+                if d.title == data:
+                    return d
             if debug:
                 logger.debug("")
-                for d in my_cols:
+                for d in cols:
                     logger.debug(f"Found: {d.title}")
                 logger.debug(f"Looking for: {data}")
-
-            # return empty list
-            # return None
-            raise Failed(f"Emby Error: Collection {data} not found")
-
-
+        raise Failed(f"Plex Error: Collection {data} not found")
 
     def validate_collections(self, collections):
         valid_collections = []

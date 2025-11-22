@@ -1230,7 +1230,7 @@ class Operations:
             all_collections = self.library.get_all_collections()
             for i, col in enumerate(all_collections, 1):
                 logger.ghost(f"Reading Collection: {i}/{len(all_collections)} {col.title}")
-                col = self.library.reload(col, force=True) # no reload with Emby
+                col = self.library.reload(col, force=True)
                 labels = [la.tag for la in self.library.item_labels(col)]
 
                 if should_be_deleted(col, labels, configured, managed, None if col.smart and ignore_smart else less):

@@ -348,6 +348,7 @@ class Library(ABC):
 
     @abstractmethod
     def reload(self, item, force=False):
+        return item
         pass
 
     @abstractmethod

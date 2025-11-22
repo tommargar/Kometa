@@ -587,7 +587,12 @@ class CollectionBuilder:
 
         self.asset_directory = metadata.asset_directory if metadata.asset_directory else self.library.asset_directory
 
-        self.language = self.library.Plex.language
+        self.language = None
+        try:
+             self.language = self.library.Plex.language
+        except:
+             self.language = "en" # todo emby language
+
         self.details = {
             "show_filtered": self.library.show_filtered,
             "show_unfiltered": self.library.show_unfiltered,
@@ -4093,6 +4098,7 @@ class CollectionBuilder:
                 logger.info(f"Backdrop updated: {self.collection_background.location}")
                 updated_details.append("Image")
             else:
+                # pass
                 logger.warning(f"Failed to update Backdrop: {response.text}")
 
         return updated_details
