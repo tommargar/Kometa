@@ -19,6 +19,7 @@ from modules.gotify import Gotify
 from modules.ntfy import Ntfy
 from modules.omdb import OMDb
 from modules.overlays import Overlays
+from modules.jellyfin import Jellyfin
 from modules.plex import Plex
 from modules.radarr import Radarr
 from modules.sonarr import Sonarr
@@ -1283,24 +1284,13 @@ class ConfigFile:
                         params["plex"]["token"] = self.env_plex_token
 
 
-                    library = Plex(self, params)
-                    # ToDo - Develop, document
-                    emby_library = Emby(self, params)
-                    if self.data["settings"] and 'server_type' in self.data["settings"]:
-                        the_type = self.data.get("settings").get("server_type")
-                        match the_type:
-                            case "emby":
-                                # library = Emby(self, params)
-                                pass
-                            case "jellyfin":
-                                # library = Jellyfin(self, params)
-                                pass
-                            case default:
-                                # library = Plex(self, params)
-                                pass
-
-
-                        pass
+                    server_type = str(self.data.get("settings", {}).get("server_type", "plex")).lower() if self.data else "plex"
+                    if server_type == "emby":
+                        library = Emby(self, params)
+                    elif server_type == "jellyfin":
+                        library = Jellyfin(self, params)
+                    else:
+                        library = Plex(self, params)
 
                     logger.info("")
                     logger.info(f"{display_name} Library Connection Successful")
