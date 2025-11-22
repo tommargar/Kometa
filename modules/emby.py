@@ -599,6 +599,74 @@ class Emby(Library):
         logger.info(f"Connected to library {params['name']}")
         logger.info(f"Type: {self.type}")
         logger.info(f"Ratings Source: {self.ratings_source}")
+
+    # Backend-agnostic helpers
+    def get_seasons(self, show):
+        if hasattr(show, "seasons"):
+            return list(show.seasons)
+        return []
+
+    def get_episodes(self, season):
+        if hasattr(season, "episodes"):
+            return list(season.episodes)
+        return []
+
+    def load_from_cache(self, rating_key):
+        if rating_key in self.cached_items:
+            item, _ = self.cached_items[rating_key]
+            return item
+
+    def load_list_from_cache(self, rating_keys):
+        item_list = []
+        for rating_key in rating_keys:
+            item = self.load_from_cache(rating_key)
+            if item:
+                item_list.append(item)
+        return item_list
+
+    def get_ratings(self, item):
+        return {}
+
+    def apply_batch_operations(self, *, label_edits, genre_edits, rating_edits,
+                               content_edits, studio_edits, date_edits, remove_edits,
+                               reset_edits, lock_edits, unlock_edits, ep_rating_edits,
+                               ep_remove_edits, ep_reset_edits, ep_lock_edits,
+                               ep_unlock_edits, name_display):
+
+        def log_batch(display_attr, total_count, display_value=None, out_type=None, tag_type=None, is_episode=False):
+            logger.info(
+                f"Batch {name_display.get(display_attr, display_attr.capitalize())} Update: "
+                f"{f'{out_type.capitalize()} ' if out_type else ''}"
+                f"{f'Adding {display_value} to ' if tag_type == 'add' else f'Removing {display_value} from ' if tag_type == 'remove' else ''}"
+                f"{total_count} {'Episode' if is_episode else 'Movie' if self.is_movie else 'Show'}"
+                f"{'s' if total_count != 1 else ''}"
+                f"{'' if out_type or tag_type else f' updated to {display_value}'}"
+            )
+
+        for i, (new_rating, rating_keys) in enumerate(sorted(content_edits.items()), 1):
+            log_batch("contentRating", len(rating_keys), display_value=new_rating)
+            self.EmbyServer.multiEditField(self.load_list_from_cache(rating_keys), "contentRating", new_rating)
+
+        for i, (new_studio, rating_keys) in enumerate(sorted(studio_edits.items()), 1):
+            log_batch("studio", len(rating_keys), display_value=new_studio)
+            self.EmbyServer.multiEditField(self.load_list_from_cache(rating_keys), "studio", new_studio)
+
+        for i, (new_date, rating_keys) in enumerate(sorted(date_edits["originallyAvailableAt"].items()), 1):
+            log_batch("originallyAvailableAt", len(rating_keys), display_value=new_date)
+            self.EmbyServer.multiEditField(self.load_list_from_cache(rating_keys), "originallyAvailableAt", new_date)
+
+        for i, (new_date, rating_keys) in enumerate(sorted(date_edits["addedAt"].items()), 1):
+            log_batch("addedAt", len(rating_keys), display_value=new_date)
+            self.EmbyServer.multiEditField(self.load_list_from_cache(rating_keys), "addedAt", new_date)
+
+        if any([label_edits, genre_edits, rating_edits, remove_edits, reset_edits, lock_edits, unlock_edits, ep_rating_edits, ep_remove_edits, ep_reset_edits, ep_lock_edits, ep_unlock_edits]):
+            logger.debug("Some batch operations are not yet supported for Emby backends.")
+
+    def needs_collection_mode_update(self, collection, mode):
+        return False
+
+    def item_has_year(self, item):
+        return hasattr(item, "year") and item.year is not None
 # ToDo - Untested, develop; use this with db cache instead of set_image_smart
     def _upload_image(self, item, image):
         upload_success = True

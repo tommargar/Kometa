@@ -383,12 +383,40 @@ class Library(ABC):
     @abstractmethod
     def get_all(self, builder_level=None, load=False):
         pass
+
+    @abstractmethod
+    def get_seasons(self, show):
+        pass
+
+    @abstractmethod
+    def get_episodes(self, season):
+        pass
     @abstractmethod
     def get_native_emby_item(self, emby_item_id):
         pass
 
     @abstractmethod
     def get_all_native(self, builder_level=None, load=False):
+        pass
+
+    @abstractmethod
+    def get_ratings(self, item):
+        pass
+
+    @abstractmethod
+    def apply_batch_operations(self, *, label_edits, genre_edits, rating_edits,
+                               content_edits, studio_edits, date_edits, remove_edits,
+                               reset_edits, lock_edits, unlock_edits, ep_rating_edits,
+                               ep_remove_edits, ep_reset_edits, ep_lock_edits,
+                               ep_unlock_edits, name_display):
+        pass
+
+    @abstractmethod
+    def needs_collection_mode_update(self, collection, mode):
+        pass
+
+    @abstractmethod
+    def item_has_year(self, item):
         pass
 
     def add_additions(self, collection, items, is_movie):
