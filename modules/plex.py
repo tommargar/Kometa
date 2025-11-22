@@ -520,12 +520,6 @@ class Plex(Library):
                     uc_str = f"Public update channel."
                 elif chl_num == "8":
                     uc_str = f"PlexPass update channel."
-
-    def _clear_search_choices_cache(self):
-        if hasattr(self, "_search_choices_cache") and isinstance(self._search_choices_cache, dict):
-            self._search_choices_cache.clear()
-                else:
-                    uc_str = f"Unknown update channel: {chl_num}."
             except NotFound:
                 uc_str = f"Unknown update channel."
             logger.info(f"PlexPass: {self.PlexServer.myPlexSubscription} on {uc_str}")
@@ -649,6 +643,8 @@ class Plex(Library):
         logger.info(f"Agent: {self.agent}")
         logger.info(f"Scanner: {self.scanner}")
         logger.info(f"Ratings Source: {self.ratings_source}")
+
+
 
     def _invalidate_metadata_caches(self, rating_key=None):
         """Clear search/filter caches for a specific item after metadata mutations."""
@@ -1527,105 +1523,6 @@ class Plex(Library):
         return self.EmbyServer.get_provider_ids(item)
 
 
-    def emby_get_all(self, builder_level=None, load=False, native = False):
-        """
-        Retrieves all items from the library, optionally filtering by builder_level.
-
-        Parameters:
-            builder_level (str): The level to build (e.g., 'movie', 'show', 'artist').
-            load (bool): Whether to reload the items.
-
-        Returns:
-            list: A list of all items.
-        """
-        # print(builder_level)
-        # if not native and load and builder_level in [None, "show", "artist", "movie"]:
-        #     self._emby_all_items = []
-        #     self._emby_all_items_native = []
-        if not native and self._emby_all_items and builder_level in [None, "show", "artist", "movie"]:
-            return self._emby_all_items
-        if native and self._emby_all_items_native and builder_level in [None, "show", "artist", "movie"]:
-            return self._emby_all_items_native
-
-        # builder_type = builder_level.lower() if builder_level else self.Plex.TYPE
-
-        builder_type = builder_level.lower() if builder_level else self.type.lower()
-        if not builder_level:
-            builder_level = self.type.lower()
-
-        logger.info(f"Loading All {builder_level.capitalize()}s from Library: {self.Emby.get('Name')}")
-
-        items = []
-        start_index = 0
-        limit = 250
-        total_record_count = 1
-        include_item_types = []
-        # print(builder_type)
-        # Bestimmung der Typen für die Abfrage
-        # ToDo: Add more builder_types
-        if builder_type == "movie":
-            include_item_types = ["Movie"]
-        elif builder_type == "show":
-            include_item_types = ["Series"]
-        elif builder_type == "season":
-            include_item_types = ["Season"]
-        elif builder_type == "artist":
-            include_item_types = ["MusicArtist"]
-        else:
-            logger.warning(f"builder type not supported by 'emby_get_all' - {builder_type}")
-            include_item_types = ["Movie", "Series", "MusicArtist"]
-        items_data =[]
-        while start_index < total_record_count:
-            # Abfrage der Hauptdaten
-            params = {
-                "Recursive": "true",
-                "IncludeItemTypes": ",".join(include_item_types),
-                "StartIndex": start_index,
-                "Limit": limit,
-                "ParentId": self.Emby.get("Id"),
-                "Fields": "Budget,Chapters,DateCreated,Genres,HomePageUrl,IndexOptions,MediaStreams,Overview,ParentId,Path,People,ProductionYear,PremiereDate,ProviderIds,PrimaryImageAspectRatio,Revenue,SortName,Studios,Taglines,CriticRating,CommunityRating,OfficialRating,Tags,TagItems",
-            }
-
-            endpoint = f"{self.emby_server_url}/emby/Users/{self.emby_user_id}/Items"
-            response = requests.get(endpoint, headers=self.EmbyServer.headers, params=params)
-            # response = self.session.get(endpoint, headers=self.EmbyServer.headers, params=params)
-            response.raise_for_status()
-            data = response.json()
-
-
-            # print(data)
-
-            # Gesamtdatensätze und Fortschritt verfolgen
-            items_data += data.get("Items", [])
-            total_record_count = data.get("TotalRecordCount", 0)
-            start_index += limit
-            logger.ghost(
-                f"Loaded: {start_index if start_index < total_record_count else total_record_count}/{total_record_count}")
-
-        self.EmbyServer.cache_filenames(items_data)
-
-        logger.info(f"Loaded {len(items_data)} {builder_level.capitalize()}s from Emby")
-        self._emby_all_items_native = items_data
-        if native:
-            # for item in items_data:
-            #     for people in item.get("People", []):
-            #         params = {
-            #             "Recursive": "true",
-            #             "IncludeItemTypes": "People",
-            #             "Ids": people.get('Id'),
-            #             "Fields": "ProviderIds",
-            #         }
-            #         response = self.session.get(endpoint, headers=self.emby_headers, params=params)
-            #         prov_ids = response.json().get('Items', [])[0].get('ProviderIds')
-            #         if prov_ids:
-            #             tmdb_id = prov_ids.get('Tmdb', None)
-            #             if tmdb_id:
-            #                 people['tmdb_id'] = tmdb_id
-            return items_data
-        plex_items= self.EmbyServer.convert_emby_to_plex(items_data)
-        # if builder_level in [None, "show", "artist", "movie"]:
-        self._emby_all_items = plex_items
-        return plex_items
 
     def get_all_native(self, builder_level=None, load = False):
         return self.emby_get_all(builder_level, load, native=True)
@@ -2361,9 +2258,6 @@ class Plex(Library):
                             # remove_label(kometa_labels, item.ratingKey, collection)
                             # save_labels_to_file(file_path_kometa, kometa_labels)
                         self.EmbyServer.add_remove_plex_object_from_collection(collection, _items, 'delete')
-
-
-                    self._clear_search_choices_cache()
 
                 # Traditionelle Sammlungen (BoxSets in Emby)
                 elif add:

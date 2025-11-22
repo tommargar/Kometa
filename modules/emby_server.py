@@ -602,7 +602,7 @@ class EmbyServer:
         if not self.library_id:
             return
         if self.file_names is None:
-            endpoint = f"{self.emby_server_url}/emby/Items"
+            endpoint = f"{self.url}/emby/Items"
             params = {
                 "Recursive": "true",
                 "IncludeItemTypes": "Movie,Series,Episodes",
@@ -740,7 +740,7 @@ class EmbyServer:
         return
 
         # sort order not settable in Emby other than item sort name
-        emby_url_name = f"{self.emby_server_url}/emby/Users/{self.user_id}/Items/{collection_id}?api_key={self.api_key}"
+        emby_url_name = f"{self.url}/emby/Users/{self.user_id}/Items/{collection_id}?api_key={self.api_key}"
         _name = requests.get(emby_url_name, headers=self.headers)
         response_name = requests.get(emby_url_name, headers=self.headers)
         response_name.raise_for_status()
@@ -1149,7 +1149,7 @@ class EmbyServer:
         # todo: nur die collections der library finden
         # 1. alle collections abfragen
         response = requests.get(
-            f"{self.emby_server_url}/Items?IncludeItemTypes=BoxSet&ParentId={library_id}&api_key={self.api_key}"
+            f"{self.url}/Items?IncludeItemTypes=BoxSet&ParentId={library_id}&api_key={self.api_key}"
         )
         collections_with_items = []
         collection_items = response.json().get("Items", [])
@@ -1185,7 +1185,7 @@ class EmbyServer:
 
         # Schritt 3: Alle Items in der Bibliothek abrufen
         response = requests.get(
-            f"{self.emby_server_url}/Items?ParentId={library_id}&IncludeItemTypes=BoxSet&Recursive=True&s&api_key={self.api_key}"
+            f"{self.url}/Items?ParentId={library_id}&IncludeItemTypes=BoxSet&Recursive=True&s&api_key={self.api_key}"
         )
 
         if response.status_code != 200:

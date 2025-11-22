@@ -131,7 +131,7 @@ class Library(ABC):
         self.status = {}
         self.plex_bulk_edit_batch_size = params["plex_bulk_edit_batch_size"]
         self.EmbyServer=None
-        self.emby_server_url = None
+        self.url = None
         self.items_library_operation = True if self.assets_for_all or self.mass_genre_update or self.remove_title_parentheses \
                                                or self.mass_audience_rating_update or self.mass_critic_rating_update or self.mass_user_rating_update \
                                                or self.mass_episode_audience_rating_update or self.mass_episode_critic_rating_update or self.mass_episode_user_rating_update \
@@ -502,7 +502,7 @@ class Library(ABC):
                 if isinstance(item, tuple):
                     item_type, check_id = self.config.Convert.scan_guid(guid)
                     id_type, main_id, imdb_id, _ = self.config.Convert.ids_from_cache(key, guid, item_type, check_id, self)
-                else:
+                else: # Emby
                     mydata = self.get_provider_ids(item)
                     id_type, main_id, imdb_id = self.config.Convert.get_id(item, self, mydata)
                 if main_id:

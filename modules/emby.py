@@ -1,29 +1,16 @@
-import os
-import re
 import time
 from datetime import datetime, timedelta
 # from importlib.metadata import pass_none
-from urllib.parse import unquote
 from xml.etree.ElementTree import ParseError
 
 import requests
-from PIL import Image
-from plexapi import utils
-from plexapi.audio import Artist, Track, Album
-from plexapi.collection import Collection
-from plexapi.exceptions import BadRequest, NotFound, Unauthorized
-from plexapi.library import Role, FilterChoice
-from plexapi.playlist import Playlist
-from plexapi.video import Movie, Show, Season, Episode
+from plexapi.exceptions import BadRequest, Unauthorized
 from requests.exceptions import ConnectionError, ConnectTimeout
-from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_not_exception_type
 
-from modules import builder, util
-from modules.emby_server import EmbyServer, FilterChoiceEmby
+from modules import util
+from modules.emby_server import EmbyServer
 from modules.library import Library
 from modules.logs import WARNING
-from modules.poster import ImageData
-from modules.request import parse_qs, quote_plus, urlparse
 from modules.util import Failed
 
 logger = util.logger
@@ -461,7 +448,12 @@ class Emby(Library):
 
         self.filter_items_cache = {}
         self.emby = params["emby"]
-        self.emby_server_url = self.emby["url"]
+        self.url = self.emby["url"]
+        # New and unused
+        self.clean_bundles = params["emby"].get("clean_bundles", False)
+        self.empty_trash = params["emby"].get("empty_trash", False)
+        self.optimize = params["emby"].get("optimize", False)
+        # unused end
         self.session = self.config.Requests.session # init?
         if self.emby["verify_ssl"] is False and self.config.Requests.global_ssl is True:
             logger.debug("Overriding verify_ssl to False for Emby connection")
@@ -473,12 +465,12 @@ class Emby(Library):
         self.emby_user_id = self.emby["user_id"]
         self.overlay_destination_folder = self.emby["overlay_destination_folder"]
         self.timeout = self.emby["timeout"]
-        logger.secret(self.emby_server_url)
+        logger.secret(self.url)
         logger.secret(self.emby_api_key)
         logger.secret(self.emby_user_id)
         self.EmbyServer = None
         try:
-            self.EmbyServer = EmbyServer(self.emby_server_url, self.emby_user_id, self.emby_api_key,config, params["name"])
+            self.EmbyServer = EmbyServer(self.url, self.emby_user_id, self.emby_api_key, config, params["name"])
             # timeout not set - self.timeout
             logger.info(f"Connected to server {self.EmbyServer.friendlyName} version {self.EmbyServer.version}")
             logger.info(f"Running on {self.EmbyServer.platform} version {self.EmbyServer.platformVersion}")
@@ -790,17 +782,118 @@ class Emby(Library):
 
     def find_poster_url(self, item):
         pass
-    def get_all(self, builder_level=None, load=False):
-        pass
+
+    def get_all(self, builder_level=None, load=False, native = False):
+        """
+        Retrieves all items from the library, optionally filtering by builder_level.
+
+        Parameters:
+            builder_level (str): The level to build (e.g., 'movie', 'show', 'artist').
+            load (bool): Whether to reload the items.
+
+        Returns:
+            list: A list of all items.
+        """
+        # print(builder_level)
+        # if not native and load and builder_level in [None, "show", "artist", "movie"]:
+        #     self._emby_all_items = []
+        #     self._emby_all_items_native = []
+        if not native and self._emby_all_items and builder_level in [None, "show", "artist", "movie"]:
+            return self._emby_all_items
+        if native and self._emby_all_items_native and builder_level in [None, "show", "artist", "movie"]:
+            return self._emby_all_items_native
+
+        # builder_type = builder_level.lower() if builder_level else self.Plex.TYPE
+
+        builder_type = builder_level.lower() if builder_level else self.type.lower()
+        if not builder_level:
+            builder_level = self.type.lower()
+
+        logger.info(f"Loading All {builder_level.capitalize()}s from Library: {self.Emby.get('Name')}")
+
+        items = []
+        start_index = 0
+        limit = 250
+        total_record_count = 1
+        include_item_types = []
+        # print(builder_type)
+        # Bestimmung der Typen für die Abfrage
+        # ToDo: Add more builder_types
+        if builder_type == "movie":
+            include_item_types = ["Movie"]
+        elif builder_type == "show":
+            include_item_types = ["Series"]
+        elif builder_type == "season":
+            include_item_types = ["Season"]
+        elif builder_type == "artist":
+            include_item_types = ["MusicArtist"]
+        else:
+            logger.warning(f"builder type not supported by 'emby_get_all' - {builder_type}")
+            include_item_types = ["Movie", "Series", "MusicArtist"]
+        items_data =[]
+        while start_index < total_record_count:
+            # Abfrage der Hauptdaten
+            params = {
+                "Recursive": "true",
+                "IncludeItemTypes": ",".join(include_item_types),
+                "StartIndex": start_index,
+                "Limit": limit,
+                "ParentId": self.Emby.get("Id"),
+                "Fields": "Budget,Chapters,DateCreated,Genres,HomePageUrl,IndexOptions,MediaStreams,Overview,ParentId,Path,People,ProductionYear,PremiereDate,ProviderIds,PrimaryImageAspectRatio,Revenue,SortName,Studios,Taglines,CriticRating,CommunityRating,OfficialRating,Tags,TagItems",
+            }
+
+            endpoint = f"{self.url}/emby/Users/{self.emby_user_id}/Items"
+            response = requests.get(endpoint, headers=self.EmbyServer.headers, params=params)
+            # response = self.session.get(endpoint, headers=self.EmbyServer.headers, params=params)
+            response.raise_for_status()
+            data = response.json()
+
+
+            # print(data)
+
+            # Gesamtdatensätze und Fortschritt verfolgen
+            items_data += data.get("Items", [])
+            total_record_count = data.get("TotalRecordCount", 0)
+            start_index += limit
+            logger.ghost(
+                f"Loaded: {start_index if start_index < total_record_count else total_record_count}/{total_record_count}")
+
+        self.EmbyServer.cache_filenames(items_data)
+
+        logger.info(f"Loaded {len(items_data)} {builder_level.capitalize()}s from Emby")
+        self._emby_all_items_native = items_data
+        if native:
+            # for item in items_data:
+            #     for people in item.get("People", []):
+            #         params = {
+            #             "Recursive": "true",
+            #             "IncludeItemTypes": "People",
+            #             "Ids": people.get('Id'),
+            #             "Fields": "ProviderIds",
+            #         }
+            #         response = self.session.get(endpoint, headers=self.emby_headers, params=params)
+            #         prov_ids = response.json().get('Items', [])[0].get('ProviderIds')
+            #         if prov_ids:
+            #             tmdb_id = prov_ids.get('Tmdb', None)
+            #             if tmdb_id:
+            #                 people['tmdb_id'] = tmdb_id
+            return items_data
+        plex_items= self.EmbyServer.convert_emby_to_plex(items_data)
+        # if builder_level in [None, "show", "artist", "movie"]:
+        self._emby_all_items = plex_items
+        return plex_items
+
+
     def get_all_native(self, builder_level=None, load=False):
         # todo remove
         pass
     def get_native_emby_item(self, emby_item_id):
         # todo remove
         pass
+
     def get_provider_ids(self, item):
-        # used once, maybe remove
-        pass
+        return self.EmbyServer.get_provider_ids(item)
+
     def image_update(self, item, image, tmdb=None, title=None, poster=True):
         pass
     def item_labels(self, item):
