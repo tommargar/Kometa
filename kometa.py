@@ -783,7 +783,6 @@ def run_libraries(config):
                     library_status[library.name]["Library Metadata Files"] = str(datetime.now() - time_start).split('.')[0]
                 elif run_type == "operations" and runs[run_type] and not config.requested_files and library.library_operation:
                     library_status[library.name]["Library Operations"] = library.Operations.run_operations()
-                    library.refresh_item_cache()
                 elif run_type == "overlays" and runs[run_type] and (library.overlay_files or (library.remove_overlays and not config.requested_files)):
                     library_status[library.name]["Library Overlay Files"] = library.Overlays.run_overlays()
             #logger.remove_library_handler(library.mapping_name)

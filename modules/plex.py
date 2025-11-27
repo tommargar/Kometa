@@ -637,7 +637,6 @@ class Plex(Library):
         if not self.is_music and self.update_blank_track_titles:
             self.update_blank_track_titles = False
             logger.error(f"update_blank_track_titles library operation only works with music libraries")
-
         logger.info(f"Connected to library {params['name']}")
         logger.info(f"Type: {self.type}")
         logger.info(f"Agent: {self.agent}")
@@ -664,11 +663,8 @@ class Plex(Library):
     def set_server_preroll(self, preroll):
         self.PlexServer.settings.get('cinemaTrailersPrerollID').set(preroll)
         self.PlexServer.settings.save()
-        # pass
 
-    # not needed, refer to fetchItems
     def get_all_collections(self, label=None):
-
         args = "?type=18"
         if label:
             label_id = next((c.key for c in self.get_tags("label") if c.title == label), None) # noqa
@@ -676,33 +672,11 @@ class Plex(Library):
                 args = f"{args}&label={label_id}"
             else:
                 return []
-            # todo add label?
-
-
-
         return self.fetchItems(args)
 
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type((BadRequest, NotFound, Unauthorized)))
     def search(self, title=None, sort=None, maxresults=None, libtype=None, **kwargs):
-        # print(title)
-        if libtype == "collection":
-            lib_id = self.Emby.get("Id")
-
-            return self.EmbyServer.get_boxsets_from_library(title, library_id=lib_id)
-
-            # return self.EmbyServer.search(title=title, sort=sort, maxresults=maxresults, libtype=libtype, **kwargs)
-            pass
-        else:
-            pass
-            # print(f"EMBY style: {self.EmbyServer.search(title=title, sort=sort, maxresults=maxresults, libtype=libtype, **kwargs)}")
-            # print(f"plex_search:{title} - {sort} - {maxresults} - {libtype} - {kwargs}")
-            # print(self.EmbyServer.search(title=title, sort=sort, maxresults=maxresults, libtype=libtype, **kwargs))
-            # print(self.Plex.search(title=title, sort=sort, maxresults=maxresults, libtype=libtype, **kwargs))
-
-        # plex_search: IMDb Lowest Rated - None - None - collection - {}
-        # [ < Collection: 204155:IMDb - Lowest - Rated >]
-
-        return self.EmbyServer.search(title=title, sort=sort, maxresults=maxresults, libtype=libtype, **kwargs)
+        return self.Plex.search(title=title, sort=sort, maxresults=maxresults, libtype=libtype, **kwargs)
 
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type((BadRequest, NotFound, Unauthorized)))
     def exact_search(self, title, libtype=None, year=None):
@@ -711,36 +685,22 @@ class Plex(Library):
             terms["year"] = year
         return self.Plex.search(libtype=libtype, **terms)
 
-    def get_native_emby_item(self, emby_item_id):
-        return self.EmbyServer.get_item(emby_item_id)
-        pass
-
-
     def fetch_item(self, item):
         if isinstance(item, (Movie, Show, Season, Episode, Artist, Album, Track)):
-            return item
-            # return self.reload(item)
+            return self.reload(item)
         key = int(item)
         if key in self.cached_items:
-            # emby no reload
-            return self.cached_items[key][0]
-            # return self.reload(self.cached_items[key][0])
+            return self.reload(self.cached_items[key][0])
         try:
             current = self.fetchItem(key)
             if isinstance(current, (Movie, Show, Season, Episode, Artist, Album, Track)):
-                return current
-                # return self.reload(current)
+                return self.reload(current)
         except (BadRequest, NotFound) as e:
             logger.trace(e)
         raise Failed(f"Plex Error: Item {item} not found")
 
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type((BadRequest, NotFound, Unauthorized)))
     def fetchItem(self, data):
-        # print(f"fetchItem(self, data): {data}")
-        # print(f"fetchItem: {self.PlexServer.fetchItem(data)}")
-        # print("-------------")
-        item = self.EmbyServer.get_item(data)
-        return self.EmbyServer.convert_emby_to_plex([item])[0]
         return self.PlexServer.fetchItem(data)
 
     # modules/plex.py
@@ -753,783 +713,15 @@ class Plex(Library):
             return dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(timezone.utc)
 
-    def _parse_emby_datetime(self, value):
-        """Parse ISO timestamps from Emby and ALWAYS return UTC-aware datetimes (or None)."""
-        if not value:
-            return None
 
-        # Bereits datetime?
-        if isinstance(value, datetime):
-            return self._to_aware_utc(value)
-
-        s = str(value).strip()
-
-        # Emby nutzt häufig 'Z' -> UTC
-        if s.endswith("Z"):
-            s = s[:-1] + "+00:00"
-
-        # Emby liefert teils 7+ Nachkommastellen. Kürzen auf 6 (Python-Mikrosekunden).
-        try:
-            # Offset-Position finden (falls vorhanden)
-            off_idx = max(s.rfind("+"), s.rfind("-"))
-            time_part, offset = (s[:off_idx], s[off_idx:]) if off_idx > 10 else (s, "")
-            if "." in time_part:
-                base, frac = time_part.split(".", 1)
-                frac = "".join(c for c in frac if c.isdigit())
-                frac = (frac + "000000")[:6]
-                time_part = f"{base}.{frac}"
-            s_norm = f"{time_part}{offset}"
-
-            dt = datetime.fromisoformat(s_norm)
-            return self._to_aware_utc(dt)
-        except Exception:
-            # Fallbacks – liefern naiv, darum danach _to_aware_utc
-            for fmt in ("%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S"):
-                try:
-                    dt = datetime.strptime(s.replace("Z", ""), fmt)
-                    return self._to_aware_utc(dt)
-                except Exception:
-                    continue
-            return None
-
-    def _can_use_emby_cache(self, emby_query_params):
-        """Return True when the local cache can satisfy the requested filters."""
-        if not emby_query_params:
-            return False
-
-        if emby_query_params.get("Ids"):
-            return False
-
-        if "PersonIds" in emby_query_params:
-            include_types = emby_query_params.get("IncludeItemTypes", "")
-            if include_types:
-                include_person = any(
-                    t.strip().lower() == "person" for t in include_types.split(",") if t.strip()
-                )
-                if include_person:
-                    return False
-
-        supported_keys = {
-            "Recursive",
-            "Fields",
-            "IncludeItemTypes",
-            "ParentId",
-            "Years",
-            "Genres",
-            "Studios",
-            "Tags",
-            "OfficialRatings",
-            "MinCriticRating",
-            "MaxCriticRating",
-            "MinCommunityRating",
-            "MaxCommunityRating",
-            "MinCustomRating",
-            "MaxCustomRating",
-            "MinPremiereDate",
-            "MaxPremiereDate",
-            "Limit",
-            "SortBy",
-            "SortOrder",
-            "PersonIds",
-            "PersonTypes",
-        }
-
-        for key, value in emby_query_params.items():
-            if key.startswith("_"):
-                continue
-            if key not in supported_keys and value not in (None, ""):
-                return False
-
-        return True
-
-    def _filter_emby_native_items(self, items, query_params):
-        """Apply supported Emby filters to a list of cached native items."""
-        if items is None:
-            return None
-
-        filtered = list(items)
-
-        def get_year(item):
-            year = item.get("ProductionYear")
-            if isinstance(year, int):
-                return str(year)
-            if isinstance(year, str) and year.isdigit():
-                return year
-            premiere = item.get("PremiereDate")
-            premiere_date = self._parse_emby_datetime(premiere)
-            if premiere_date:
-                return str(premiere_date.year)
-            return None
-
-        def get_tags(item):
-            raw_tags = item.get("Tags") or []
-            if raw_tags:
-                return set(raw_tags)
-            tag_items = item.get("TagItems") or []
-            return {tag.get("Name") for tag in tag_items if tag.get("Name")}
-
-        def matches_person(item, person_ids, person_roles=None):
-            people = item.get("People")
-            if not isinstance(people, list):
-                return None
-            for person in people:
-                pid = person.get("Id")
-                if pid is not None and str(pid) in person_ids:
-                    if person_roles:
-                        person_type = person.get("Type")
-                        if isinstance(person_type, str) and person_type.lower() in person_roles:
-                            return True
-                    else:
-                        return True
-            return False
-
-        include_item_types = query_params.get("IncludeItemTypes")
-        if include_item_types:
-            allowed_types = {t.strip() for t in include_item_types.split(",") if t.strip()}
-            if allowed_types:
-                filtered = [item for item in filtered if item.get("Type") in allowed_types]
-
-        years_value = query_params.get("Years")
-        if years_value:
-            allowed_years = {y.strip() for y in years_value.split(",") if y.strip()}
-            if allowed_years:
-                hydrated_items = []
-                for item in filtered:
-                    item_year = get_year(item)
-                    if item_year is None:
-                        return None
-                    hydrated_items.append((item, item_year))
-                filtered = [item for item, item_year in hydrated_items if item_year in allowed_years]
-
-        min_premiere = self._parse_emby_datetime(query_params.get("MinPremiereDate"))
-        if min_premiere:
-            filtered = [
-                item
-                for item in filtered
-                if (premiere := self._parse_emby_datetime(item.get("PremiereDate"))) and premiere >= min_premiere
-            ]
-
-        max_premiere = self._parse_emby_datetime(query_params.get("MaxPremiereDate"))
-        if max_premiere:
-            filtered = [
-                item
-                for item in filtered
-                if (premiere := self._parse_emby_datetime(item.get("PremiereDate"))) and premiere <= max_premiere
-            ]
-
-        if any(
-            key in query_params
-            for key in (
-                "MaxCriticRating",
-                "MaxCommunityRating",
-                "MaxCustomRating",
-                "MinCriticRating",
-                "MinCommunityRating",
-                "MinCustomRating",
-            )
-        ):
-            updated_results = []
-            for item in filtered:
-                keep_item = True
-                custom_rating_value = 0
-                if "MaxCustomRating" in query_params or "MinCustomRating" in query_params:
-                    rating = self.EmbyServer.get_custom_rating_from_item(item)
-                    if rating is not None:
-                        custom_rating_value = rating
-                if "MaxCriticRating" in query_params:
-                    critic_rating = int(float(item.get("CriticRating", 0)))
-                    max_rating = int(query_params.get("MaxCriticRating"))
-                    if critic_rating > max_rating or critic_rating == 0:
-                        keep_item = False
-
-                if "MaxCommunityRating" in query_params:
-                    community_rating = float(item.get("CommunityRating", 0))
-                    max_rating = float(query_params.get("MaxCommunityRating"))
-                    if community_rating > max_rating or community_rating == 0:
-                        keep_item = False
-
-                if "MaxCustomRating" in query_params:
-                    max_rating = float(query_params.get("MaxCustomRating"))
-                    if custom_rating_value > max_rating or custom_rating_value == 0:
-                        keep_item = False
-
-                if "MinCriticRating" in query_params:
-                    critic_rating = int(float(item.get("CriticRating", 0)))
-                    min_rating = int(query_params.get("MinCriticRating"))
-                    if critic_rating < min_rating or critic_rating == 0:
-                        keep_item = False
-
-                if "MinCommunityRating" in query_params:
-                    community_rating = float(item.get("CommunityRating", 0))
-                    min_rating = float(query_params.get("MinCommunityRating"))
-                    if community_rating < min_rating or community_rating == 0:
-                        keep_item = False
-
-                if "MinCustomRating" in query_params:
-                    min_rating = float(query_params.get("MinCustomRating"))
-                    if custom_rating_value < min_rating or custom_rating_value == 0:
-                        keep_item = False
-
-                if keep_item:
-                    updated_results.append(item)
-
-            filtered = updated_results
-
-        if "Studios" in query_params:
-            studio_value = query_params["Studios"]
-            if isinstance(studio_value, str):
-                studio_names = [s.strip() for s in studio_value.split(",") if s.strip()]
-            else:
-                studio_names = [str(s).strip() for s in studio_value if str(s).strip()]
-            if studio_names:
-                studio_filter_results = []
-                for item in filtered:
-                    for studio in item.get("Studios", []) or []:
-                        if studio.get("Name") in studio_names:
-                            studio_filter_results.append(item)
-                            break
-                filtered = studio_filter_results
-
-        if "Genres" in query_params:
-            genres_value = query_params["Genres"]
-            if isinstance(genres_value, str):
-                source_genres = genres_value.split(",")
-            else:
-                source_genres = genres_value
-            requested_genres = {str(g).strip() for g in source_genres if str(g).strip()}
-            if requested_genres:
-                filtered = [
-                    item
-                    for item in filtered
-                    if requested_genres.issubset({str(g) for g in item.get("Genres", []) if g})
-                ]
-
-        if "Tags" in query_params:
-            requested_tags = {tag.strip() for tag in query_params["Tags"].split("|") if tag.strip()}
-            if requested_tags:
-                filtered = [
-                    item
-                    for item in filtered
-                    if (tags := get_tags(item)) and requested_tags.intersection(tags)
-                ]
-
-        if "OfficialRatings" in query_params:
-            allowed_ratings = {r.strip() for r in query_params["OfficialRatings"].split("|") if r.strip()}
-            if allowed_ratings:
-                filtered = [
-                    item
-                    for item in filtered
-                    if item.get("OfficialRating") in allowed_ratings
-                ]
-
-        resolution_filters = query_params.get("_Resolutions")
-        require_hdr = query_params.get("_RequireHdr")
-        if resolution_filters or require_hdr:
-            allowed_ids = None
-            if resolution_filters:
-                allowed_ids = set()
-                for res_key in resolution_filters:
-                    allowed_ids.update(str(i) for i in self.EmbyServer.media_by_resolution.get(res_key, []))
-            if require_hdr:
-                hdr_ids = set()
-                for hdr_key in ["dvhdr", "dvhdrplus", "hdr", "plus"]:
-                    hdr_ids.update(str(i) for i in self.EmbyServer.media_by_resolution.get(hdr_key, []))
-                allowed_ids = hdr_ids if allowed_ids is None else allowed_ids.intersection(hdr_ids)
-            if allowed_ids is not None:
-                filtered = [item for item in filtered if str(item.get("Id")) in allowed_ids]
-
-        if "PersonIds" in query_params:
-            person_ids = {pid.strip() for pid in query_params["PersonIds"].split(",") if pid.strip()}
-            person_roles = None
-            if "PersonTypes" in query_params:
-                raw_roles = query_params["PersonTypes"]
-                if isinstance(raw_roles, str):
-                    parsed_roles = {role.strip().lower() for role in raw_roles.split(",") if role.strip()}
-                else:
-                    parsed_roles = {str(role).strip().lower() for role in raw_roles if str(role).strip()}
-                if parsed_roles:
-                    person_roles = parsed_roles
-            person_matches = []
-            for item in filtered:
-                match = matches_person(item, person_ids, person_roles)
-                if match is None:
-                    return None
-                if match:
-                    person_matches.append(item)
-            filtered = person_matches
-
-        sort_key = query_params.get("SortBy")
-        if sort_key:
-            reverse_order = query_params.get("SortOrder", "Ascending").lower() == "descending"
-            if sort_key.lower() == "random":
-                random.shuffle(filtered)
-            else:
-                def _normalize_rating(value):
-                    if isinstance(value, (int, float)) and not isinstance(value, bool):
-                        return float(value)
-                    if isinstance(value, str):
-                        match = re.search(r"[-+]?\d*\.?\d+", value)
-                        if match:
-                            try:
-                                return float(match.group())
-                            except (TypeError, ValueError):
-                                return None
-                        return None
-                    if isinstance(value, dict):
-                        for sub_value in value.values():
-                            normalized = _normalize_rating(sub_value)
-                            if normalized is not None:
-                                return normalized
-                        return None
-                    if isinstance(value, (list, tuple, set)):
-                        for sub_value in value:
-                            normalized = _normalize_rating(sub_value)
-                            if normalized is not None:
-                                return normalized
-                        return None
-                    return None
-
-                def sort_value(item):
-                    value = item.get(sort_key)
-                    if sort_key in ["PremiereDate", "DateCreated"]:
-                        value = self._parse_emby_datetime(value) or datetime.min
-                    elif value is None and sort_key == "Name":
-                        value = item.get("SortName") or item.get("Name") or ""
-                    elif isinstance(sort_key, str) and "rating" in sort_key.lower():
-                        value = _normalize_rating(value)
-                    return value
-
-                try:
-                    sortable = []
-                    none_bucket = []
-                    for item in filtered:
-                        value = sort_value(item)
-                        if value is None:
-                            none_bucket.append(item)
-                        else:
-                            sortable.append((value, item))
-                    sortable.sort(key=lambda pair: pair[0], reverse=reverse_order)
-                    filtered = [item for _, item in sortable] + none_bucket
-                except Exception as e:
-                    logger.error(f"Error during local sorting by {sort_key}: {e}")
-                    return None
-
-        limit_value = query_params.get("Limit")
-        if limit_value:
-            try:
-                limit_int = int(limit_value)
-                if limit_int >= 0:
-                    filtered = filtered[:limit_int]
-            except (TypeError, ValueError):
-                logger.error(f"Invalid Limit value for local filtering: {limit_value}")
-                return None
-
-        return filtered
 
     # @retry(stop=stop_after_attempt(6), wait=wait_fixed(10),
     #        retry=retry_if_not_exception_type((BadRequest, NotFound, Unauthorized)))
 
     def fetchItems(self, uri_args):
-        """
-        Fetch items from Plex or Emby based on the provided URI arguments.
-        Supports decade-based filtering for Emby and correctly handles episodes.
-        """
-        is_show= False
-        additional_person_search = []
-        # Parse the URI arguments
-        plus_replace = str(uri_args).replace('+', '%2B')
-
-        args = parse_qs(plus_replace.lstrip('?'))
-
-        # Default-Datenstruktur für mehrere Instanzen
-        from collections import defaultdict
-        param_values = defaultdict(list)
-        for key, values in args.items():
-            for value in values:
-                param_values[unquote(key)].append(unquote(value))
-
-        # Initialize Emby API query parameters
-        emby_query_params = {}
-        unknown_params = {}
-        emby_query_params["Recursive"] = "true"
-        if "or" in args:
-            pass
-
-        # Initialize 'Years' list and item types
-        years_list = []
-        item_types = set()
-
-        # Process 'type' parameter
-        type_values = args.get('type', [])
-        for type_value in type_values:
-            if type_value == '1':
-                item_types.add('Movie')
-            elif type_value == '2':
-                item_types.add('Series')
-            elif type_value == '18':
-                item_types.add('BoxSet')  # Assuming 'BoxSet' for collections
-            else:
-                raise Failed(f"Unknown type value: {type_value} {uri_args}")
-
-        # Process each parameter
-        for key, values in param_values.items():
-            for value in values:
-                key_decoded = unquote(key)
-                value_decoded = unquote(value)
-
-                # Detect 'episode.' or 'show.' fields for item types
-                # if key_decoded.startswith('episode.'):
-                #     item_types = {"Episode"}
-
-                # Handle parameters with comparison operators in the key
-                match = re.match(r'([\w\.]+)([<>]{1,2}=?)(.*)', key_decoded)
-                if match:
-                    field, operator, _ = match.groups()
-                    field = field.strip()
-                    operator = operator.strip()
-                    operand = value_decoded.strip()
-
-                    if field in ["rating","show.rating"]:
-                        emby_query_params["Fields"]= "CommunityRating,CriticRating,ProviderIds"
-                        if operator in ['>', '>=']:
-                            emby_query_params['MinCriticRating'] = int(float(operand) * 10)
-                        elif operator in ['<', '<=','<<']:
-                            emby_query_params['MaxCriticRating'] = int(float(operand) * 10)
-                        else:
-                            raise Failed(f"Unknown operator {operator} for {field}")
-                    elif field in ["audienceRating", "show.audienceRating"]:
-                        emby_query_params["Fields"]= "CommunityRating,CriticRating,ProviderIds"
-                        if operator in ['>', '>=']:
-                            emby_query_params['MinCommunityRating'] = operand
-                        elif operator in ['<', '<=','<<']:
-                            emby_query_params['MaxCommunityRating'] = operand
-                        else:
-                            raise Failed(f"Unknown operator {operator} for {field}")
-                    elif field in ["userRating", "show.userRating"]:
-                        emby_query_params["Fields"]= "CommunityRating,CriticRating,ProviderIds"
-                        if operator in ['>', '>=']:
-                            emby_query_params['MinCustomRating'] = operand
-                        elif operator in ['<', '<=','<<']:
-                            emby_query_params['MaxCustomRating'] = operand
-                        else:
-                            raise Failed(f"Unknown operator {operator} for {field}")
-                    elif field.endswith('originallyAvailableAt'):
-                        if field.startswith("episode"): # look for episodes recently aired to get to the show
-                            is_show = True
-                            item_types.add("Episode")
-                            # item_types = {"Series"}
-
-                        date_value = self.parse_relative_date(operand)
-                        if date_value:
-                            if operator in ['>>', '>=', '>>=']:
-                                emby_query_params['MinPremiereDate'] = date_value.isoformat()
-                            elif operator in ['<<', '<=', '<<=']:
-                                emby_query_params['MaxPremiereDate'] = date_value.isoformat()
-                            else:
-                                unknown_params['operator'] = operator
-                        else:
-                            print(f"Unable to parse date value: {operand}")
-                    else:
-                        unknown_params[key_decoded] = value_decoded
-                else:
-                    # Process regular parameters
-                    if key_decoded in ['type', 'and']:
-                        pass  # Already handled above
-                    elif key_decoded in ['studio=', 'studio', 'show.studio', 'show.studio=']: # todo add newtwork here for later
-                        # Handle multiple studios
-                        # if 'Studios' not in emby_query_params:
-                        #     emby_query_params['Studios'] = []
-                        # is this working correctly?
-                        if "Studios" in emby_query_params:
-                            emby_query_params["Studios"].append(value_decoded)
-                        else:
-                            emby_query_params['Studios']= [value_decoded]
-                    elif key_decoded in ['show.network']: # todo add newtwork here for later
-                        # TODO: Use Emby Studio for Studios and Networks. Too much work with auto updates.
-                        if "Studios" in emby_query_params:
-                            # emby_query_params["Studios"].append(f"📡 {value_decoded}")
-                            emby_query_params["Studios"].append(f"{value_decoded}")
-                        else:
-                            # emby_query_params['Studios']= [f"📡 {value_decoded}"]
-                            emby_query_params['Studios']= [f"{value_decoded}"]
-                    elif key_decoded == 'country':
-
-                        if 'Ids' not in emby_query_params:
-                            emby_query_params['Ids'] = []
-
-                        for it, val in self.EmbyServer.production_search.items():
-                            if value in val:
-                                emby_query_params['Ids'].append(it)
-                            elif f"{self.name} {value_decoded}" in val:
-                                emby_query_params['Ids'].append(it)
-
-                        # emby_query_params['Ids'].append(encode_tags_to_uri(emby_item_ids))
-
-
-                        # e_items = []
-                        # for id in emby_item_ids:
-                        #     e_items.append(self.EmbyServer.get_item(id))
-                        #
-                        # # mn = self.EmbyServer.get_items({'Ids': emby})
-                        # mn = self.EmbyServer.convert_emby_to_plex(e_items)
-                        # # todo: add sort order etc.
-                        # return mn
-
-                    elif key_decoded == 'genre':
-                        if "Genres" not in emby_query_params:
-                            emby_query_params['Genres'] = [value_decoded]
-                            emby_query_params["Recursive"]= "true"
-
-                        else:
-                            emby_query_params['Genres'].append(value_decoded)
-                    elif key_decoded == 'limit':
-                        emby_query_params['Limit'] = value_decoded
-                    elif key_decoded == 'show.contentRating' or key_decoded == 'contentRating':
-                        if "OfficialRatings" not in emby_query_params:
-                            emby_query_params['OfficialRatings'] = [value_decoded]
-                        else:
-                            emby_query_params['OfficialRatings'].append(value_decoded)
-                    elif key_decoded in ['label', 'show.label']:
-                        # Handle multiple labels
-                        icon = '📺' if self.type == 'Show' else '🎥'
-                        name = self.name
-                        composed_name = f'{icon} {name} '
-                        if 'Tags' not in emby_query_params:
-                            emby_query_params['Tags'] = []
-                        emby_query_params['Tags'].append(f'{composed_name}{value_decoded}')
-                        emby_query_params['Tags'].append(f'{value_decoded}')
-                    elif key_decoded in ['actor', 'director', 'writer', 'producer', 'composer', 'show.actor']:
-                        # Handle multiple persons
-                        # item_types.add("Person")
-                        if 'PersonIds' not in emby_query_params:
-                            emby_query_params['PersonIds'] = []
-                        if 'PersonTypes' not in emby_query_params:
-                            emby_query_params['PersonTypes'] = []
-                        if key_decoded.startswith('show.'):
-                            key_decoded = key_decoded.split('.')[1]
-                        emby_query_params['PersonIds'].append(value_decoded)
-                        emby_query_params['PersonTypes'].append(key_decoded)
-                        additional_person_search.append(value_decoded) # Emby item id
-                    elif key_decoded == 'sort':
-                        sort_parts = value_decoded.split(':')
-                        sort_field, sort_order = (sort_parts[0], sort_parts[1]) if len(sort_parts) == 2 else (
-                        value_decoded, 'asc')
-
-                        if sort_field == 'audienceRating':
-                            emby_query_params['SortBy'] = 'CommunityRating'
-                        elif sort_field in ['title', 'titleSort']:
-                            emby_query_params['SortBy'] = 'Name'
-                        elif sort_field == 'originallyAvailableAt':
-                            emby_query_params['SortBy'] = 'PremiereDate'
-                        elif sort_field == 'rating':
-                            emby_query_params['SortBy'] = 'CriticRating'
-                        elif sort_field == 'random':
-                            emby_query_params['SortBy'] = 'Random'
-                        elif sort_field in ['addedAt', 'episode.addedAt']:
-                            emby_query_params['SortBy'] = 'DateCreated'
-                        else:
-                            unknown_params['sort_field'] = sort_field
-
-                        emby_query_params['SortOrder'] = 'Descending' if sort_order.lower() == 'desc' else 'Ascending'
-                    elif key_decoded == 'decade':
-                        decade = int(value_decoded)
-                        years_list.extend(str(year) for year in range(decade, decade + 10))
-                    elif key_decoded in ('year', 'show.year', 'episode.year'):
-                        if value_decoded.isdigit():
-                            years_list.append(value_decoded)
-                    elif key_decoded in ['resolution']:
-                        index_key = value_decoded
-                        lower_index = index_key.lower()
-                        if lower_index == "hd":
-                            index_key = "720p"
-                            lower_index = "720p"
-                        elif lower_index not in ["4k"] and not lower_index.endswith("p"):
-                            index_key = f"{index_key}p"
-                            lower_index = index_key.lower()
-                        normalized_key = lower_index
-                        if normalized_key == "4k":
-                            normalized_key = "4k"
-                        media_by_resolutions = getattr(self.EmbyServer, "media_by_resolution", None)
-                        if not media_by_resolutions or normalized_key not in media_by_resolutions:
-                            get_resolutions = getattr(self.EmbyServer, "get_resolutions", None)
-                            if callable(get_resolutions):
-                                get_resolutions()
-                                media_by_resolutions = getattr(self.EmbyServer, "media_by_resolution", None)
-                        if not media_by_resolutions or normalized_key not in media_by_resolutions:
-                            logger.warning(
-                                "Emby BETA: resolution '%s' is not cached; skipping filter",
-                                value_decoded,
-                            )
-                            continue
-                        emby_query_params.setdefault("_Resolutions", set()).add(normalized_key)
-                    elif key_decoded == 'hdr':
-                        if value_decoded == "1":
-                            emby_query_params['_RequireHdr'] = True
-
-                    else:
-                        if key_decoded not in ["pop", "push", "or"]:
-                            unknown_params[key_decoded] = value_decoded
-
-        # resolution:
-        # {'resolution': '4k'}
-        # {'resolution': '4k', 'hdr': '1'}
-        # {'resolution': '1080'}
-        # {'resolution': 'HD'}
-        # {'resolution': '576'}
-        # {'resolution': '480'}
-
-        # retrieves all media
-        # 📺 Serien CBS
-        # 📺 Serien Max
-        # if '📺 Serien Sky' in emby_query_params.get('Tags', []):
-        #     pass
-
-        # Combine multi-value parameters
-        if 'Ids' in emby_query_params:
-            emby_query_params['Ids'] = ','.join(emby_query_params['Ids'])
-        if 'Studios' in emby_query_params:
-            emby_query_params['Studios'] = ','.join(emby_query_params['Studios'])
-        if 'Tags' in emby_query_params:
-            emby_query_params['Tags'] = '|'.join(emby_query_params['Tags'])
-        if 'PersonIds' in emby_query_params:
-            emby_query_params['PersonIds'] = ','.join(emby_query_params['PersonIds'])
-        if 'PersonTypes' in emby_query_params:
-            emby_query_params['PersonTypes'] = ','.join(set(emby_query_params['PersonTypes']))
-        if 'OfficialRatings' in emby_query_params:
-            emby_query_params['OfficialRatings'] = '|'.join(set(emby_query_params['OfficialRatings']))
-
-
-        # Set 'Years' parameter if years_list is not empty
-        if years_list:
-            emby_query_params['Years'] = ','.join(years_list)
-
-        # Set IncludeItemTypes in query params
-        if item_types:
-            emby_query_params['IncludeItemTypes'] = ','.join(item_types)
-
-        emby_query_params['ParentId'] = self.Emby.get("Id")
-
-        needs_resolution_filter = bool(
-            emby_query_params.get("_Resolutions") or emby_query_params.get("_RequireHdr")
-        )
-        if needs_resolution_filter:
-            media_by_resolutions = getattr(self.EmbyServer, "media_by_resolution", None)
-            if not media_by_resolutions:
-                get_resolutions = getattr(self.EmbyServer, "get_resolutions", None)
-                if callable(get_resolutions):
-                    get_resolutions()
-
-        if unknown_params:
-            logger.error(f"Emby BETA: unknown parameters: {unknown_params}")
-            # |     1 | Unknown parameter: {'duplicate': '1'} ?type=1&sort=titleSort&duplicate=1
-            raise Failed(f"Unknown parameter: {unknown_params} {uri_args}")
-
-        # Query Emby API to get items matching criteria
-        # if re.search("Miramax",uri_args):
-        #     pass
-
-
-        items = None
-        if self._can_use_emby_cache(emby_query_params):
-            self.get_all_native(builder_level=self.type.lower())
-            native_source = self._emby_all_items_native or []
-            filtered_items = self._filter_emby_native_items(list(native_source), emby_query_params)
-            if filtered_items is not None:
-                items = filtered_items
-
-        if items is None:
-            api_query_params = {k: v for k, v in emby_query_params.items() if not k.startswith('_')}
-            items = self.EmbyServer.get_items(api_query_params)
-            if items is None:
-                items = []
-            filtered_items = self._filter_emby_native_items(list(items), emby_query_params)
-            if filtered_items is not None:
-                items = filtered_items
-
-        all_shows = None
-        if is_show:
-            all_shows= []
-            # only the show is requestes
-            for item in items:
-                my_id = item.get("SeriesId")
-                my_series = self.EmbyServer.get_item(my_id)
-                all_shows.append(my_series)
-
-        if all_shows:
-            my_output= self.EmbyServer.convert_emby_to_plex(all_shows)
-        else:
-            my_output= self.EmbyServer.convert_emby_to_plex(items)
-        # Convert Emby items to Plex format
-        # Used for Emby to retrieve the person and add to collection
-        if additional_person_search:
-            people = []
-            for add_p in additional_person_search:
-                if not add_p.isdigit():
-                    continue
-                person = self.EmbyServer.get_item(add_p)
-                people.append(person)
-            plex_person = self.EmbyServer.convert_emby_to_plex(people, False)
-            if plex_person:
-                my_output.extend(plex_person)
-            else:
-                logger.warning(f"Additional person search was requested, result unclear: {additional_person_search} => {plex_person}")
-        return my_output
-
-    def parse_relative_date(self, relative_date_str):
-        """
-        Parses a relative date string like '-90d' and returns a datetime object.
-        """
-        match = re.match(r'(-?\d+)([dwmy])', relative_date_str)
-        if not match:
-            return None
-
-        value, unit = match.groups()
-        value = int(value)
-        now = datetime.now()
-
-        if unit == 'd':
-            return now + timedelta(days=value)
-        elif unit == 'w':
-            return now + timedelta(weeks=value)
-        elif unit == 'm':
-            # Approximate a month as 30 days
-            return now + timedelta(days=value * 30)
-        elif unit == 'y':
-            # Approximate a year as 365 days
-            return now + timedelta(days=value * 365)
-        else:
-            return None
-
-
-    # @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type((BadRequest, NotFound, Unauthorized)))
-    # def fetchItems(self, uri_args):
-    #     # print(uri_args)
-    #     # todo
-    #     if uri_args != "?type=18": # 18 == collections
-    #         print(f"fetchItems: {uri_args}")
-    #         # fetchItems: ?type=18
-    #         # [<Collection:204179:🎖Veteran's-Day-Movie>, <Collection:204180:🦃-Thanksgiving-Movie>]
-    #         print(self.Plex.fetchItems(f"/library/sections/{self.Plex.key}/all{'' if uri_args is None else uri_args}"))
-    #         print("-----------------------")
-    #     else:
-    #         return self.EmbyServer.get_boxsets_from_library()
-    #     # print("jhjhbjbjb")
-    #     return self.Plex.fetchItems(f"/library/sections/{self.Plex.key}/all{'' if uri_args is None else uri_args}")
-
-    def get_provider_ids(self, item):
-        return self.EmbyServer.get_provider_ids(item)
-
-
-
-    def get_all_native(self, builder_level=None, load = False):
-        return self.emby_get_all(builder_level, load, native=True)
-
+        return self.Plex.fetchItems(f"/library/sections/{self.Plex.key}/all{'' if uri_args is None else uri_args}")
 
     def get_all(self, builder_level=None, load=False):
-        # print(builder_level)
-
-        return self.emby_get_all(builder_level, load)
-
         if load and builder_level in [None, "show", "artist", "movie"]:
             self._all_items = []
         if self._all_items and builder_level in [None, "show", "artist", "movie"]:
@@ -1560,16 +752,9 @@ class Plex(Library):
         logger.info(f"Loaded {total_size} {builder_level.capitalize()}s")
         if builder_level in [None, "show", "artist", "movie"]:
             self._all_items = results
-
-        # print("-------------")
-        # print(self.emby_get_all(builder_level, load))
-        # print("-------------")
-        # print(results)
-
         return results
 
     def upload_theme(self, collection, url=None, filepath=None):
-        # todo should be file based
         key = f"/library/metadata/{collection.ratingKey}/themes"
         if url:
             self.PlexServer.query(f"{key}?url={quote_plus(url)}", method=self.PlexServer._session.post)
@@ -1590,7 +775,6 @@ class Plex(Library):
 
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type((BadRequest, NotFound, Unauthorized)))
     def query(self, method):
-        # print("query!!!!!!")
         return method()
 
     def get_seasons(self, show):
@@ -1600,19 +784,6 @@ class Plex(Library):
         return self.query(season.episodes)
 
     def delete(self, obj):
-        if isinstance(obj, Collection):
-            # print(f"EMBY DELETE: {obj}")
-            self.EmbyServer.delete_collection(obj)
-            return
-        elif isinstance(obj, list) and len(obj) == 0:
-            return
-        else:
-            print(f"Failed to delete object {obj}")
-            logger.stacktrace()
-            return
-            raise Failed(f"Plex Error: Failed to delete {obj.title}")
-
-        # return
         try:
             return self.query(obj.delete)
         except Exception:
@@ -1645,9 +816,6 @@ class Plex(Library):
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type((BadRequest, NotFound, Unauthorized)))
     def collection_order_query(self, collection, data):
         collection.sortUpdate(sort=data)
-
-    def item_has_year(self, item):
-        return hasattr(item, "year") and item.year is not None
 
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type((BadRequest, NotFound, Unauthorized)))
     def item_labels(self, item):
@@ -1715,8 +883,6 @@ class Plex(Library):
         return image_url
 
     def item_reload(self, item):
-        return item
-
         item.reload(checkFiles=False, includeAllConcerts=False, includeBandwidths=False, includeChapters=False,
                     includeChildren=False, includeConcerts=False, includeExternalMedia=False, includeExtras=False,
                     includeFields=False, includeGeolocation=False, includeLoudnessRamps=False, includeMarkers=False,
@@ -1738,11 +904,15 @@ class Plex(Library):
                 item_list.append(item)
         return item_list
 
+    def validate_image_size(self, image):
+        if image.compare < MAX_IMAGE_SIZE:
+            return True
+        else:
+            logger.error(f"Image too large: {image.location}, bytes {image.compare}, MAX {MAX_IMAGE_SIZE}")
+            return False
 
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type((BadRequest, NotFound, Unauthorized)))
     def reload(self, item, force=False):
-        return item
-
         is_full = False
         if not force and item.ratingKey in self.cached_items:
             item, is_full = self.cached_items[item.ratingKey]
@@ -1774,11 +944,11 @@ class Plex(Library):
                         now = datetime.now()
                 self.config.tpdb_timer = now
             if image.is_poster and image.is_url:
-                upload_success = self.upload_poster(item, image.location, url=True)
+                item.uploadPoster(url=image.location)
             elif image.is_poster:
                 upload_success = self.validate_image_size(image)
                 if upload_success:
-                    self.upload_poster(item, image.location)
+                    item.uploadPoster(filepath=image.location)
             elif image.is_background and image.is_url:
                 item.uploadArt(url=image.location)
             elif image.is_background:
@@ -1796,355 +966,69 @@ class Plex(Library):
             raise Failed(e)
 
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type((BadRequest, NotFound, Unauthorized)))
-    def upload_poster_overlay(self, item, image_temp_path, url=False):
-        # Not actually uploading anything to Emby, just saving the overlay png
-        file_extension = image_temp_path.split('.')[-1]
-        file_name = f"{item.ratingKey}.{file_extension}"
-        # todo: config path
-
-        export_file = os.path.join(self.overlay_destination_folder, file_name)
-
-        try:
-            # Erstellen des Zielverzeichnisses, falls es nicht existiert
-            destination_dir = os.path.dirname(self.overlay_destination_folder)
-            if not os.path.exists(destination_dir):
-                os.makedirs(destination_dir)
-
-            # Kopiere die Datei zum Ziel
-            import shutil
-            shutil.copy2(image_temp_path, export_file)
-            # print(f"Datei erfolgreich kopiert: {image_temp_path} -> {export_file}")
-        except Exception as e:
-            # print(f"Fehler beim Kopieren der Datei: {e}")
-            raise
-
     def upload_poster(self, item, image, url=False):
         if url:
-            return self.EmbyServer.set_image_smart(item.ratingKey, image)
-            # item.uploadArt(url=image)
+            item.uploadPoster(url=image)
         else:
-            return self.EmbyServer.set_image_smart(item.ratingKey, image)
-        # if url:
-        #     item.uploadPoster(url=image)
-        # else:
-        #     item.uploadPoster(filepath=image)
+            item.uploadPoster(filepath=image)
 
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type((BadRequest, NotFound, Unauthorized)))
     def upload_background(self, item, image, url=False):
         if url:
-            self.EmbyServer.set_image_smart(item.ratingKey, url, image_type="Backdrop")
-            # item.uploadArt(url=image)
+            item.uploadArt(url=image)
         else:
-            self.EmbyServer.set_image_smart(item.ratingKey, image, image_type="Backdrop")
-            # item.uploadArt(filepath=image)
+            item.uploadArt(filepath=image)
 
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type((BadRequest, NotFound, Unauthorized)))
     def upload_logo(self, item, image, url=False):
         if url:
-            self.EmbyServer.set_image_smart(item.ratingKey, url, image_type="ClearLogo")
+            item.uploadLogo(url=image)
         else:
-            self.EmbyServer.set_image_smart(item.ratingKey, image, image_type="ClearLogo")
+            item.uploadLogo(filepath=image)
 
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type(Failed))
     def get_actor_id(self, name):
-
-        return self.EmbyServer.get_actor_id(name)
-
         results = self.Plex.hubSearch(name)
         for result in results:
             if isinstance(result, Role) and result.librarySectionID == self.Plex.key and result.tag == name:
                 return result.id
 
-    def get_search_choices(self, search_name, title=True, name_pairs=False, person_list = None, tmdb_person_id = None):
+    def get_search_choices(self, search_name, title=True, name_pairs=False):
         final_search = search_translation[search_name] if search_name in search_translation else search_name
         final_search = show_translation[final_search] if self.is_show and final_search in show_translation else final_search
         final_search = get_tags_translation[final_search] if final_search in get_tags_translation else final_search
-        normalized_person_list = None
-        if person_list:
-            normalized_person_list = tuple(sorted(str(person).strip().lower() for person in person_list if person is not None))
-        cache_key = (
-            final_search,
-            bool(title),
-            bool(name_pairs),
-            normalized_person_list,
-            str(tmdb_person_id) if tmdb_person_id is not None else None,
-        )
-        if cache_key in self._search_choices_cache:
-            cached_choices, cached_names = self._search_choices_cache[cache_key]
-            return dict(cached_choices), list(cached_names)
         try:
             names = []
-            seen_names = set()
             choices = {}
             use_title = title and final_search not in ["contentRating", "audioLanguage", "subtitleLanguage", "resolution"]
-            tags_iter = self.get_tags(final_search, person_list = person_list, tmdb_person_id = tmdb_person_id)
-            for choice in tags_iter:
-
-                if choice.title not in seen_names:
-                    seen_names.add(choice.title)
+            for choice in self.get_tags(final_search):
+                if choice.title not in names:
                     names.append((choice.title, choice.key) if name_pairs else choice.title)
                 choices[choice.title] = choice.title if use_title else choice.key
                 choices[choice.key] = choice.title if use_title else choice.key
                 choices[choice.title.lower()] = choice.title if use_title else choice.key
                 choices[choice.key.lower()] = choice.title if use_title else choice.key
-            self._search_choices_cache[cache_key] = (dict(choices), list(names))
             return choices, names
         except NotFound:
             logger.debug(f"Search Attribute: {final_search}")
             raise Failed(f"Plex Error: plex_search attribute: {search_name} not supported")
 
-    @retry(stop=stop_after_attempt(6), wait=wait_fixed(60), retry=retry_if_not_exception_type((BadRequest, NotFound, Unauthorized)))
-    def get_tags(self, tag, person_list=None, tmdb_person_id = None):
+    @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type((BadRequest, NotFound, Unauthorized)))
+    def get_tags(self, tag):
         if isinstance(tag, str):
             match = re.match(r'(?:([a-zA-Z]*)\.)?([a-zA-Z]+)', tag)
             if not match:
                 raise BadRequest(f'Invalid filter field: {tag}')
             _libtype, tag = match.groups()
-            libtype = _libtype or self.lib_type # e.g. show
-            # libtype = _libtype or self.Plex.TYPE # e.g. show
-
-            if not self.EmbyServer.is_in_filtertype(tag, libtype):
-                raise NotFound(f'Unknown filter field "{tag}" for libtype "{libtype}". ') from None
-                try:
-                    tag = next(f for f in self.Plex.listFilters(libtype) if f.filter == tag)
-                except StopIteration:
-                    available_filters = [f.filter for f in self.Plex.listFilters(libtype)]
-                    raise NotFound(f'Unknown filter field "{tag}" for libtype "{libtype}". '
-                                   f'Available filters: {available_filters}') from None
-            my_search = tag
-        else:
-             my_search = tag.filter
-
-        # tag: <FilteringFilter:/library/sections/8/:Labels>
-        # items = {MediaContainer: 10} [<FilterChoice:284998:Overlay>, <FilterChoice:310126:Kometa>, <FilterChoice:310132:National-Film-Regist>, <FilterChoice:310150...-on-a-True-Stor>, <FilterChoice:310159:🎖Veteran's-Day-Movie>, <FilterChoice:310161:Seasonal>, <FilterChoice:310165:Top-Actors>
-        #  TAG = {str} 'MediaContainer'
-        #  TYPE = {NoneType} None
-        #  allowSync = {int} 0
-        #  augmentationKey = {NoneType} None
-        #  identifier = {str} 'com.plexapp.plugins.library'
-        #  key = {NoneType} None
-        #  librarySectionID = {NoneType} None
-        #  librarySectionTitle = {NoneType} None
-        #  librarySectionUUID = {NoneType} None
-        #  mediaTagPrefix = {str} '/system/bundle/media/flags/'
-        #  mediaTagVersion = {str} '1727455477'
-        #  offset = {NoneType} None
-        #  size = {int} 10
-        #  totalSize = {NoneType} None
-        #  00 = {FilterChoice} <FilterChoice:284998:Overlay>
-        #   TAG = {str} 'Directory'
-        #   TYPE = {NoneType} None
-        #   fastKey = {str} '/library/sections/8/all?label=284998'
-        #   key = {str} '284998'
-        #   thumb = {NoneType} None
-        #   title = {str} 'Overlay'
-        #   type = {NoneType} None
-        #  01 = {FilterChoice} <FilterChoice:310126:Kometa>
-        #   TAG = {str} 'Directory'
-        #   TYPE = {NoneType} None
-        #   fastKey = {str} '/library/sections/8/all?label=310126'
-        #   key = {str} '310126'
-        #   thumb = {NoneType} None
-        #   title = {str} 'Kometa'
-        #   type = {NoneType} None
-
-
-        # my_items = self.EmbyServer.get_collections_filter_choices()
-
-        # tag = {FilteringFilter} <FilteringFilter:/library/sections/8/:Actor>
-        #  TAG = {str} 'Filter'
-        #  TYPE = {NoneType} None
-        #  filter = {str} 'actor'
-        #  filterType = {str} 'string'
-        #  key = {str} '/library/sections/8/actor'
-        #  title = {str} 'Actor'
-        #  type = {str} 'filter'
-
-
-
-        emby_items = []
-
-        if my_search in ['studio', 'show.studio']: # todo: differentiate between studio & network?
-            labels = self.EmbyServer.get_emby_studios(self, self.Emby.get("Id"))
-
-            for label in labels:
-                key = str(label)
-                title = f"{str(label)}"
-
-                # Create a FilterChoiceEmby object
-                filter_choice = FilterChoiceEmby(key=key, title=title)
-                emby_items.append(filter_choice)
-            return emby_items
-        elif my_search in ['network', 'show.network']: # todo: differentiate between studio & network?
-            labels = self.EmbyServer.get_emby_networks(self, self.Emby.get("Id"))
-
-            for label in labels:
-                key = str(label)
-                title = f"{str(label)}"
-
-                # Create a FilterChoiceEmby object
-                filter_choice = FilterChoiceEmby(key=key, title=title)
-                emby_items.append(filter_choice)
-            return emby_items
-        elif my_search in ['country']:
-            labels = self.EmbyServer.get_emby_countries(self.Emby.get("Id"))
-
-            for label in labels:
-                key = str(label)
-                title = f"{str(label)}"
-
-                # Create a FilterChoiceEmby object
-                filter_choice = FilterChoiceEmby(key=key, title=title)
-                emby_items.append(filter_choice)
-            return emby_items
-        elif my_search in ['genre']:
-            genres = self.EmbyServer.get_emby_genres(self.Emby.get("Id"))
-
-            for genre in genres:
-                key = str(genre)
-                title = f"{str(genre)}"
-
-                # Create a FilterChoiceEmby object
-                filter_choice = FilterChoiceEmby(key=key, title=title)
-                emby_items.append(filter_choice)
-            return emby_items
-        elif my_search in ['contentRating']:
-            content_ratings = self.EmbyServer.get_official_age_ratings(self.Emby.get("Id"))
-
-            for rating in content_ratings:
-                key = rating.get("Name")
-                if key:
-                    # Create a FilterChoiceEmby object
-                    filter_choice = FilterChoiceEmby(key=key, title=key)
-                    emby_items.append(filter_choice)
-            return emby_items
-        elif my_search in ['label', 'show.label']:
-            labels = self.EmbyServer.get_emby_item_tags(self, self.Emby.get("Id"), search_all=True)
-
-            labels += self.EmbyServer.get_emby_countries(self.Emby.get("Id"))
-            icon = '📺' if self.type == 'Show' else '🎥'
-            name = self.name
-            composed_name = f'{icon} {name} '
-            for label in labels:
-                key = str(label)
-                title = f"{str(label)}"
-
-                # Create a FilterChoiceEmby object
-                filter_choice = FilterChoiceEmby(key=key, title=title)
-                emby_items.append(filter_choice)
-                if str(label).startswith(composed_name):
-                    label_new = str(label).replace(composed_name, '')
-                    key = str(label_new)
-                    title = f"{str(label_new)}"
-                    # Create a FilterChoiceEmby object
-                    filter_choice = FilterChoiceEmby(key=key, title=title)
-                    emby_items.append(filter_choice)
-
-            return emby_items
-        elif my_search in ['decade']:
-            years = self.EmbyServer.get_years(self.Emby.get("Id"))
-            dekaden_set = set()
-
-            for y in years:
-                jahr = int(y['Name'])
-                dekade = (jahr // 10) * 10
-                dekaden_set.add(dekade)
-
-            dekaden_liste = sorted(dekaden_set)
-
-            for dec in dekaden_liste:
-                key = str(dec)
-                title = f"{str(dec)}s"
-
-                # Create a FilterChoiceEmby object
-                filter_choice = FilterChoiceEmby(key=key, title=title)
-                emby_items.append(filter_choice)
-            return emby_items
-        #             for decade in decades:
-        #                 key = decade
-        #                 title = f"{decade}s"
-        # 0 = {FilterChoice} <FilterChoice:2020:2020s>
-        # 1 = {FilterChoice} <FilterChoice:2010:2010s>
-
-        # 0 = {FilterChoice} <FilterChoice:2020:2020s>
-        #  TAG = {str} 'Directory'
-        #  TYPE = {NoneType} None
-        #  fastKey = {str} '/library/sections/8/all?decade=2020'
-        #  key = {str} '2020'
-        #  thumb = {NoneType} None
-        #  title = {str} '2020s'
-        #  type = {NoneType} None
-
-        elif my_search in ["actor", "director", "writer", "producer", "composer"]:
-
-            # short cut with proper tmdb id
-            if tmdb_person_id and len(person_list) == 1:
-                my_person = self.EmbyServer.get_person_info_bulk([tmdb_person_id], "tmdb")
-                my_choice = FilterChoiceEmby(key=my_person.get(int(tmdb_person_id)), title=person_list[0], thumb=None)
-                return [my_choice]
-
-            emby_people = self.EmbyServer.get_people(my_search, person_list)
-
-            for person in emby_people:
-                key = person.get('Id')
-                title = person.get('Name')
-                prov_ids = person.get('ProviderIds')
-                tmdb_id = prov_ids.get('Tmdb') if prov_ids else None
-
-                # Construct the thumbnail URL
-                thumb = None
-                if 'ImageTags' in person and 'Primary' in person['ImageTags']:
-                    server_url = self.EmbyServer.emby_server_url
-                    image_tag = person['ImageTags']['Primary']
-                    thumb = f"{server_url}/Items/{key}/Images/Primary?tag={image_tag}"
-
-                # Create a FilterChoiceEmby object
-                filter_choice = FilterChoiceEmby(key=key, title=title, thumb=thumb)
-                emby_items.append(filter_choice)
-
-            # if len(emby_items) > 0:
-            return emby_items
-        elif my_search in ['resolution']:
-            my_dict = self.EmbyServer.get_resolutions()
-            return my_dict
-                # key = str(dec)
-                # title = f"{str(dec)}s"
-                #
-                # # Create a FilterChoiceEmby object
-                # filter_choice = FilterChoiceEmby(key=key, title=title)
-                # emby_items.append(filter_choice)
-
-
-        # Errors:
-        # 'country'
-        # country, region + continent not working
-
-        raise Failed(f"Not implemented Emby search FilterChoice {tag}")
-
+            libtype = _libtype or self.Plex.TYPE
+            try:
+                tag = next(f for f in self.Plex.listFilters(libtype) if f.filter == tag)
+            except StopIteration:
+                available_filters = [f.filter for f in self.Plex.listFilters(libtype)]
+                raise NotFound(f'Unknown filter field "{tag}" for libtype "{libtype}". '
+                               f'Available filters: {available_filters}') from None
         items = self.Plex.findItems(self.Plex._server.query(tag.key), FilterChoice)
-
-        #     {
-        #       "Name": "Wolfgang Petersen",
-        #       "ServerId": "37de8e11ee0748bea8d2080a13984949",
-        #       "Id": "61041",
-        #       "Type": "Person",
-        #       "ImageTags": {
-        #         "Primary": "ca733b3b975daa618201765a10805fe7"
-        #       },
-        #       "BackdropImageTags": []
-        #     }
-
-        # items_filter = object[FilterChoice]()
-        # key: '/library/sections/8/label'
-        # Plex:
-        #         for elem in data:
-        #             if self._checkAttrs(elem, **kwargs):
-        #                 item = self._buildItemOrNone(elem, cls, initpath)
-        #                 if item is not None:
-        #                     items.append(item)
-        #         return items
-
-        if tag.key.endswith("/collection?type=4"): # no idea
+        if tag.key.endswith("/collection?type=4"):
             keys = [k.key for k in items]
             keys.extend([k.key for k in self.Plex.findItems(self.Plex._server.query(f"{tag.key[:-1]}3"), FilterChoice)])
             items = [i for i in self.Plex.findItems(self.Plex._server.query(tag.key[:-7]), FilterChoice) if i.key not in keys]
@@ -2200,14 +1084,13 @@ class Plex(Library):
                  r._data.attrib.get('promotedToOwnHome'), r._data.attrib.get('promotedToSharedHome'))
                 for r in self.Plex.fetchItems(f"/hubs/sections/{self.Plex.key}/manage")]
 
-    def alter_collection(self, items, collection, smart_label_collection=False, add=True, collection_id = None):
+    def alter_collection(self, items, collection, smart_label_collection=False, add=True):
         maintain_status = True
         locked_items = []
         unlocked_items = []
         if not smart_label_collection and maintain_status and self.agent in ["tv.plex.agents.movie", "tv.plex.agents.series"]:
             for item in items:
-                # emby
-                # item = self.reload(item)
+                item = self.reload(item)
                 if next((f for f in item.fields if f.name == "collection"), None) is not None:
                     locked_items.append(item)
                 else:
@@ -2217,59 +1100,14 @@ class Plex(Library):
 
         for _items, locked in [(locked_items, True), (unlocked_items, False)]:
             if _items:
-                # Smart Label Collection (verwende JSON-basierte Labels)
+                self.Plex.batchMultiEdits(_items)
                 if smart_label_collection:
-                    if add:
-                        # add / remove collection tag/label
-                        # ToDo: Remove the tags for smart label collections
-                        # if False:
-                        for item in _items:
-                            # Füge ein Label hinzu
-                            self.EmbyServer.add_tags(item.ratingKey,[collection])
-                            self._invalidate_metadata_caches(item.ratingKey)
-
-                                # add_label(kometa_labels, item.ratingKey, collection)
-                                # save_labels_to_file(file_path_kometa, kometa_labels)
-                        self.EmbyServer.add_remove_plex_object_from_collection(collection, _items, 'add')
-
-
-                    else:
-                        for item in _items:
-                            # Entferne ein Label (JSON-basiert)
-                            self.EmbyServer.remove_tags(item.ratingKey, [collection])
-                            self._invalidate_metadata_caches(item.ratingKey)
-                            # remove_label(kometa_labels, item.ratingKey, collection)
-                            # save_labels_to_file(file_path_kometa, kometa_labels)
-                        self.EmbyServer.add_remove_plex_object_from_collection(collection, _items, 'delete')
-
-                # Traditionelle Sammlungen (BoxSets in Emby)
+                    self.query_data(self.Plex.addLabel if add else self.Plex.removeLabel, collection)
                 elif add:
-                    rating_keys = [item.ratingKey for item in _items]
-                    added = self.EmbyServer.add_to_collection(collection, rating_keys)
-                    # Sammlung erstellen oder Medien hinzufügen
-                    if not added:
-                        self.EmbyServer.create_collection(collection, rating_keys, locked=locked, parent_id= self.Emby.get("Id"))
-                    for rating_key in rating_keys:
-                        self._invalidate_metadata_caches(rating_key)
+                    self.Plex.addCollection(collection, locked=locked)
                 else:
-                    # Tags entfernen und Sammlung löschen
-                    for item in _items:
-                        self.EmbyServer.remove_tags(item.ratingKey, [collection])
-                        self._invalidate_metadata_caches(item.ratingKey)
-                    # self.EmbyServer.remove_boxset(collection, collection_id)
-                    self.EmbyServer.add_remove_plex_object_from_collection(collection, items, 'delete')
-
-        # for _items, locked in [(locked_items, True), (unlocked_items, False)]:
-        #     if _items:
-        #         # self.Plex.batchMultiEdits(_items)
-        #         if smart_label_collection:
-        #             self.query_data(self.Plex.addLabel if add else self.Plex.removeLabel, collection)
-        #         elif add:
-        #             self.Plex.addCollection(collection, locked=locked)
-        #         else:
-        #             self.EmbyServer.remove_kometa_tags_from_collection(collection)
-        #             self.Plex.removeCollection(collection, locked=locked)
-        #         # self.Plex.saveMultiEdits()
+                    self.Plex.removeCollection(collection, locked=locked)
+                self.Plex.saveMultiEdits()
 
     def move_item(self, collection, item, after=None):
         key = f"{collection.key}/items/{item}/move"
@@ -2278,17 +1116,7 @@ class Plex(Library):
         self._query(key, put=True)
 
     def smart_label_check(self, label):
-
-        # print(f"Smart Label: {label}")
-        tags = self.EmbyServer.get_emby_item_tags(self, self.Emby.get("Id"), search_all=True,from_cache=False)
-        #
-        if label in tags:
-            return True
-        logger.trace(f"Label not found in Emby. Options: {tags}")
-        return False
-
         labels = [la.title for la in self.get_tags("label")] # noqa
-        labels += self.EmbyServer.get_emby_countries(self.Emby.get("Id"))
         if label in labels:
             return True
         logger.trace(f"Label not found in Plex. Options: {labels}")
@@ -2300,26 +1128,9 @@ class Plex(Library):
         if len(test_items) < 1:
             raise Failed(f"Plex Error: No items for smart filter: {uri_args}")
 
-    def create_smart_collection(self, title, smart_type, uri_args, ignore_blank_results, minimum = None):
-
-        collection_id = self.EmbyServer.get_collection_id(title)
-        if collection_id:
-            return collection_id
-
+    def create_smart_collection(self, title, smart_type, uri_args, ignore_blank_results):
         if not ignore_blank_results:
             self.test_smart_filter(uri_args)
-
-        # no smart collections in emby, using regular one
-        my_items = self.fetchItems(uri_args)
-
-        if minimum and minimum > len(my_items):
-            return None
-
-
-        return self.EmbyServer.create_smart_collection(title, smart_type, my_items, ignore_blank_results, self.Emby.get("Id"))
-        # print(f"{smart_type} - {uri_args}")
-
-
         args = {
             "type": smart_type,
             "title": title,
@@ -2330,9 +1141,6 @@ class Plex(Library):
         self._query(f"/library/collections{utils.joinArgs(args)}", post=True)
 
     def create_blank_collection(self, title):
-        # Create a blank collection for Emby, add at least one title
-        return self.EmbyServer.create_collection(title,[self._emby_all_items[0].ratingKey], self.Emby.get("Id"))
-
         args = {
             "type": 1 if self.is_movie else 2 if self.is_show else 8,
             "title": title,
@@ -2350,73 +1158,9 @@ class Plex(Library):
     def build_smart_filter(self, uri_args):
         return f"{self.PlexServer._uriRoot()}/library/sections/{self.Plex.key}/all{uri_args}"
 
-    def calculate_add_remove_items(self, new_items, current_items):
-        """
-        Berechnet die Listen von Items, die hinzugefügt (add_items) oder entfernt (remove_items) werden müssen.
-
-        :param new_items: Liste der neuen Items (z. B. aus fetchItems)
-        :param current_items: Liste der aktuellen Items in der Collection
-        :return: Tuple (add_items, remove_items)
-        """
-        # Extrahiere die ratingKeys für schnellen Vergleich
-        new_keys = {item.ratingKey for item in new_items}
-        current_keys = {item.ratingKey for item in current_items}
-
-        # Berechne Items, die hinzugefügt werden müssen (in new_items, aber nicht in current_items)
-        add_items = [item for item in new_items if item.ratingKey not in current_keys]
-
-        # Berechne Items, die entfernt werden müssen (in current_items, aber nicht in new_items)
-        remove_items = [item for item in current_items if item.ratingKey not in new_keys]
-
-        keep_items = [item for item in current_items if item.ratingKey in new_keys]
-
-        return add_items, remove_items, keep_items
-
     def update_smart_collection(self, collection, uri_args):
         self.test_smart_filter(uri_args)
-
-        new_items = self.fetchItems(uri_args)
-        current_items = collection.items()
-        add_items, remove_items, keep_items = self.calculate_add_remove_items(new_items, current_items)
-
-
-        # return
-
-        logger.info("")
-        logger.separator(f"Syncing SmartEmby Collection {collection.title} {self.type}", space=False, border=False)
-        logger.info("")
-
-
-        total = len(add_items) + len(remove_items)
-        spacing = len(str(total)) * 2 + 1
-
-        # Prüfe auf hinzugefügte oder unveränderte Items
-        for i, item in enumerate(add_items, 1):
-            current_operation = "+"
-            number_text = f"{i}/{total}"
-            logger.info(
-                f"{number_text:>{spacing}} | {collection.title} {self.type} | {current_operation} | {util.item_title(item)}")
-
-        # Prüfe auf hinzugefügte oder unveränderte Items
-        for i, item in enumerate(remove_items, 1):
-            current_operation = "-"
-            number_text = f"{i + len(add_items)}/{total}"
-            logger.info(
-                f"{number_text:>{spacing}} | {collection.title} {self.type} | {current_operation} | {util.item_title(item)}")
-
-        if len(remove_items) >0:
-            self.EmbyServer.add_remove_plex_object_from_collection(collection.title, remove_items, 'delete', collection_id = collection.ratingKey)
-            # print(f"Removed {len(remove_items)} from Emby {collection.title} ")
-        if len(add_items) >0:
-            self.EmbyServer.add_remove_plex_object_from_collection(collection.title, add_items, 'add', collection_id = collection.ratingKey)
-            # print(f"Added {len(add_items)} to Emby {collection.title} ")
-
-        logger.exorcise()
-        logger.info("")
-        item_label = f"{self.type.capitalize()}{'s' if total > 1 else ''}"
-        logger.info(f"{total} {item_label} Processed - Added {len(add_items)} {item_label} labels, Removed {len(remove_items)} {item_label} labels")
-
-        # self._query(f"/library/collections/{collection.ratingKey}/items{utils.joinArgs({'uri': self.build_smart_filter(uri_args)})}", put=True)
+        self._query(f"/library/collections/{collection.ratingKey}/items{utils.joinArgs({'uri': self.build_smart_filter(uri_args)})}", put=True)
 
     def smart_filter(self, collection):
         smart_filter = self.get_collection(collection).content
@@ -2670,62 +1414,6 @@ class Plex(Library):
             return False
 
     def edit_tags(self, attr, obj, add_tags=None, remove_tags=None, sync_tags=None, do_print=True, locked=True, is_locked=None):
-
-
-        display = ""
-        final = ""
-        key = attribute_translation[attr] if attr in attribute_translation else attr
-        actual = "similar" if attr == "similar_artist" else attr
-        attr_display = attr.replace("_", " ").title()
-
-        if add_tags or remove_tags or sync_tags is not None:
-            _add_tags = add_tags if add_tags else []
-            _remove_tags = remove_tags if remove_tags else []
-            _sync_tags = sync_tags if sync_tags else []
-
-            if attr == "label":
-                _item_tags = self.EmbyServer.get_emby_item_tags(obj,self.Emby.get("Id"), from_cache=False)
-            elif attr == "genre":
-                _item_tags = self.EmbyServer.get_emby_item_genres(obj,self.Emby.get("Id"), from_cache=False)
-            else:
-                pass
-
-            _add = [t for t in _add_tags + _sync_tags if t not in _item_tags]
-            _remove = [t for t in _item_tags if (sync_tags is not None and t not in _sync_tags) or t in _remove_tags]
-
-            # Berechne die finalen Tags
-            final_tags = sorted(set([t for t in _item_tags if t not in _remove] + _add))
-            final_tags = sorted(set(final_tags))  # Entferne eventuelle Duplikate
-            if final_tags != sorted(set(_item_tags)):
-                if attr == "label":
-                    self.EmbyServer.set_tags(obj.ratingKey, final_tags)
-                elif attr == "genre":
-                    self.EmbyServer.set_genres(obj.ratingKey, final_tags)
-                else:
-                    raise WARNING(f"edit_tags: I won't edit {attr} with {final_tags}")
-                self._invalidate_metadata_caches(getattr(obj, "ratingKey", None))
-
-            if _add:
-                display += f"+{', +'.join(_add)}"
-            if _remove:
-                if display:
-                    display += ", "
-                display += f"-{', -'.join(_remove)}"
-            if is_locked is not None and not display and is_locked != locked:
-                # self.edit_query(obj, {f"{actual}.locked": 1 if locked else 0})
-                # todo: add emby locked?
-                display = "Locked" if locked else "Unlocked"
-            final = f"{obj.title[:25]:<25} | {attr_display} | {display}" if display else display
-            if do_print and final:
-                logger.info(final)
-        return final[28:] if final else final
-
-        # if add_tags and not remove_tags and not None:
-        #     self.EmbyServer.add_tags(obj.ratingKey, add_tags)
-        #     return
-        raise WARNING(f"EMBY EDIT TAGS: {self} - {attr} - {obj} - {add_tags} - {remove_tags} - {sync_tags} - { locked} - {is_locked}")
-
-
         display = ""
         final = ""
         key = attribute_translation[attr] if attr in attribute_translation else attr
@@ -2938,14 +1626,9 @@ class Plex(Library):
                     starting = item.artist()
                 else:
                     starting = item
-                emby_item = self.EmbyServer.get_item(starting.ratingKey)
-                emby_path_media = emby_item.get('Path', None)
-                # directory_path = os.path.dirname(emby_path_media)
-                # starting.locations.append(directory_path)
-
-                if not emby_path_media:
+                if not starting.locations:
                     raise Failed(f"Asset Warning: No video filepath found for {item.title}")
-                path_test = str(emby_path_media)
+                path_test = str(starting.locations[0])
                 if not os.path.dirname(path_test):
                     path_test = path_test.replace("\\", "/")
                 folder_name = os.path.basename(os.path.dirname(path_test) if isinstance(starting, Movie) else path_test)
@@ -3029,15 +1712,6 @@ class Plex(Library):
         tmdb_id = None
         tvdb_id = None
         imdb_id = None
-
-        provider_ids = self.EmbyServer.get_provider_ids(item)
-        emby_imdb_id = provider_ids[0]
-        emby_tvdb_id = provider_ids[1]
-        emby_tmdb_id = provider_ids[2]
-
-        return emby_tmdb_id, emby_tvdb_id, emby_imdb_id
-
-
         if self.config.Cache:
             t_id, i_id, guid_media_type, _ = self.config.Cache.query_guid_map(item.guid)
             if t_id:
@@ -3047,77 +1721,14 @@ class Plex(Library):
                     tvdb_id = t_id[0]
             if i_id:
                 imdb_id = i_id[0]
-            return tmdb_id, tvdb_id, imdb_id
+        if not tmdb_id and not tvdb_id:
+            tmdb_id = self.get_tmdb_from_map(item)
+        if not tmdb_id and not tvdb_id and self.is_show:
+            tvdb_id = self.get_tvdb_from_map(item)
+        if not imdb_id:
+            imdb_id = self.get_imdb_from_map(item)
+        return tmdb_id, tvdb_id, imdb_id
 
-    def upload_images(self, item, poster=None, background=None, logo=None, overlay=False):
-        poster_uploaded = False
-        if poster is not None:
-            try:
-                emby_item = self.EmbyServer.get_item(item.ratingKey)
-                emby_images = emby_item.get("ImageTags")
-                emby_poster_compare = emby_images.get("Primary") if emby_images else None
-                poster_key = f"{poster.compare}-{emby_poster_compare}" if emby_poster_compare else poster.compare
-                image_compare = None
-                if self.config.Cache:
-                    _, image_compare, _ = self.config.Cache.query_image_map(item.ratingKey, self.image_table_name)
-                if not image_compare or not emby_poster_compare or str(poster_key) != str(image_compare):
-                    if overlay:
-                        # self.reload(item, force=True)
-                        if overlay and "Overlay" in [la.tag for la in self.item_labels(item)]:
-                            item.removeLabel("Overlay")
-                    poster_uploaded = self._upload_image(item, poster)
-                    logger.info(f"Metadata: {poster.attribute} updated {poster.message}")
-                elif self.show_asset_not_needed:
-                    logger.info(f"Metadata: {poster.prefix}poster update not needed")
-            except Failed:
-                logger.stacktrace()
-                logger.error(f"Metadata: {poster.attribute} failed to update {poster.message}")
-
-        background_uploaded = False
-        if background is not None:
-            try:
-                image_compare = None
-                if self.config.Cache:
-                    _, image_compare, _ = self.config.Cache.query_image_map(item.ratingKey, f"{self.image_table_name}_backgrounds")
-                if not image_compare or str(background.compare) != str(image_compare):
-                    background_uploaded = self._upload_image(item, background)
-                    logger.info(f"Metadata: {background.attribute} updated {background.message}")
-                elif self.show_asset_not_needed:
-                    logger.info(f"Metadata: {background.prefix}background update not needed")
-            except Failed:
-                logger.stacktrace()
-                logger.error(f"Metadata: {background.attribute} failed to update {background.message}")
-
-        logo_uploaded = False
-        if logo is not None:
-            try:
-                image_compare = None
-                if self.config.Cache:
-                    _, image_compare, _ = self.config.Cache.query_image_map(item.ratingKey, f"{self.image_table_name}_logos")
-                if not image_compare or str(logo.compare) != str(image_compare):
-                    logo_uploaded = self._upload_image(item, logo)
-                    logger.info(f"Metadata: {logo.attribute} updated {logo.message}")
-                elif self.show_asset_not_needed:
-                    logger.info(f"Metadata: {logo.prefix}logo update not needed")
-            except Failed:
-                logger.stacktrace()
-                logger.error(f"Metadata: {logo.attribute} failed to update {logo.message}")
-
-        if self.config.Cache:
-
-            if poster_uploaded:
-                emby_item = self.EmbyServer.get_item(item.ratingKey, force_refresh=True)
-                emby_images = emby_item.get("ImageTags")
-                emby_poster_compare = emby_images.get("Primary") if emby_images else None
-                poster_key = f"{poster.compare}-{emby_poster_compare}" if emby_poster_compare else poster.compare
-
-                self.config.Cache.update_image_map(item.ratingKey, self.image_table_name, "", poster_key if poster else "")
-            if background_uploaded:
-                self.config.Cache.update_image_map(item.ratingKey, f"{self.image_table_name}_backgrounds", "", background.compare)
-            if logo_uploaded:
-                self.config.Cache.update_image_map(item.ratingKey, f"{self.image_table_name}_logos", "", logo.compare)
-
-        return poster_uploaded, background_uploaded, logo_uploaded
 
 
     def get_ratings(self, item):

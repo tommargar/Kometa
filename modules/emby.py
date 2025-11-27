@@ -1,4 +1,5 @@
 import os
+import random
 import re
 import time
 from datetime import datetime, timedelta
@@ -7,13 +8,17 @@ from urllib import parse
 from xml.etree.ElementTree import ParseError
 
 import requests
+from PIL import Image
+from plexapi.audio import Artist, Album, Track
 from plexapi.exceptions import BadRequest, Unauthorized
+from plexapi.playlist import Playlist
 from requests.exceptions import ConnectionError, ConnectTimeout
 
 from modules import util, builder
-from modules.emby_server import EmbyServer, Collection
+from modules.emby_server import EmbyServer, Collection, FilterChoiceEmby, Movie, Show, Season, Episode
 from modules.library import Library
 from modules.logs import WARNING
+from modules.poster import ImageData
 from modules.util import Failed
 from urllib.parse import unquote, parse_qsl, parse_qs
 
@@ -457,6 +462,7 @@ class Emby(Library):
         self.clean_bundles = params["emby"].get("clean_bundles", False)
         self.empty_trash = params["emby"].get("empty_trash", False)
         self.optimize = params["emby"].get("optimize", False)
+        self._search_choices_cache = {}
         # unused end
         self.session = self.config.Requests.session # init?
         if self.emby["verify_ssl"] is False and self.config.Requests.global_ssl is True:
@@ -596,11 +602,78 @@ class Emby(Library):
         logger.info(f"Type: {self.type}")
         logger.info(f"Ratings Source: {self.ratings_source}")
 
+    def update_smart_collection(self, collection, uri_args):
+        self.test_smart_filter(uri_args)
+
+        new_items = self.fetchItems(uri_args)
+        current_items = collection.items()
+        add_items, remove_items, keep_items = self.calculate_add_remove_items(new_items, current_items)
+
+
+        # return
+
+        logger.info("")
+        logger.separator(f"Syncing SmartEmby Collection {collection.title} {self.type}", space=False, border=False)
+        logger.info("")
+
+
+        total = len(add_items) + len(remove_items)
+        spacing = len(str(total)) * 2 + 1
+
+        # Prüfe auf hinzugefügte oder unveränderte Items
+        for i, item in enumerate(add_items, 1):
+            current_operation = "+"
+            number_text = f"{i}/{total}"
+            logger.info(
+                f"{number_text:>{spacing}} | {collection.title} {self.type} | {current_operation} | {util.item_title(item)}")
+
+        # Prüfe auf hinzugefügte oder unveränderte Items
+        for i, item in enumerate(remove_items, 1):
+            current_operation = "-"
+            number_text = f"{i + len(add_items)}/{total}"
+            logger.info(
+                f"{number_text:>{spacing}} | {collection.title} {self.type} | {current_operation} | {util.item_title(item)}")
+
+        if len(remove_items) >0:
+            self.EmbyServer.add_remove_plex_object_from_collection(collection.title, remove_items, 'delete', collection_id = collection.ratingKey)
+            # print(f"Removed {len(remove_items)} from Emby {collection.title} ")
+        if len(add_items) >0:
+            self.EmbyServer.add_remove_plex_object_from_collection(collection.title, add_items, 'add', collection_id = collection.ratingKey)
+            # print(f"Added {len(add_items)} to Emby {collection.title} ")
+
+        logger.exorcise()
+        logger.info("")
+        item_label = f"{self.type.capitalize()}{'s' if total > 1 else ''}"
+        logger.info(f"{total} {item_label} Processed - Added {len(add_items)} {item_label} labels, Removed {len(remove_items)} {item_label} labels")
+
+        # self._query(f"/library/collections/{collection.ratingKey}/items{utils.joinArgs({'uri': self.build_smart_filter(uri_args)})}", put=True)
+
+
     # Backend-agnostic helpers
     def get_seasons(self, show):
         if hasattr(show, "seasons"):
             return list(show.seasons)
         return []
+
+    def delete(self, obj):
+        if isinstance(obj, Collection):
+            # print(f"EMBY DELETE: {obj}")
+            self.EmbyServer.delete_collection(obj)
+            return
+        elif isinstance(obj, list) and len(obj) == 0:
+            return
+        else:
+            logger.info(f"Failed to delete object {obj}")
+            logger.stacktrace()
+            return
+            raise Failed(f"Plex Error: Failed to delete {obj.title}")
+
+        # return
+        try:
+            return self.query(obj.delete)
+        except Exception:
+            logger.stacktrace()
+            raise Failed(f"Plex Error: Failed to delete {obj.title}")
 
     def get_episodes(self, season):
         if hasattr(season, "episodes"):
@@ -675,7 +748,7 @@ class Emby(Library):
                         now = datetime.now()
                 self.config.tpdb_timer = now
             if image.is_poster and image.is_url:
-                self.upload_poster(item, url=image.location)
+                self.upload_poster(item, image, url=image.location)
             elif image.is_poster:
                 upload_success = self.validate_image_size(image)
                 if upload_success:
@@ -695,6 +768,383 @@ class Emby(Library):
         except BadRequest as e:
             item.refresh()
             raise Failed(e)
+
+    def upload_images(self, item, poster=None, background=None, logo=None, overlay=False):
+        poster_uploaded = False
+        if poster is not None:
+            try:
+                emby_item = self.EmbyServer.get_item(item.ratingKey)
+                emby_images = emby_item.get("ImageTags")
+                emby_poster_compare = emby_images.get("Primary") if emby_images else None
+                poster_key = f"{poster.compare}-{emby_poster_compare}" if emby_poster_compare else poster.compare
+                image_compare = None
+                if self.config.Cache:
+                    _, image_compare, _ = self.config.Cache.query_image_map(item.ratingKey, self.image_table_name)
+                if not image_compare or not emby_poster_compare or str(poster_key) != str(image_compare):
+                    if overlay:
+                        # self.reload(item, force=True)
+                        if overlay and "Overlay" in [la.tag for la in self.item_labels(item)]:
+                            item.removeLabel("Overlay")
+                    poster_uploaded = self._upload_image(item, poster)
+                    logger.info(f"Metadata: {poster.attribute} updated {poster.message}")
+                elif self.show_asset_not_needed:
+                    logger.info(f"Metadata: {poster.prefix}poster update not needed")
+            except Failed:
+                logger.stacktrace()
+                logger.error(f"Metadata: {poster.attribute} failed to update {poster.message}")
+
+        background_uploaded = False
+        if background is not None:
+            try:
+                image_compare = None
+                if self.config.Cache:
+                    _, image_compare, _ = self.config.Cache.query_image_map(item.ratingKey, f"{self.image_table_name}_backgrounds")
+                if not image_compare or str(background.compare) != str(image_compare):
+                    background_uploaded = self._upload_image(item, background)
+                    logger.info(f"Metadata: {background.attribute} updated {background.message}")
+                elif self.show_asset_not_needed:
+                    logger.info(f"Metadata: {background.prefix}background update not needed")
+            except Failed:
+                logger.stacktrace()
+                logger.error(f"Metadata: {background.attribute} failed to update {background.message}")
+
+        logo_uploaded = False
+        if logo is not None:
+            try:
+                image_compare = None
+                if self.config.Cache:
+                    _, image_compare, _ = self.config.Cache.query_image_map(item.ratingKey, f"{self.image_table_name}_logos")
+                if not image_compare or str(logo.compare) != str(image_compare):
+                    logo_uploaded = self._upload_image(item, logo)
+                    logger.info(f"Metadata: {logo.attribute} updated {logo.message}")
+                elif self.show_asset_not_needed:
+                    logger.info(f"Metadata: {logo.prefix}logo update not needed")
+            except Failed:
+                logger.stacktrace()
+                logger.error(f"Metadata: {logo.attribute} failed to update {logo.message}")
+
+        if self.config.Cache:
+
+            if poster_uploaded:
+                emby_item = self.EmbyServer.get_item(item.ratingKey, force_refresh=True)
+                emby_images = emby_item.get("ImageTags")
+                emby_poster_compare = emby_images.get("Primary") if emby_images else None
+                poster_key = f"{poster.compare}-{emby_poster_compare}" if emby_poster_compare else poster.compare
+
+                self.config.Cache.update_image_map(item.ratingKey, self.image_table_name, "", poster_key if poster else "")
+            if background_uploaded:
+                self.config.Cache.update_image_map(item.ratingKey, f"{self.image_table_name}_backgrounds", "", background.compare)
+            if logo_uploaded:
+                self.config.Cache.update_image_map(item.ratingKey, f"{self.image_table_name}_logos", "", logo.compare)
+
+        return poster_uploaded, background_uploaded, logo_uploaded
+
+
+    def _invalidate_metadata_caches(self, rating_key=None):
+        """Clear search/filter caches for a specific item after metadata mutations."""
+        if hasattr(self, "_search_choices_cache") and isinstance(self._search_choices_cache, dict):
+            self._search_choices_cache.clear()
+        if rating_key is not None and hasattr(self, "filter_items_cache") and isinstance(self.filter_items_cache, dict):
+            self.filter_items_cache.pop(rating_key, None)
+    def get_search_choices(self, search_name, title=True, name_pairs=False, person_list = None, tmdb_person_id = None):
+        final_search = search_translation[search_name] if search_name in search_translation else search_name
+        final_search = show_translation[final_search] if self.is_show and final_search in show_translation else final_search
+        final_search = get_tags_translation[final_search] if final_search in get_tags_translation else final_search
+        normalized_person_list = None
+        if person_list:
+            normalized_person_list = tuple(sorted(str(person).strip().lower() for person in person_list if person is not None))
+        cache_key = (
+            final_search,
+            bool(title),
+            bool(name_pairs),
+            normalized_person_list,
+            str(tmdb_person_id) if tmdb_person_id is not None else None,
+        )
+        if cache_key in self._search_choices_cache:
+            cached_choices, cached_names = self._search_choices_cache[cache_key]
+            return dict(cached_choices), list(cached_names)
+        try:
+            names = []
+            seen_names = set()
+            choices = {}
+            use_title = title and final_search not in ["contentRating", "audioLanguage", "subtitleLanguage", "resolution"]
+            tags_iter = self.get_tags(final_search, person_list = person_list, tmdb_person_id = tmdb_person_id)
+            for choice in tags_iter:
+
+                if choice.title not in seen_names:
+                    seen_names.add(choice.title)
+                    names.append((choice.title, choice.key) if name_pairs else choice.title)
+                choices[choice.title] = choice.title if use_title else choice.key
+                choices[choice.key] = choice.title if use_title else choice.key
+                choices[choice.title.lower()] = choice.title if use_title else choice.key
+                choices[choice.key.lower()] = choice.title if use_title else choice.key
+            self._search_choices_cache[cache_key] = (dict(choices), list(names))
+            return choices, names
+        except Warning:
+            logger.debug(f"Search Attribute: {final_search}")
+            raise Failed(f"Emby Error: plex_search attribute: {search_name} not supported")
+
+    def create_blank_collection(self, title):
+        # Create a blank collection for Emby, add at least one title
+        return self.EmbyServer.create_collection(title,[self._emby_all_items[0].ratingKey], self.Emby.get("Id"))
+
+
+
+    def get_tags(self, tag, person_list=None, tmdb_person_id = None):
+        if isinstance(tag, str):
+            match = re.match(r'(?:([a-zA-Z]*)\.)?([a-zA-Z]+)', tag)
+            if not match:
+                raise BadRequest(f'Invalid filter field: {tag}')
+            _libtype, tag = match.groups()
+            libtype = _libtype or self.lib_type # e.g. show
+            # libtype = _libtype or self.Plex.TYPE # e.g. show
+
+            if not self.EmbyServer.is_in_filtertype(tag, libtype):
+                raise Warning(f'Unknown filter field "{tag}" for libtype "{libtype}". ') from None
+                try:
+                    tag = next(f for f in self.Plex.listFilters(libtype) if f.filter == tag)
+                except StopIteration:
+                    available_filters = [f.filter for f in self.Plex.listFilters(libtype)]
+                    raise NotFound(f'Unknown filter field "{tag}" for libtype "{libtype}". '
+                                   f'Available filters: {available_filters}') from None
+            my_search = tag
+        else:
+             my_search = tag.filter
+
+        # tag: <FilteringFilter:/library/sections/8/:Labels>
+        # items = {MediaContainer: 10} [<FilterChoice:284998:Overlay>, <FilterChoice:310126:Kometa>, <FilterChoice:310132:National-Film-Regist>, <FilterChoice:310150...-on-a-True-Stor>, <FilterChoice:310159:🎖Veteran's-Day-Movie>, <FilterChoice:310161:Seasonal>, <FilterChoice:310165:Top-Actors>
+        #  TAG = {str} 'MediaContainer'
+        #  TYPE = {NoneType} None
+        #  allowSync = {int} 0
+        #  augmentationKey = {NoneType} None
+        #  identifier = {str} 'com.plexapp.plugins.library'
+        #  key = {NoneType} None
+        #  librarySectionID = {NoneType} None
+        #  librarySectionTitle = {NoneType} None
+        #  librarySectionUUID = {NoneType} None
+        #  mediaTagPrefix = {str} '/system/bundle/media/flags/'
+        #  mediaTagVersion = {str} '1727455477'
+        #  offset = {NoneType} None
+        #  size = {int} 10
+        #  totalSize = {NoneType} None
+        #  00 = {FilterChoice} <FilterChoice:284998:Overlay>
+        #   TAG = {str} 'Directory'
+        #   TYPE = {NoneType} None
+        #   fastKey = {str} '/library/sections/8/all?label=284998'
+        #   key = {str} '284998'
+        #   thumb = {NoneType} None
+        #   title = {str} 'Overlay'
+        #   type = {NoneType} None
+        #  01 = {FilterChoice} <FilterChoice:310126:Kometa>
+        #   TAG = {str} 'Directory'
+        #   TYPE = {NoneType} None
+        #   fastKey = {str} '/library/sections/8/all?label=310126'
+        #   key = {str} '310126'
+        #   thumb = {NoneType} None
+        #   title = {str} 'Kometa'
+        #   type = {NoneType} None
+
+
+        # my_items = self.EmbyServer.get_collections_filter_choices()
+
+        # tag = {FilteringFilter} <FilteringFilter:/library/sections/8/:Actor>
+        #  TAG = {str} 'Filter'
+        #  TYPE = {NoneType} None
+        #  filter = {str} 'actor'
+        #  filterType = {str} 'string'
+        #  key = {str} '/library/sections/8/actor'
+        #  title = {str} 'Actor'
+        #  type = {str} 'filter'
+
+
+
+        emby_items = []
+
+        if my_search in ['studio', 'show.studio']: # todo: differentiate between studio & network?
+            labels = self.EmbyServer.get_emby_studios(self, self.Emby.get("Id"))
+
+            for label in labels:
+                key = str(label)
+                title = f"{str(label)}"
+
+                # Create a FilterChoiceEmby object
+                filter_choice = FilterChoiceEmby(key=key, title=title)
+                emby_items.append(filter_choice)
+            return emby_items
+        elif my_search in ['network', 'show.network']: # todo: differentiate between studio & network?
+            labels = self.EmbyServer.get_emby_networks(self, self.Emby.get("Id"))
+
+            for label in labels:
+                key = str(label)
+                title = f"{str(label)}"
+
+                # Create a FilterChoiceEmby object
+                filter_choice = FilterChoiceEmby(key=key, title=title)
+                emby_items.append(filter_choice)
+            return emby_items
+        elif my_search in ['country']:
+            labels = self.EmbyServer.get_emby_countries(self.Emby.get("Id"))
+
+            for label in labels:
+                key = str(label)
+                title = f"{str(label)}"
+
+                # Create a FilterChoiceEmby object
+                filter_choice = FilterChoiceEmby(key=key, title=title)
+                emby_items.append(filter_choice)
+            return emby_items
+        elif my_search in ['genre']:
+            genres = self.EmbyServer.get_emby_genres(self.Emby.get("Id"))
+
+            for genre in genres:
+                key = str(genre)
+                title = f"{str(genre)}"
+
+                # Create a FilterChoiceEmby object
+                filter_choice = FilterChoiceEmby(key=key, title=title)
+                emby_items.append(filter_choice)
+            return emby_items
+        elif my_search in ['contentRating']:
+            content_ratings = self.EmbyServer.get_official_age_ratings(self.Emby.get("Id"))
+
+            for rating in content_ratings:
+                key = rating.get("Name")
+                if key:
+                    # Create a FilterChoiceEmby object
+                    filter_choice = FilterChoiceEmby(key=key, title=key)
+                    emby_items.append(filter_choice)
+            return emby_items
+        elif my_search in ['label', 'show.label']:
+            labels = self.EmbyServer.get_emby_item_tags(self, self.Emby.get("Id"), search_all=True)
+
+            labels += self.EmbyServer.get_emby_countries(self.Emby.get("Id"))
+            icon = '📺' if self.type == 'Show' else '🎥'
+            name = self.name
+            composed_name = f'{icon} {name} '
+            for label in labels:
+                key = str(label)
+                title = f"{str(label)}"
+
+                # Create a FilterChoiceEmby object
+                filter_choice = FilterChoiceEmby(key=key, title=title)
+                emby_items.append(filter_choice)
+                if str(label).startswith(composed_name):
+                    label_new = str(label).replace(composed_name, '')
+                    key = str(label_new)
+                    title = f"{str(label_new)}"
+                    # Create a FilterChoiceEmby object
+                    filter_choice = FilterChoiceEmby(key=key, title=title)
+                    emby_items.append(filter_choice)
+
+            return emby_items
+        elif my_search in ['decade']:
+            years = self.EmbyServer.get_years(self.Emby.get("Id"))
+            dekaden_set = set()
+
+            for y in years:
+                jahr = int(y['Name'])
+                dekade = (jahr // 10) * 10
+                dekaden_set.add(dekade)
+
+            dekaden_liste = sorted(dekaden_set)
+
+            for dec in dekaden_liste:
+                key = str(dec)
+                title = f"{str(dec)}s"
+
+                # Create a FilterChoiceEmby object
+                filter_choice = FilterChoiceEmby(key=key, title=title)
+                emby_items.append(filter_choice)
+            return emby_items
+        #             for decade in decades:
+        #                 key = decade
+        #                 title = f"{decade}s"
+        # 0 = {FilterChoice} <FilterChoice:2020:2020s>
+        # 1 = {FilterChoice} <FilterChoice:2010:2010s>
+
+        # 0 = {FilterChoice} <FilterChoice:2020:2020s>
+        #  TAG = {str} 'Directory'
+        #  TYPE = {NoneType} None
+        #  fastKey = {str} '/library/sections/8/all?decade=2020'
+        #  key = {str} '2020'
+        #  thumb = {NoneType} None
+        #  title = {str} '2020s'
+        #  type = {NoneType} None
+
+        elif my_search in ["actor", "director", "writer", "producer", "composer"]:
+
+            # short cut with proper tmdb id
+            if tmdb_person_id and len(person_list) == 1:
+                my_person = self.EmbyServer.get_person_info_bulk([tmdb_person_id], "tmdb")
+                my_choice = FilterChoiceEmby(key=my_person.get(int(tmdb_person_id)), title=person_list[0], thumb=None)
+                return [my_choice]
+
+            emby_people = self.EmbyServer.get_people(my_search, person_list)
+
+            for person in emby_people:
+                key = person.get('Id')
+                title = person.get('Name')
+                prov_ids = person.get('ProviderIds')
+                tmdb_id = prov_ids.get('Tmdb') if prov_ids else None
+
+                # Construct the thumbnail URL
+                thumb = None
+                if 'ImageTags' in person and 'Primary' in person['ImageTags']:
+                    server_url = self.EmbyServer.emby_server_url
+                    image_tag = person['ImageTags']['Primary']
+                    thumb = f"{server_url}/Items/{key}/Images/Primary?tag={image_tag}"
+
+                # Create a FilterChoiceEmby object
+                filter_choice = FilterChoiceEmby(key=key, title=title, thumb=thumb)
+                emby_items.append(filter_choice)
+
+            # if len(emby_items) > 0:
+            return emby_items
+        elif my_search in ['resolution']:
+            my_dict = self.EmbyServer.get_resolutions()
+            return my_dict
+                # key = str(dec)
+                # title = f"{str(dec)}s"
+                #
+                # # Create a FilterChoiceEmby object
+                # filter_choice = FilterChoiceEmby(key=key, title=title)
+                # emby_items.append(filter_choice)
+
+
+        # Errors:
+        # 'country'
+        # country, region + continent not working
+
+        raise Failed(f"Not implemented Emby search FilterChoice {tag}")
+
+        items = self.Plex.findItems(self.Plex._server.query(tag.key), FilterChoice)
+
+        #     {
+        #       "Name": "Wolfgang Petersen",
+        #       "ServerId": "37de8e11ee0748bea8d2080a13984949",
+        #       "Id": "61041",
+        #       "Type": "Person",
+        #       "ImageTags": {
+        #         "Primary": "ca733b3b975daa618201765a10805fe7"
+        #       },
+        #       "BackdropImageTags": []
+        #     }
+
+        # items_filter = object[FilterChoice]()
+        # key: '/library/sections/8/label'
+        # Plex:
+        #         for elem in data:
+        #             if self._checkAttrs(elem, **kwargs):
+        #                 item = self._buildItemOrNone(elem, cls, initpath)
+        #                 if item is not None:
+        #                     items.append(item)
+        #         return items
+
+        if tag.key.endswith("/collection?type=4"): # no idea
+            keys = [k.key for k in items]
+            keys.extend([k.key for k in self.Plex.findItems(self.Plex._server.query(f"{tag.key[:-1]}3"), FilterChoice)])
+            items = [i for i in self.Plex.findItems(self.Plex._server.query(tag.key[:-7]), FilterChoice) if i.key not in keys]
+        return items
 
     def edit_tags(self, attr, obj, add_tags=None, remove_tags=None, sync_tags=None, do_print=True, locked=True,
                   is_locked=None):
@@ -784,6 +1234,100 @@ class Emby(Library):
                 logger.info(final)
         return final[28:] if final else final
 
+    def alter_collection(self, items, collection, smart_label_collection=False, add=True, collection_id = None):
+        maintain_status = True
+        locked_items = []
+        unlocked_items = []
+        if not smart_label_collection and maintain_status and self.agent in ["tv.plex.agents.movie", "tv.plex.agents.series"]:
+            for item in items:
+                # emby
+                # item = self.reload(item)
+                if next((f for f in item.fields if f.name == "collection"), None) is not None:
+                    locked_items.append(item)
+                else:
+                    unlocked_items.append(item)
+        else:
+            locked_items = items
+
+        for _items, locked in [(locked_items, True), (unlocked_items, False)]:
+            if _items:
+                # Smart Label Collection (verwende JSON-basierte Labels)
+                if smart_label_collection:
+                    if add:
+                        # add / remove collection tag/label
+                        # ToDo: Remove the tags for smart label collections
+                        # if False:
+                        for item in _items:
+                            # Füge ein Label hinzu
+                            self.EmbyServer.add_tags(item.ratingKey,[collection])
+                            self._invalidate_metadata_caches(item.ratingKey)
+
+                                # add_label(kometa_labels, item.ratingKey, collection)
+                                # save_labels_to_file(file_path_kometa, kometa_labels)
+                        self.EmbyServer.add_remove_plex_object_from_collection(collection, _items, 'add')
+
+
+                    else:
+                        for item in _items:
+                            # Entferne ein Label (JSON-basiert)
+                            self.EmbyServer.remove_tags(item.ratingKey, [collection])
+                            self._invalidate_metadata_caches(item.ratingKey)
+                            # remove_label(kometa_labels, item.ratingKey, collection)
+                            # save_labels_to_file(file_path_kometa, kometa_labels)
+                        self.EmbyServer.add_remove_plex_object_from_collection(collection, _items, 'delete')
+
+                # Traditionelle Sammlungen (BoxSets in Emby)
+                elif add:
+                    rating_keys = [item.ratingKey for item in _items]
+                    added = self.EmbyServer.add_to_collection(collection, rating_keys)
+                    # Sammlung erstellen oder Medien hinzufügen
+                    if not added:
+                        self.EmbyServer.create_collection(collection, rating_keys, locked=locked, parent_id= self.Emby.get("Id"))
+                    for rating_key in rating_keys:
+                        self._invalidate_metadata_caches(rating_key)
+                else:
+                    # Tags entfernen und Sammlung löschen
+                    for item in _items:
+                        self.EmbyServer.remove_tags(item.ratingKey, [collection])
+                        self._invalidate_metadata_caches(item.ratingKey)
+                    # self.EmbyServer.remove_boxset(collection, collection_id)
+                    self.EmbyServer.add_remove_plex_object_from_collection(collection, items, 'delete')
+
+        # for _items, locked in [(locked_items, True), (unlocked_items, False)]:
+        #     if _items:
+        #         # self.Plex.batchMultiEdits(_items)
+        #         if smart_label_collection:
+        #             self.query_data(self.Plex.addLabel if add else self.Plex.removeLabel, collection)
+        #         elif add:
+        #             self.Plex.addCollection(collection, locked=locked)
+        #         else:
+        #             self.EmbyServer.remove_kometa_tags_from_collection(collection)
+        #             self.Plex.removeCollection(collection, locked=locked)
+        #         # self.Plex.saveMultiEdits()
+
+    def calculate_add_remove_items(self, new_items, current_items):
+        """
+        Berechnet die Listen von Items, die hinzugefügt (add_items) oder entfernt (remove_items) werden müssen.
+
+        :param new_items: Liste der neuen Items (z. B. aus fetchItems)
+        :param current_items: Liste der aktuellen Items in der Collection
+        :return: Tuple (add_items, remove_items)
+        """
+        # Extrahiere die ratingKeys für schnellen Vergleich
+        new_keys = {item.ratingKey for item in new_items}
+        current_keys = {item.ratingKey for item in current_items}
+
+        # Berechne Items, die hinzugefügt werden müssen (in new_items, aber nicht in current_items)
+        add_items = [item for item in new_items if item.ratingKey not in current_keys]
+
+        # Berechne Items, die entfernt werden müssen (in current_items, aber nicht in new_items)
+        remove_items = [item for item in current_items if item.ratingKey not in new_keys]
+
+        keep_items = [item for item in current_items if item.ratingKey in new_keys]
+
+        return add_items, remove_items, keep_items
+
+
     def find_poster_url(self, item):
         pass
     def smart_label_check(self, label):
@@ -823,6 +1367,525 @@ class Emby(Library):
         if text != final:
             logger.warning(f"Collection Warning: {text} attribute will run as {final}")
         return attribute, modifier, final
+
+    def _can_use_emby_cache(self, emby_query_params):
+        """Return True when the local cache can satisfy the requested filters."""
+        if not emby_query_params:
+            return False
+
+        if emby_query_params.get("Ids"):
+            return False
+
+        if "PersonIds" in emby_query_params:
+            include_types = emby_query_params.get("IncludeItemTypes", "")
+            if include_types:
+                include_person = any(
+                    t.strip().lower() == "person" for t in include_types.split(",") if t.strip()
+                )
+                if include_person:
+                    return False
+
+        supported_keys = {
+            "Recursive",
+            "Fields",
+            "IncludeItemTypes",
+            "ParentId",
+            "Years",
+            "Genres",
+            "Studios",
+            "Tags",
+            "OfficialRatings",
+            "MinCriticRating",
+            "MaxCriticRating",
+            "MinCommunityRating",
+            "MaxCommunityRating",
+            "MinCustomRating",
+            "MaxCustomRating",
+            "MinPremiereDate",
+            "MaxPremiereDate",
+            "Limit",
+            "SortBy",
+            "SortOrder",
+            "PersonIds",
+            "PersonTypes",
+        }
+
+        for key, value in emby_query_params.items():
+            if key.startswith("_"):
+                continue
+            if key not in supported_keys and value not in (None, ""):
+                return False
+
+        return True
+
+    def _parse_emby_datetime(self, value):
+        """Parse ISO timestamps from Emby and ALWAYS return UTC-aware datetimes (or None)."""
+        if not value:
+            return None
+
+        # Bereits datetime?
+        if isinstance(value, datetime):
+            return self._to_aware_utc(value)
+
+        s = str(value).strip()
+
+        # Emby nutzt häufig 'Z' -> UTC
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+
+        # Emby liefert teils 7+ Nachkommastellen. Kürzen auf 6 (Python-Mikrosekunden).
+        try:
+            # Offset-Position finden (falls vorhanden)
+            off_idx = max(s.rfind("+"), s.rfind("-"))
+            time_part, offset = (s[:off_idx], s[off_idx:]) if off_idx > 10 else (s, "")
+            if "." in time_part:
+                base, frac = time_part.split(".", 1)
+                frac = "".join(c for c in frac if c.isdigit())
+                frac = (frac + "000000")[:6]
+                time_part = f"{base}.{frac}"
+            s_norm = f"{time_part}{offset}"
+
+            dt = datetime.fromisoformat(s_norm)
+            return self._to_aware_utc(dt)
+        except Exception:
+            # Fallbacks – liefern naiv, darum danach _to_aware_utc
+            for fmt in ("%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S"):
+                try:
+                    dt = datetime.strptime(s.replace("Z", ""), fmt)
+                    return self._to_aware_utc(dt)
+                except Exception:
+                    continue
+            return None
+
+    def find_item_assets(self, item, item_asset_directory=None, asset_directory=None, folder_name=None):
+        poster = None
+        background = None
+        logo = None
+
+        if asset_directory is None:
+            asset_directory = self.asset_directory
+
+        is_top_level = isinstance(item, (Movie, Artist, Show, Collection, Playlist, str))
+        if isinstance(item, Album):
+            prefix = f"{item.parentTitle} Album {item.title}'s "
+            file_name = item.title
+        elif isinstance(item, Season):
+            prefix = f"{item.parentTitle} Season {item.seasonNumber}'s "
+            file_name = f"Season{'0' if not item.seasonNumber or item.seasonNumber < 10 else ''}{item.seasonNumber}"
+        elif isinstance(item, Episode):
+            prefix = f"{item.grandparentTitle} {item.seasonEpisode.upper()}'s "
+            file_name = item.seasonEpisode.upper()
+        else:
+            prefix = f"{item if isinstance(item, str) else item.title}'s "
+            file_name = "poster"
+
+        if not item_asset_directory:
+            if isinstance(item, (Movie, Artist, Album, Show, Episode, Season)):
+                if isinstance(item, (Episode, Season)):
+                    starting = item.show()
+                elif isinstance(item, (Album, Track)):
+                    starting = item.artist()
+                else:
+                    starting = item
+                emby_item = self.EmbyServer.get_item(starting.ratingKey)
+                emby_path_media = emby_item.get('Path', None)
+                # directory_path = os.path.dirname(emby_path_media)
+                # starting.locations.append(directory_path)
+
+                if not emby_path_media:
+                    raise Failed(f"Asset Warning: No video filepath found for {item.title}")
+                path_test = str(emby_path_media)
+                if not os.path.dirname(path_test):
+                    path_test = path_test.replace("\\", "/")
+                folder_name = os.path.basename(os.path.dirname(path_test) if isinstance(starting, Movie) else path_test)
+            elif isinstance(item, (Collection, Playlist)):
+                folder_name = item.title
+            else:
+                folder_name = item
+            folder_name, _ = util.validate_filename(folder_name)
+
+        if not self.asset_folders:
+            file_name = folder_name if file_name == "poster" else f"{folder_name}_{file_name}"
+
+        if not item_asset_directory:
+            for ad in asset_directory:
+                if self.asset_folders:
+                    if os.path.isdir(os.path.join(ad, folder_name)):
+                        item_asset_directory = os.path.join(ad, folder_name)
+                    else:
+                        for n in range(1, self.asset_depth + 1):
+                            new_path = ad
+                            for i in range(1, n + 1):
+                                new_path = os.path.join(new_path, "*")
+                            matches = util.glob_filter(os.path.join(new_path, folder_name))
+                            if len(matches) > 0:
+                                item_asset_directory = os.path.abspath(matches[0])
+                                break
+                else:
+                    matches = util.glob_filter(os.path.join(ad, f"{file_name}.*"))
+                    if len(matches) > 0:
+                        item_asset_directory = ad
+                if item_asset_directory:
+                    break
+            if not item_asset_directory:
+                if self.asset_folders:
+                    if self.create_asset_folders and asset_directory:
+                        item_asset_directory = os.path.join(asset_directory[0], folder_name)
+                        os.makedirs(item_asset_directory, exist_ok=True)
+                        logger.warning(f"Asset Warning: Asset Directory Not Found and Created: {item_asset_directory}")
+                    else:
+                        raise Failed(f"Asset Warning: Unable to find asset folder: '{folder_name}'")
+                return None, None, None, item_asset_directory, folder_name
+
+        poster_filter = os.path.join(item_asset_directory, f"{file_name}.*")
+        background_filter = os.path.join(item_asset_directory, "background.*" if file_name == "poster" else f"{file_name}_background.*")
+        logo_filter = os.path.join(item_asset_directory, "logo.*" if file_name == "poster" else f"{file_name}_logo.*")
+
+        poster_matches = util.glob_filter(poster_filter)
+        if len(poster_matches) > 0:
+            poster = ImageData("asset_directory", os.path.abspath(poster_matches[0]), prefix=prefix, is_url=False)
+
+        background_matches = util.glob_filter(background_filter)
+        if len(background_matches) > 0:
+            background = ImageData("asset_directory", os.path.abspath(background_matches[0]), prefix=prefix, image_type="background", is_url=False)
+
+        logo_matches = util.glob_filter(logo_filter)
+        if len(logo_matches) > 0:
+            logo = ImageData("asset_directory", os.path.abspath(logo_matches[0]), prefix=prefix, image_type="logo", is_url=False)
+
+        if is_top_level and self.asset_folders and self.dimensional_asset_rename and (not poster or not background):
+            for file in util.glob_filter(os.path.join(item_asset_directory, "*.*")):
+                if file.lower().endswith((".png", ".jpg", ".jpeg", "webp")) and not re.match(r"s\d+e\d+|season\d+", os.path.basename(file).lower()):
+                    try:
+                        with Image.open(file) as image:
+                            _w, _h = image.size
+                        if not poster and _h >= _w:
+                            new_path = os.path.join(os.path.dirname(file), f"poster{os.path.splitext(file)[1].lower()}")
+                            os.rename(file, new_path)
+                            poster = ImageData("asset_directory", os.path.abspath(new_path), prefix=prefix, is_url=False)
+                        elif not background and _w > _h:
+                            new_path = os.path.join(os.path.dirname(file), f"background{os.path.splitext(file)[1].lower()}")
+                            os.rename(file, new_path)
+                            background = ImageData("asset_directory", os.path.abspath(new_path), prefix=prefix, image_type="background", is_url=False)
+                        if poster and background:
+                            break
+                    except OSError:
+                        logger.error(f"Asset Error: Failed to open image: {file}")
+
+        return poster, background, logo, item_asset_directory, folder_name
+
+    def get_ids(self, item):
+        provider_ids = self.EmbyServer.get_provider_ids(item)
+        emby_imdb_id = provider_ids[0]
+        emby_tvdb_id = provider_ids[1]
+        emby_tmdb_id = provider_ids[2]
+
+        return emby_tmdb_id, emby_tvdb_id, emby_imdb_id
+
+    def _filter_emby_native_items(self, items, query_params):
+        """Apply supported Emby filters to a list of cached native items."""
+        if items is None:
+            return None
+
+        filtered = list(items)
+
+        def get_year(item):
+            year = item.get("ProductionYear")
+            if isinstance(year, int):
+                return str(year)
+            if isinstance(year, str) and year.isdigit():
+                return year
+            premiere = item.get("PremiereDate")
+            premiere_date = self._parse_emby_datetime(premiere)
+            if premiere_date:
+                return str(premiere_date.year)
+            return None
+
+        def get_tags(item):
+            raw_tags = item.get("Tags") or []
+            if raw_tags:
+                return set(raw_tags)
+            tag_items = item.get("TagItems") or []
+            return {tag.get("Name") for tag in tag_items if tag.get("Name")}
+
+        def matches_person(item, person_ids, person_roles=None):
+            people = item.get("People")
+            if not isinstance(people, list):
+                return None
+            for person in people:
+                pid = person.get("Id")
+                if pid is not None and str(pid) in person_ids:
+                    if person_roles:
+                        person_type = person.get("Type")
+                        if isinstance(person_type, str) and person_type.lower() in person_roles:
+                            return True
+                    else:
+                        return True
+            return False
+
+        include_item_types = query_params.get("IncludeItemTypes")
+        if include_item_types:
+            allowed_types = {t.strip() for t in include_item_types.split(",") if t.strip()}
+            if allowed_types:
+                filtered = [item for item in filtered if item.get("Type") in allowed_types]
+
+        years_value = query_params.get("Years")
+        if years_value:
+            allowed_years = {y.strip() for y in years_value.split(",") if y.strip()}
+            if allowed_years:
+                hydrated_items = []
+                for item in filtered:
+                    item_year = get_year(item)
+                    if item_year is None:
+                        return None
+                    hydrated_items.append((item, item_year))
+                filtered = [item for item, item_year in hydrated_items if item_year in allowed_years]
+
+        min_premiere = self._parse_emby_datetime(query_params.get("MinPremiereDate"))
+        if min_premiere:
+            filtered = [
+                item
+                for item in filtered
+                if (premiere := self._parse_emby_datetime(item.get("PremiereDate"))) and premiere >= min_premiere
+            ]
+
+        max_premiere = self._parse_emby_datetime(query_params.get("MaxPremiereDate"))
+        if max_premiere:
+            filtered = [
+                item
+                for item in filtered
+                if (premiere := self._parse_emby_datetime(item.get("PremiereDate"))) and premiere <= max_premiere
+            ]
+
+        if any(
+            key in query_params
+            for key in (
+                "MaxCriticRating",
+                "MaxCommunityRating",
+                "MaxCustomRating",
+                "MinCriticRating",
+                "MinCommunityRating",
+                "MinCustomRating",
+            )
+        ):
+            updated_results = []
+            for item in filtered:
+                keep_item = True
+                custom_rating_value = 0
+                if "MaxCustomRating" in query_params or "MinCustomRating" in query_params:
+                    rating = self.EmbyServer.get_custom_rating_from_item(item)
+                    if rating is not None:
+                        custom_rating_value = rating
+                if "MaxCriticRating" in query_params:
+                    critic_rating = int(float(item.get("CriticRating", 0)))
+                    max_rating = int(query_params.get("MaxCriticRating"))
+                    if critic_rating > max_rating or critic_rating == 0:
+                        keep_item = False
+
+                if "MaxCommunityRating" in query_params:
+                    community_rating = float(item.get("CommunityRating", 0))
+                    max_rating = float(query_params.get("MaxCommunityRating"))
+                    if community_rating > max_rating or community_rating == 0:
+                        keep_item = False
+
+                if "MaxCustomRating" in query_params:
+                    max_rating = float(query_params.get("MaxCustomRating"))
+                    if custom_rating_value > max_rating or custom_rating_value == 0:
+                        keep_item = False
+
+                if "MinCriticRating" in query_params:
+                    critic_rating = int(float(item.get("CriticRating", 0)))
+                    min_rating = int(query_params.get("MinCriticRating"))
+                    if critic_rating < min_rating or critic_rating == 0:
+                        keep_item = False
+
+                if "MinCommunityRating" in query_params:
+                    community_rating = float(item.get("CommunityRating", 0))
+                    min_rating = float(query_params.get("MinCommunityRating"))
+                    if community_rating < min_rating or community_rating == 0:
+                        keep_item = False
+
+                if "MinCustomRating" in query_params:
+                    min_rating = float(query_params.get("MinCustomRating"))
+                    if custom_rating_value < min_rating or custom_rating_value == 0:
+                        keep_item = False
+
+                if keep_item:
+                    updated_results.append(item)
+
+            filtered = updated_results
+
+        if "Studios" in query_params:
+            studio_value = query_params["Studios"]
+            if isinstance(studio_value, str):
+                studio_names = [s.strip() for s in studio_value.split(",") if s.strip()]
+            else:
+                studio_names = [str(s).strip() for s in studio_value if str(s).strip()]
+            if studio_names:
+                studio_filter_results = []
+                for item in filtered:
+                    for studio in item.get("Studios", []) or []:
+                        if studio.get("Name") in studio_names:
+                            studio_filter_results.append(item)
+                            break
+                filtered = studio_filter_results
+
+        if "Genres" in query_params:
+            genres_value = query_params["Genres"]
+            if isinstance(genres_value, str):
+                source_genres = genres_value.split(",")
+            else:
+                source_genres = genres_value
+            requested_genres = {str(g).strip() for g in source_genres if str(g).strip()}
+            if requested_genres:
+                filtered = [
+                    item
+                    for item in filtered
+                    if requested_genres.issubset({str(g) for g in item.get("Genres", []) if g})
+                ]
+
+        if "Tags" in query_params:
+            requested_tags = {tag.strip() for tag in query_params["Tags"].split("|") if tag.strip()}
+            if requested_tags:
+                filtered = [
+                    item
+                    for item in filtered
+                    if (tags := get_tags(item)) and requested_tags.intersection(tags)
+                ]
+
+        if "OfficialRatings" in query_params:
+            allowed_ratings = {r.strip() for r in query_params["OfficialRatings"].split("|") if r.strip()}
+            if allowed_ratings:
+                filtered = [
+                    item
+                    for item in filtered
+                    if item.get("OfficialRating") in allowed_ratings
+                ]
+
+        resolution_filters = query_params.get("_Resolutions")
+        require_hdr = query_params.get("_RequireHdr")
+        if resolution_filters or require_hdr:
+            allowed_ids = None
+            if resolution_filters:
+                allowed_ids = set()
+                for res_key in resolution_filters:
+                    allowed_ids.update(str(i) for i in self.EmbyServer.media_by_resolution.get(res_key, []))
+            if require_hdr:
+                hdr_ids = set()
+                for hdr_key in ["dvhdr", "dvhdrplus", "hdr", "plus"]:
+                    hdr_ids.update(str(i) for i in self.EmbyServer.media_by_resolution.get(hdr_key, []))
+                allowed_ids = hdr_ids if allowed_ids is None else allowed_ids.intersection(hdr_ids)
+            if allowed_ids is not None:
+                filtered = [item for item in filtered if str(item.get("Id")) in allowed_ids]
+
+        if "PersonIds" in query_params:
+            person_ids = {pid.strip() for pid in query_params["PersonIds"].split(",") if pid.strip()}
+            person_roles = None
+            if "PersonTypes" in query_params:
+                raw_roles = query_params["PersonTypes"]
+                if isinstance(raw_roles, str):
+                    parsed_roles = {role.strip().lower() for role in raw_roles.split(",") if role.strip()}
+                else:
+                    parsed_roles = {str(role).strip().lower() for role in raw_roles if str(role).strip()}
+                if parsed_roles:
+                    person_roles = parsed_roles
+            person_matches = []
+            for item in filtered:
+                match = matches_person(item, person_ids, person_roles)
+                if match is None:
+                    return None
+                if match:
+                    person_matches.append(item)
+            filtered = person_matches
+
+        sort_key = query_params.get("SortBy")
+        if sort_key:
+            reverse_order = query_params.get("SortOrder", "Ascending").lower() == "descending"
+            if sort_key.lower() == "random":
+                random.shuffle(filtered)
+            else:
+                def _normalize_rating(value):
+                    if isinstance(value, (int, float)) and not isinstance(value, bool):
+                        return float(value)
+                    if isinstance(value, str):
+                        match = re.search(r"[-+]?\d*\.?\d+", value)
+                        if match:
+                            try:
+                                return float(match.group())
+                            except (TypeError, ValueError):
+                                return None
+                        return None
+                    if isinstance(value, dict):
+                        for sub_value in value.values():
+                            normalized = _normalize_rating(sub_value)
+                            if normalized is not None:
+                                return normalized
+                        return None
+                    if isinstance(value, (list, tuple, set)):
+                        for sub_value in value:
+                            normalized = _normalize_rating(sub_value)
+                            if normalized is not None:
+                                return normalized
+                        return None
+                    return None
+
+                def sort_value(item):
+                    value = item.get(sort_key)
+                    if sort_key in ["PremiereDate", "DateCreated"]:
+                        value = self._parse_emby_datetime(value) or datetime.min
+                    elif value is None and sort_key == "Name":
+                        value = item.get("SortName") or item.get("Name") or ""
+                    elif isinstance(sort_key, str) and "rating" in sort_key.lower():
+                        value = _normalize_rating(value)
+                    return value
+
+                try:
+                    sortable = []
+                    none_bucket = []
+                    for item in filtered:
+                        value = sort_value(item)
+                        if value is None:
+                            none_bucket.append(item)
+                        else:
+                            sortable.append((value, item))
+                    sortable.sort(key=lambda pair: pair[0], reverse=reverse_order)
+                    filtered = [item for _, item in sortable] + none_bucket
+                except Exception as e:
+                    logger.error(f"Error during local sorting by {sort_key}: {e}")
+                    return None
+
+        limit_value = query_params.get("Limit")
+        if limit_value:
+            try:
+                limit_int = int(limit_value)
+                if limit_int >= 0:
+                    filtered = filtered[:limit_int]
+            except (TypeError, ValueError):
+                logger.error(f"Invalid Limit value for local filtering: {limit_value}")
+                return None
+
+        return filtered
+
+    def search(self, title=None, sort=None, maxresults=None, libtype=None, **kwargs):
+        # print(title)
+        if libtype == "collection":
+            lib_id = self.Emby.get("Id")
+
+            return self.EmbyServer.get_boxsets_from_library(title, library_id=lib_id)
+
+            # return self.EmbyServer.search(title=title, sort=sort, maxresults=maxresults, libtype=libtype, **kwargs)
+            pass
+        else:
+            pass
+            # print(f"EMBY style: {self.EmbyServer.search(title=title, sort=sort, maxresults=maxresults, libtype=libtype, **kwargs)}")
+            # print(f"plex_search:{title} - {sort} - {maxresults} - {libtype} - {kwargs}")
+            # print(self.EmbyServer.search(title=title, sort=sort, maxresults=maxresults, libtype=libtype, **kwargs))
+            # print(self.Plex.search(title=title, sort=sort, maxresults=maxresults, libtype=libtype, **kwargs))
+
+        # plex_search: IMDb Lowest Rated - None - None - collection - {}
+        # [ < Collection: 204155:IMDb - Lowest - Rated >]
+
+        return self.EmbyServer.search(title=title, sort=sort, maxresults=maxresults, libtype=libtype, **kwargs)
 
 
     def fetchItems(self, uri_args):
@@ -1319,13 +2382,36 @@ class Emby(Library):
         lib_id = self.Emby.get("Id")
         return self.EmbyServer.get_boxsets_from_library(library_id = lib_id, label=label, native=True)
 
+    def get_actor_id(self, name):
 
-    def get_all_native(self, builder_level=None, load=False):
-        # todo remove
-        pass
+        return self.EmbyServer.get_actor_id(name)
+
+        results = self.Plex.hubSearch(name)
+        for result in results:
+            if isinstance(result, Role) and result.librarySectionID == self.Plex.key and result.tag == name:
+                return result.id
+
+    def fetch_item(self, item):
+        if isinstance(item, (Movie, Show, Season, Episode, Artist, Album, Track)):
+            return self.reload(item)
+        key = int(item)
+        if key in self.cached_items:
+            return self.reload(self.cached_items[key][0])
+        try:
+            current = self.fetchItem(key)
+            if isinstance(current, (Movie, Show, Season, Episode, Artist, Album, Track)):
+                return self.reload(current)
+        except (BadRequest, Warning) as e:
+            logger.trace(e)
+        raise Failed(f"Emby Error: Item {item} not found")
+
+    def get_all_native(self, builder_level=None, load = False):
+        return self.get_all(builder_level, load, native=True)
+
     def get_native_emby_item(self, emby_item_id):
-        # todo remove
+        return self.EmbyServer.get_item(emby_item_id)
         pass
+
 
     def get_provider_ids(self, item):
         return self.EmbyServer.get_provider_ids(item)
@@ -1358,12 +2444,86 @@ class Emby(Library):
         pass
     def notify_delete(self, message):
         pass
+
+
     def reload(self, item, force=False):
+        # todo: set dirty
         return item
         pass
     def upload_poster(self, item, image, url=False):
-        pass
-    def upload_poster_overlay(self, item, image, url=False):
-        pass
+        if url:
+            return self.EmbyServer.set_image_smart(item.ratingKey, image.location)
+        else:
+            return self.EmbyServer.set_image_smart(item.ratingKey, image.location)
+
+    def create_smart_collection(self, title, smart_type, uri_args, ignore_blank_results, minimum = None):
+
+        collection_id = self.EmbyServer.get_collection_id(title)
+        if collection_id:
+            return collection_id
+
+        if not ignore_blank_results:
+            self.test_smart_filter(uri_args)
+
+        # no smart collections in emby, using regular one
+        my_items = self.fetchItems(uri_args)
+
+        if minimum and minimum > len(my_items):
+            return None
+
+
+        return self.EmbyServer.create_smart_collection(title, smart_type, my_items, ignore_blank_results, self.Emby.get("Id"))
+        # print(f"{smart_type} - {uri_args}")
+
+
+        args = {
+            "type": smart_type,
+            "title": title,
+            "smart": 1,
+            "sectionId": self.Plex.key,
+            "uri": self.build_smart_filter(uri_args)
+        }
+        self._query(f"/library/collections{utils.joinArgs(args)}", post=True)
+
+
+    def upload_poster_overlay(self, item, image_temp_path, url=False):
+        # Not actually uploading anything to Emby, just saving the overlay png
+        file_extension = image_temp_path.split('.')[-1]
+        file_name = f"{item.ratingKey}.{file_extension}"
+        # todo: config path
+
+        export_file = os.path.join(self.overlay_destination_folder, file_name)
+
+        try:
+            # Erstellen des Zielverzeichnisses, falls es nicht existiert
+            destination_dir = os.path.dirname(self.overlay_destination_folder)
+            if not os.path.exists(destination_dir):
+                os.makedirs(destination_dir)
+
+            # Kopiere die Datei zum Ziel
+            import shutil
+            shutil.copy2(image_temp_path, export_file)
+            # print(f"Datei erfolgreich kopiert: {image_temp_path} -> {export_file}")
+        except Exception as e:
+            # print(f"Fehler beim Kopieren der Datei: {e}")
+            raise
     def upload_background(self, item, image, url=False):
-        pass
+        if url:
+            self.EmbyServer.set_image_smart(item.ratingKey, url, image_type="Backdrop")
+            # item.uploadArt(url=image)
+        else:
+            self.EmbyServer.set_image_smart(item.ratingKey, image, image_type="Backdrop")
+            # item.uploadArt(filepath=image)
+    def upload_logo(self, item, image, url=False):
+        if url:
+            self.EmbyServer.set_image_smart(item.ratingKey, url, image_type="ClearLogo")
+        else:
+            self.EmbyServer.set_image_smart(item.ratingKey, image, image_type="ClearLogo")
+
+    def upload_theme(self, collection, url=None, filepath=None):
+        return
+        key = f"/library/metadata/{collection.ratingKey}/themes"
+        if url:
+            self.PlexServer.query(f"{key}?url={quote_plus(url)}", method=self.PlexServer._session.post)
+        elif filepath:
+            self.PlexServer.query(key, method=self.PlexServer._session.post, data=open(filepath, 'rb').read())

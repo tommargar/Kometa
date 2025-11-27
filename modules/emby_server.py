@@ -1451,25 +1451,28 @@ class EmbyServer:
         # Korrekt: echten Exception-Typ werfen, NICHT WARNING (logging-level int)
         raise Failed(f"Cannot resolve Emby item id from type={type(plex_object).__name__}: {plex_object!r}")
 
-    def get_item(self, item_id: int | str, *, force_refresh: bool = False, fields: list[str] | None = None) -> dict | None:
-        item_id_str = str(item_id)
+    # ToDo: Merge with fetch_item, also merge item cache
+    def get_item(self, item_id: int | str, *, force_refresh: bool = False) -> dict | None:
         try:
-            item_id_int = int(item_id_str)
-        except (TypeError, ValueError):
-            item_id_int = None
+            item_id = int(item_id)
+        except: # will be triggered if item doesnt exist yet
+            return None
 
-        if force_refresh and item_id_int is not None:
-            self.dirty_items.add(item_id_int)
+        if not force_refresh and item_id in self.item_cache and item_id not in self.dirty_items:
+            return self.item_cache[item_id]
 
-        items = self.get_items_bulk([item_id_str], fields=fields, force_refresh=force_refresh) or {}
-        item = items.get(item_id_str)
-        if item is None and item_id_int is not None:
-            item = items.get(str(item_id_int))
-
-        if item is not None and item_id_int is not None:
-            self.dirty_items.discard(item_id_int)
-
-        return item
+        endpoint = f"/emby/users/{self.user_id}/Items/{item_id}?api_key={self.api_key}"
+        url = self.emby_server_url + endpoint
+        try:
+            resp = requests.get(url, headers=self.headers)
+            resp.raise_for_status()
+            data = resp.json()
+            self.item_cache[item_id] = data
+            self.dirty_items.discard(item_id)  # wieder „sauber“
+            return data
+        except Exception as e:
+            logger.ghost(f"Error occurred while getting item: {e}. URL: {url}.")
+            return None
 
     def get_item_images(self, item_id) -> dict:
         endpoint = f"/emby/Items/{item_id}/Images?api_key={self.api_key}"
