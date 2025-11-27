@@ -1729,8 +1729,6 @@ class Plex(Library):
             imdb_id = self.get_imdb_from_map(item)
         return tmdb_id, tvdb_id, imdb_id
 
-
-
     def get_ratings(self, item):
         ratings = {
             "plex_imdb": None,
@@ -1826,7 +1824,7 @@ class Plex(Library):
     def get_locked_attributes(self, item, titles=None, year_titles=None, item_type=None):
         if not item_type:
             item_type = self.type
-        # item = self.reload(item)
+        item = self.reload(item)
         attrs = {}
         match_dict = {}
         fields = {f.name: f for f in item.fields if f.locked}
@@ -1935,30 +1933,13 @@ class Plex(Library):
         return map_key, attrs
 
     def get_item_display_title(self, item_to_sort, sort=False):
-
         if isinstance(item_to_sort, Album):
             return f"{item_to_sort.artist().titleSort if sort else item_to_sort.parentTitle} Album {item_to_sort.titleSort if sort else item_to_sort.title}"
         elif isinstance(item_to_sort, Season):
-            titleSort = None
-            if sort:
-                season = self.EmbyServer.get_item(item_to_sort.ratingKey)
-                show = self.EmbyServer.get_item(season.get("SeriesId"))
-                titleSort = show.get("SortName")
-            return f"{titleSort if sort else item_to_sort.parentTitle} Season {item_to_sort.seasonNumber}"
+            return f"{item_to_sort.show().titleSort if sort else item_to_sort.parentTitle} Season {item_to_sort.seasonNumber}"
         elif isinstance(item_to_sort, Episode):
-            titleSort = None
-            if sort:
-                season = self.EmbyServer.get_item(item_to_sort.ratingKey)
-                show = self.EmbyServer.get_item(season.get("SeriesId"))
-                titleSort = show.get("SortName")
-            # ToDo - Not working / tested
             return f"{item_to_sort.show().titleSort if sort else item_to_sort.grandparentTitle} {item_to_sort.seasonEpisode.upper()}"
         else:
-            key = item_to_sort.ratingKey if not (isinstance(item_to_sort, int) or isinstance(item_to_sort, str)) else str(item_to_sort)
-            # must bei str Id
-            item = self.EmbyServer.get_item(key)
-            return item.get("SortName") if sort else item.get("Name")
-
             return item_to_sort.titleSort if sort else item_to_sort.title
 
     def split(self, text):
@@ -1988,11 +1969,6 @@ class Plex(Library):
 
     def check_filter(self, item, filter_attr, modifier, filter_final, filter_data, current_time):
         filter_actual = attribute_translation[filter_attr] if filter_attr in attribute_translation else filter_attr
-        if item.ratingKey in self.filter_items_cache:
-            emby_item = self.filter_items_cache[item.ratingKey]
-        else:
-            emby_item = self.EmbyServer.get_item(item.ratingKey)
-            self.filter_items_cache[item.ratingKey] = emby_item
         if isinstance(item, Movie):
             item_type = "movie"
         elif isinstance(item, Show):
@@ -2009,14 +1985,13 @@ class Plex(Library):
             item_type = "track"
         else:
             return True
-        # item = self.reload(item)
         if filter_attr not in builder.filters[item_type]:
             return True
-        elif filter_attr in builder.date_filters:
+        item = self.reload(item, force=filter_attr in ["genre", "label", "collection"])
+        if filter_attr in builder.date_filters:
             if util.is_date_filter(getattr(item, filter_actual), modifier, filter_data, filter_final, current_time):
                 return False
         elif filter_attr in builder.string_filters:
-            #ToDo: most of the stuff for proprietary Emby item not integrated yet
             values = []
             if filter_attr == "audio_track_title":
                 for media in item.media:
@@ -2032,8 +2007,11 @@ class Plex(Library):
                     if attr and attr not in values:
                         values.append(attr)
             elif filter_attr in ["filepath", "folder"]:
-                values = [emby_item.get("Path")]
-                # values = [loc for loc in item.locations if loc]
+                values = [loc for loc in item.locations if loc]
+            elif filter_attr == "season_title":
+                values = [item.season().title]
+            elif filter_attr == "show_title":
+                values = [item.show().title]
             else:
                 test_value = getattr(item, filter_actual)
                 values = [test_value] if test_value else []
@@ -2041,46 +2019,30 @@ class Plex(Library):
                 return False
         elif filter_attr in builder.boolean_filters:
             filter_check = False
-            # logger.info(f"filter attribute: {filter_attr}")
             if filter_attr == "has_collection":
                 filter_check = len(item.collections) > 0
-            elif filter_attr == "has_edition": # no edition in Emby, filename regex
+            elif filter_attr == "has_edition":
                 filter_check = True if item.editionTitle else False
             elif filter_attr == "has_stinger":
                 filter_check = False
                 if item.ratingKey in self.movie_rating_key_map and self.movie_rating_key_map[item.ratingKey] in self.config.mediastingers:
                     filter_check = True
             elif filter_attr == "has_overlay":
-                if os.path.exists(os.path.join(self.overlay_destination_folder, item.ratingKey, ".png")):
-                    filter_check = True
                 for label in self.item_labels(item):
                     if label.tag.lower().endswith(" overlay") or label.tag.lower() == "overlay":
                         filter_check = True
                         break
             elif filter_attr == "has_dolby_vision":
-                media_sources = emby_item.get("MediaSources", [])
-                # logger.warning(f"My media: {media_sources}")
-
-                for media in media_sources:
-                    media_streams = media.get("MediaStreams", [])
-                    for stream in media_streams:
-                        if stream.get("VideoRange") == "DolbyVision":
-                            # logger.warning("Found Dolby Vision!")
-                            filter_check = True
-                            break
-
-                # for media in item.media:
-                #     for part in media.parts:
-                #         for stream in part.videoStreams():
-                #             if stream.DOVIPresent:
-                #                 filter_check = True
-                #                 break
+                for media in item.media:
+                    for part in media.parts:
+                        for stream in part.videoStreams():
+                            if stream.DOVIPresent:
+                                filter_check = True
+                                break
             if util.is_boolean_filter(filter_data, filter_check):
                 return False
         elif filter_attr == "history":
-            my_date = emby_item.get("PremiereDate")
-            item_date = datetime.fromisoformat(my_date.replace("Z", "+00:00"))
-            # item_date = item.originallyAvailableAt
+            item_date = item.originallyAvailableAt
             if item_date is None:
                 return False
             elif filter_data == "day":
@@ -2105,9 +2067,7 @@ class Plex(Library):
             elif filter_attr == "tracks":
                 sub_items = item.tracks()
             else:
-                episodes = self.EmbyServer.get_items({"ParentId": item.ratingKey}, include_item_types="Episode")
-                sub_items = self.EmbyServer.convert_emby_to_plex(episodes)
-                # sub_items = item.episodes()
+                sub_items = item.episodes()
             filters_in = []
             percentage = 60
             for sub_atr, sub_data in filter_data.items():
@@ -2170,7 +2130,7 @@ class Plex(Library):
                                 attrs.extend([s.language, s.languageCode])
             elif filter_attr in ["content_rating", "year", "rating"]:
                 attrs = [getattr(item, filter_actual)]
-            elif filter_attr in ["actor", "country", "director", "genre", "label", "producer", "composer", "writer",
+            elif filter_attr in ["actor", "country", "director", "genre", "label", "producer", "writer",
                                  "collection", "network"]:
                 attrs = [attr.tag for attr in getattr(item, filter_actual)]
             else:
@@ -2178,15 +2138,10 @@ class Plex(Library):
             if modifier == ".regex":
                 has_match = False
                 for reg in filter_data:
-                    pattern = re.compile(reg)
                     for name in attrs:
-                        if name is None:
-                            continue
-                        if pattern.search(str(name)):
-                            has_match = True
-                            break
-                    if has_match:
-                        break
+                        if isinstance(name, str):
+                            if re.compile(reg).search(name):
+                                has_match = True
                 if has_match is False:
                     return False
             elif (not list(set(filter_data) & set(attrs)) and modifier == "") \
