@@ -712,24 +712,225 @@ class Emby(Library):
                 f"{'' if out_type or tag_type else f' updated to {display_value}'}"
             )
 
+        def get_ids(rating_keys, *, is_episode=False):
+            ids = []
+            for rating_key in rating_keys:
+                if hasattr(rating_key, "ratingKey"):
+                    ids.append(rating_key.ratingKey)
+                else:
+                    ids.append(rating_key)
+            if is_episode and any(not isinstance(rk, (int, str)) and not hasattr(rk, "episodeNumber") for rk in rating_keys):
+                raise Failed("Emby Error: Episode batch edits require episode rating keys or episode objects")
+            return ids
+
+        def get_tag_values(emby_item, keys):
+            values = set()
+            for key in keys:
+                for entry in emby_item.get(key) or []:
+                    if isinstance(entry, dict):
+                        name = entry.get("Name")
+                        if name:
+                            values.add(name)
+                    elif entry:
+                        values.add(entry)
+            return values
+
+        item_cache = {}
+        item_updates = {}
+
+        def get_emby_item(item_id):
+            if item_id not in item_cache:
+                emby_item = self.EmbyServer.get_item(item_id)
+                if emby_item is None:
+                    raise Failed(f"Emby Error: Unable to load item {item_id} for batch edit")
+                item_cache[item_id] = emby_item
+            return item_cache[item_id]
+
+        def get_update_entry(item_id):
+            if item_id not in item_updates:
+                emby_item = get_emby_item(item_id)
+                item_updates[item_id] = {
+                    "update": {},
+                    "locked_fields": list(emby_item.get("LockedFields") or []),
+                    "labels": {
+                        "current": get_tag_values(emby_item, ["TagItems", "Tags"]),
+                        "desired": None,
+                    },
+                    "genres": {
+                        "current": get_tag_values(emby_item, ["GenreItems", "Genres"]),
+                        "desired": None,
+                    },
+                }
+            return item_updates[item_id]
+
+        def update_field_state(field_map, edits, action, *, is_episode=False):
+            for item_attr, rating_keys in sorted(edits.items()):
+                if item_attr not in field_map:
+                    raise Failed(f"Emby Error: Unsupported {action} batch edit for '{item_attr}'")
+                item_field, clear_value = field_map[item_attr]
+                items = self.load_list_from_cache(get_ids(rating_keys, is_episode=is_episode)) if not is_episode else rating_keys
+                log_batch(item_attr, len(items), out_type=action, is_episode=is_episode)
+                for item in items:
+                    item_id = item.ratingKey if hasattr(item, "ratingKey") else item
+                    entry = get_update_entry(item_id)
+                    locked_fields = list(entry["locked_fields"])
+                    if action in ["remove", "lock"] and item_field not in locked_fields:
+                        locked_fields.append(item_field)
+                    if action in ["reset", "unlock"]:
+                        locked_fields = [f for f in locked_fields if f != item_field]
+                    entry["locked_fields"] = locked_fields
+                    if action in ["remove", "reset"]:
+                        if item_field == "ProviderIds":
+                            provider_ids = {
+                                k: v
+                                for k, v in (get_emby_item(item_id).get("ProviderIds") or {}).items()
+                                if k.lower() != self.EmbyServer.CUSTOM_RATING_PROVIDER.lower()
+                            }
+                            entry["update"][item_field] = provider_ids
+                        else:
+                            entry["update"][item_field] = clear_value
+
+        field_map = {
+            "audienceRating": ("CommunityRating", None),
+            "rating": ("CriticRating", None),
+            "userRating": ("ProviderIds", {}),
+            "contentRating": ("OfficialRating", None),
+            "studio": ("Studios", []),
+            "originalTitle": ("OriginalTitle", None),
+            "summary": ("Overview", None),
+            "tagline": ("Taglines", []),
+            "title": ("Name", None),
+            "sortTitle": ("SortName", None),
+            "originallyAvailableAt": ("PremiereDate", None),
+            "addedAt": ("DateCreated", None),
+        }
+
+        def collect_tag_edits(edit_dict, tag_attribute):
+            for tag_operation, batch_edits in edit_dict.items():
+                for tag_value, rating_keys in sorted(batch_edits.items()):
+                    items = self.load_list_from_cache(rating_keys)
+                    log_batch(tag_attribute, len(items), display_value=tag_value, tag_type=tag_operation)
+                    for item in items:
+                        item_id = item.ratingKey if hasattr(item, "ratingKey") else item
+                        entry = get_update_entry(item_id)
+                        if tag_attribute == "label":
+                            desired = entry["labels"].setdefault("desired", set(entry["labels"]["current"]))
+                        elif tag_attribute == "genre":
+                            desired = entry["genres"].setdefault("desired", set(entry["genres"]["current"]))
+                        else:
+                            raise Failed(f"Emby Error: Unsupported tag attribute '{tag_attribute}'")
+                        if tag_operation == "add":
+                            desired.add(tag_value)
+                        else:
+                            desired.discard(tag_value)
+
+        for tag_attribute, edit_dict in [("label", label_edits), ("genre", genre_edits)]:
+            collect_tag_edits(edit_dict, tag_attribute)
+
+        for item_attr, rt_edits in rating_edits.items():
+            for new_rating, rating_keys in sorted(rt_edits.items()):
+                rating_ids = get_ids(rating_keys)
+                log_batch(item_attr, len(rating_ids), display_value=new_rating)
+                for item_id in rating_ids:
+                    entry = get_update_entry(item_id)
+                    if item_attr == "audienceRating":
+                        entry["update"]["CommunityRating"] = new_rating
+                    elif item_attr == "rating":
+                        entry["update"]["CriticRating"] = float(new_rating) * 10 if new_rating else None
+                    elif item_attr == "userRating":
+                        provider_ids = entry["update"].setdefault("ProviderIds", {})
+                        provider_ids[self.EmbyServer.CUSTOM_RATING_PROVIDER] = new_rating
+
         for i, (new_rating, rating_keys) in enumerate(sorted(content_edits.items()), 1):
             log_batch("contentRating", len(rating_keys), display_value=new_rating)
-            self.EmbyServer.multiEditField(self.load_list_from_cache(rating_keys), "contentRating", new_rating)
+            for item in self.load_list_from_cache(rating_keys):
+                entry = get_update_entry(item.ratingKey if hasattr(item, "ratingKey") else item)
+                entry["update"]["OfficialRating"] = new_rating
 
         for i, (new_studio, rating_keys) in enumerate(sorted(studio_edits.items()), 1):
             log_batch("studio", len(rating_keys), display_value=new_studio)
-            self.EmbyServer.multiEditField(self.load_list_from_cache(rating_keys), "studio", new_studio)
+            for item in self.load_list_from_cache(rating_keys):
+                item_id = item.ratingKey if hasattr(item, "ratingKey") else item
+                entry = get_update_entry(item_id)
+                entry["update"]["Studios"] = {"Name": new_studio}
 
         for i, (new_date, rating_keys) in enumerate(sorted(date_edits["originallyAvailableAt"].items()), 1):
             log_batch("originallyAvailableAt", len(rating_keys), display_value=new_date)
-            self.EmbyServer.multiEditField(self.load_list_from_cache(rating_keys), "originallyAvailableAt", new_date)
+            for item in self.load_list_from_cache(rating_keys):
+                entry = get_update_entry(item.ratingKey if hasattr(item, "ratingKey") else item)
+                entry["update"]["PremiereDate"] = new_date
 
         for i, (new_date, rating_keys) in enumerate(sorted(date_edits["addedAt"].items()), 1):
             log_batch("addedAt", len(rating_keys), display_value=new_date)
-            self.EmbyServer.multiEditField(self.load_list_from_cache(rating_keys), "addedAt", new_date)
+            for item in self.load_list_from_cache(rating_keys):
+                entry = get_update_entry(item.ratingKey if hasattr(item, "ratingKey") else item)
+                entry["update"]["DateCreated"] = new_date
 
-        if any([label_edits, genre_edits, rating_edits, remove_edits, reset_edits, lock_edits, unlock_edits, ep_rating_edits, ep_remove_edits, ep_reset_edits, ep_lock_edits, ep_unlock_edits]):
-            logger.debug("Some batch operations are not yet supported for Emby backends.")
+        update_field_state(field_map, remove_edits, "remove")
+        update_field_state(field_map, reset_edits, "reset")
+        update_field_state(field_map, lock_edits, "lock")
+        update_field_state(field_map, unlock_edits, "unlock")
+
+        for item_attr, ep_edits in ep_rating_edits.items():
+            for new_rating, rating_keys in sorted(ep_edits.items()):
+                episode_ids = get_ids(rating_keys, is_episode=True)
+                log_batch(item_attr, len(episode_ids), display_value=new_rating, is_episode=True)
+                for item_id in episode_ids:
+                    entry = get_update_entry(item_id)
+                    if item_attr == "audienceRating":
+                        entry["update"]["CommunityRating"] = new_rating
+                    elif item_attr == "rating":
+                        entry["update"]["CriticRating"] = float(new_rating) * 10 if new_rating else None
+                    elif item_attr == "userRating":
+                        provider_ids = entry["update"].setdefault("ProviderIds", {})
+                        provider_ids[self.EmbyServer.CUSTOM_RATING_PROVIDER] = new_rating
+
+        update_field_state(field_map, ep_remove_edits, "remove", is_episode=True)
+        update_field_state(field_map, ep_reset_edits, "reset", is_episode=True)
+        update_field_state(field_map, ep_lock_edits, "lock", is_episode=True)
+        update_field_state(field_map, ep_unlock_edits, "unlock", is_episode=True)
+
+        for item_id, data in item_updates.items():
+            update_payload = dict(data["update"])
+
+            if data["locked_fields"] is not None:
+                update_payload["LockedFields"] = data["locked_fields"]
+
+            if data["labels"]["desired"] is not None:
+                desired_labels = sorted(data["labels"]["desired"])
+                if set(desired_labels) != data["labels"]["current"]:
+                    update_payload.update({
+                        "Tags": desired_labels,
+                        "TagItems": desired_labels,
+                    })
+
+            if data["genres"]["desired"] is not None:
+                desired_genres = sorted(data["genres"]["desired"])
+                if set(desired_genres) != data["genres"]["current"]:
+                    update_payload.update({
+                        "Genres": desired_genres,
+                        "GenreItems": desired_genres,
+                    })
+
+            provider_ids_payload = None
+            if "ProviderIds" in update_payload:
+                provider_ids_payload = dict(update_payload["ProviderIds"])
+            elif "ProviderIds" in get_emby_item(item_id):
+                provider_ids_payload = dict(get_emby_item(item_id).get("ProviderIds") or {})
+
+            if provider_ids_payload is not None:
+                if self.EmbyServer.CUSTOM_RATING_PROVIDER in provider_ids_payload:
+                    normalized_rating = self.EmbyServer._normalize_custom_rating_input(
+                        provider_ids_payload[self.EmbyServer.CUSTOM_RATING_PROVIDER]
+                    )
+                    if normalized_rating is None:
+                        provider_ids_payload.pop(self.EmbyServer.CUSTOM_RATING_PROVIDER, None)
+                    else:
+                        provider_ids_payload[self.EmbyServer.CUSTOM_RATING_PROVIDER] = normalized_rating
+                update_payload["ProviderIds"] = provider_ids_payload
+
+            if update_payload:
+                self.EmbyServer.update_item(item_id, update_payload)
 
     def needs_collection_mode_update(self, collection, mode):
         return False
