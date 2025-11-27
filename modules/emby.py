@@ -20,7 +20,7 @@ from modules.library import Library
 from modules.logs import WARNING
 from modules.poster import ImageData
 from modules.util import Failed
-from urllib.parse import unquote, parse_qsl, parse_qs
+from urllib.parse import unquote, parse_qsl, parse_qs, urlparse
 
 logger = util.logger
 
@@ -733,6 +733,165 @@ class Emby(Library):
 
     def needs_collection_mode_update(self, collection, mode):
         return False
+
+    def get_item_display_title(self, item_to_sort, sort=False):
+
+        if isinstance(item_to_sort, Album):
+            return f"{item_to_sort.artist().titleSort if sort else item_to_sort.parentTitle} Album {item_to_sort.titleSort if sort else item_to_sort.title}"
+        elif isinstance(item_to_sort, Season):
+            titleSort = None
+            if sort:
+                season = self.EmbyServer.get_item(item_to_sort.ratingKey)
+                show = self.EmbyServer.get_item(season.get("SeriesId"))
+                titleSort = show.get("SortName")
+            return f"{titleSort if sort else item_to_sort.parentTitle} Season {item_to_sort.seasonNumber}"
+        elif isinstance(item_to_sort, Episode):
+            titleSort = None
+            if sort:
+                season = self.EmbyServer.get_item(item_to_sort.ratingKey)
+                show = self.EmbyServer.get_item(season.get("SeriesId"))
+                titleSort = show.get("SortName")
+            # ToDo - Not working / tested
+            return f"{item_to_sort.show().titleSort if sort else item_to_sort.grandparentTitle} {item_to_sort.seasonEpisode.upper()}"
+        else:
+            key = item_to_sort.ratingKey if not (isinstance(item_to_sort, int) or isinstance(item_to_sort, str)) else str(item_to_sort)
+            # must bei str Id
+            item = self.EmbyServer.get_item(key)
+            return item.get("SortName") if sort else item.get("Name")
+
+            return item_to_sort.titleSort if sort else item_to_sort.title
+
+
+    def get_watchlist(self, sort=None, is_playlist=False):
+        #ToDo: Will bug out, copy paste from Plex
+        if is_playlist:
+            libtype = None
+        elif self.is_movie:
+            libtype = "movie"
+        else:
+            libtype = "show"
+        watchlist = self.account.watchlist(sort=watchlist_sorts[sort], libtype=libtype)
+        ids = []
+        for item in watchlist:
+            tmdb_id = []
+            tvdb_id = []
+            imdb_id = []
+            if self.config.Cache:
+                cache_id, _, media_type, _ = self.config.Cache.query_guid_map(item.guid)
+                if cache_id:
+                    ids.extend([(t_id, "tmdb" if "movie" in media_type else "tvdb") for t_id in cache_id])
+                    continue
+            try:
+                fin = False
+                for guid_tag in item.guids:
+                    url_parsed = urlparse(guid_tag.id)
+                    if url_parsed.scheme == "tvdb":
+                        if isinstance(item, Show):
+                            ids.append((int(url_parsed.netloc), "tvdb"))
+                            fin = True
+                    elif url_parsed.scheme == "imdb":
+                        imdb_id.append(url_parsed.netloc)
+                    elif url_parsed.scheme == "tmdb":
+                        if isinstance(item, Movie):
+                            ids.append((int(url_parsed.netloc), "tmdb"))
+                            fin = True
+                        tmdb_id.append(int(url_parsed.netloc))
+                    if fin:
+                        break
+                if fin:
+                    continue
+            except ConnectionError:
+                continue
+            if imdb_id and not tmdb_id:
+                for imdb in imdb_id:
+                    tmdb, tmdb_type = self.config.Convert.imdb_to_tmdb(imdb)
+                    if tmdb:
+                        tmdb_id.append(tmdb)
+            if tmdb_id and isinstance(item, Show) and not tvdb_id:
+                for tmdb in tmdb_id:
+                    tvdb = self.config.Convert.tmdb_to_tvdb(tmdb)
+                    if tvdb:
+                        tvdb_id.append(tvdb)
+            if isinstance(item, Show) and tvdb_id:
+                ids.extend([(t_id, "tvdb") for t_id in tvdb_id])
+            if isinstance(item, Movie) and tmdb_id:
+                ids.extend([(t_id, "tmdb") for t_id in tmdb_id])
+        return ids
+
+    def get_all_collections(self, label=None):
+        args = "?type=18"
+        if label:
+            label_id = next((c.key for c in self.get_tags("label") if c.title == label), None) # noqa
+            if label_id:
+                args = f"{args}&label={label_id}"
+            else:
+                return []
+        return self.fetchItems(args)
+
+    def get_rating_keys(self, method, data, is_playlist=False):
+        items = []
+        if method == "plex_all":
+            logger.info(f"Processing Plex All {data.capitalize()}s")
+            items = self.get_all(builder_level=data)
+        elif method == "plex_watchlist":
+            logger.info(f"Processing Plex Watchlist")
+            return self.get_watchlist(sort=data, is_playlist=is_playlist)
+        elif method == "plex_pilots":
+            logger.info(f"Processing Plex Pilot {data.capitalize()}s")
+            items = []
+            for item in self.get_all():
+                try:
+                    items.append(item.episode(season=1, episode=1))
+                except Failed:
+                    logger.warning(f"Plex Warning: {item.title} has no Season 1 Episode 1 ")
+        elif method == "plex_search":
+            logger.info(f"Processing {data[1]}")
+            logger.trace(data[2])
+            items = self.fetchItems(data[2])
+        elif method == "plex_collectionless":
+            good_collections = []
+            logger.info(f"Processing Plex Collectionless")
+            logger.info("")
+            for col in self.get_all_collections():
+                keep_collection = True
+                for pre in data["exclude_prefix"]:
+                    if col.title.startswith(pre) or (col.titleSort and col.titleSort.startswith(pre)):
+                        keep_collection = False
+                        logger.info(f"Excluded by Prefix Match: {col.title}")
+                        break
+                if keep_collection:
+                    for ext in data["exclude"]:
+                        if col.title == ext or (col.titleSort and col.titleSort == ext):
+                            keep_collection = False
+                            logger.info(f"Excluded by Exact Match: {col.title}")
+                            break
+                if keep_collection:
+                    good_collections.append(col)
+            logger.info("")
+            logger.info("Collections Not Excluded (Items in these collections are not added to Collectionless)")
+            for col in good_collections:
+                logger.info(col.title)
+            logger.info("")
+            collection_indexes = [str(c.title).lower() for c in good_collections]
+            all_items = self.get_all()
+            for i, item in enumerate(all_items, 1):
+                logger.ghost(f"Processing: {i}/{len(all_items)} {item.title}")
+                add_item = True
+                # item = self.reload(item)
+                for collection in item.collections:
+                    if str(collection.tag).lower() in collection_indexes:
+                        add_item = False
+                        break
+                if add_item:
+                    items.append(item)
+            logger.info(f"Processed {len(all_items)} {self.type}s")
+        else:
+            raise Failed(f"Plex Error: Method {method} not supported")
+        if not items:
+            # raise Failed("Plex Error: No Items found in Plex")
+            return[]
+        return [(item.ratingKey, "ratingKey") for item in items]
+
 
     def item_has_year(self, item):
         return hasattr(item, "year") and item.year is not None
@@ -2527,3 +2686,217 @@ class Emby(Library):
             self.PlexServer.query(f"{key}?url={quote_plus(url)}", method=self.PlexServer._session.post)
         elif filepath:
             self.PlexServer.query(key, method=self.PlexServer._session.post, data=open(filepath, 'rb').read())
+    def check_filters(self, item, filters_in, current_time):
+        for filter_method, filter_data in filters_in:
+            filter_attr, modifier, filter_final = self.split(filter_method)
+            if self.check_filter(item, filter_attr, modifier, filter_final, filter_data, current_time) is False:
+                return False
+        return True
+
+    def check_filter(self, item, filter_attr, modifier, filter_final, filter_data, current_time):
+        filter_actual = attribute_translation[filter_attr] if filter_attr in attribute_translation else filter_attr
+        if item.ratingKey in self.filter_items_cache:
+            emby_item = self.filter_items_cache[item.ratingKey]
+        else:
+            emby_item = self.EmbyServer.get_item(item.ratingKey)
+            self.filter_items_cache[item.ratingKey] = emby_item
+        if isinstance(item, Movie):
+            item_type = "movie"
+        elif isinstance(item, Show):
+            item_type = "show"
+        elif isinstance(item, Season):
+            item_type = "season"
+        elif isinstance(item, Episode):
+            item_type = "episode"
+        elif isinstance(item, Artist):
+            item_type = "artist"
+        elif isinstance(item, Album):
+            item_type = "album"
+        elif isinstance(item, Track):
+            item_type = "track"
+        else:
+            return True
+        # item = self.reload(item)
+        if filter_attr not in builder.filters[item_type]:
+            return True
+        elif filter_attr in builder.date_filters:
+            if util.is_date_filter(getattr(item, filter_actual), modifier, filter_data, filter_final, current_time):
+                return False
+        elif filter_attr in builder.string_filters:
+            #ToDo: most of the stuff for proprietary Emby item not integrated yet
+            values = []
+            if filter_attr == "audio_track_title":
+                for media in item.media:
+                    for part in media.parts:
+                        values.extend([a.extendedDisplayTitle for a in part.audioStreams() if a.extendedDisplayTitle])
+            elif filter_attr == "subtitle_track_title":
+                for media in item.media:
+                    for part in media.parts:
+                        values.extend([a.extendedDisplayTitle for a in part.subtitleStreams() if a.extendedDisplayTitle])
+            elif filter_attr in ["audio_codec", "audio_profile", "video_codec", "video_profile"]:
+                for media in item.media:
+                    attr = getattr(media, filter_actual)
+                    if attr and attr not in values:
+                        values.append(attr)
+            elif filter_attr in ["filepath", "folder"]:
+                values = [emby_item.get("Path")]
+                # values = [loc for loc in item.locations if loc]
+            else:
+                test_value = getattr(item, filter_actual)
+                values = [test_value] if test_value else []
+            if util.is_string_filter(values, modifier, filter_data):
+                return False
+        elif filter_attr in builder.boolean_filters:
+            filter_check = False
+            # logger.info(f"filter attribute: {filter_attr}")
+            if filter_attr == "has_collection":
+                filter_check = len(item.collections) > 0
+            elif filter_attr == "has_edition": # no edition in Emby, filename regex
+                filter_check = True if item.editionTitle else False
+            elif filter_attr == "has_stinger":
+                filter_check = False
+                if item.ratingKey in self.movie_rating_key_map and self.movie_rating_key_map[item.ratingKey] in self.config.mediastingers:
+                    filter_check = True
+            elif filter_attr == "has_overlay":
+                if os.path.exists(os.path.join(self.overlay_destination_folder, item.ratingKey, ".png")):
+                    filter_check = True
+                for label in self.item_labels(item):
+                    if label.tag.lower().endswith(" overlay") or label.tag.lower() == "overlay":
+                        filter_check = True
+                        break
+            elif filter_attr == "has_dolby_vision":
+                media_sources = emby_item.get("MediaSources", [])
+                # logger.warning(f"My media: {media_sources}")
+
+                for media in media_sources:
+                    media_streams = media.get("MediaStreams", [])
+                    for stream in media_streams:
+                        if stream.get("VideoRange") == "DolbyVision":
+                            # logger.warning("Found Dolby Vision!")
+                            filter_check = True
+                            break
+
+                # for media in item.media:
+                #     for part in media.parts:
+                #         for stream in part.videoStreams():
+                #             if stream.DOVIPresent:
+                #                 filter_check = True
+                #                 break
+            if util.is_boolean_filter(filter_data, filter_check):
+                return False
+        elif filter_attr == "history":
+            my_date = emby_item.get("PremiereDate")
+            item_date = datetime.fromisoformat(my_date.replace("Z", "+00:00"))
+            # item_date = item.originallyAvailableAt
+            if item_date is None:
+                return False
+            elif filter_data == "day":
+                if item_date.month != current_time.month or item_date.day != current_time.day:
+                    return False
+            elif filter_data == "month":
+                if item_date.month != current_time.month:
+                    return False
+            else:
+                date_match = False
+                for i in range(filter_data):
+                    check_date = current_time - timedelta(days=i)
+                    if item_date.month == check_date.month and item_date.day == check_date.day:
+                        date_match = True
+                if date_match is False:
+                    return False
+        elif filter_attr in ["seasons", "episodes", "albums", "tracks"]:
+            if filter_attr == "seasons":
+                sub_items = item.seasons()
+            elif filter_attr == "albums":
+                sub_items = item.albums()
+            elif filter_attr == "tracks":
+                sub_items = item.tracks()
+            else:
+                episodes = self.EmbyServer.get_items({"ParentId": item.ratingKey}, include_item_types="Episode")
+                sub_items = self.EmbyServer.convert_emby_to_plex(episodes)
+                # sub_items = item.episodes()
+            filters_in = []
+            percentage = 60
+            for sub_atr, sub_data in filter_data.items():
+                if sub_atr == "percentage":
+                    percentage = sub_data
+                else:
+                    filters_in.append((sub_atr, sub_data))
+            failure_threshold = len(sub_items) * ((100 - percentage) / 100)
+            failures = 0
+            for sub_item in sub_items:
+                if self.check_filters(sub_item, filters_in, current_time) is False:
+                    failures += 1
+                if failures > failure_threshold:
+                    return False
+        elif (filter_attr != "year" and filter_attr in builder.number_filters) or modifier in [".gt", ".gte", ".lt", ".lte", ".count_gt", ".count_gte", ".count_lt", ".count_lte"]:
+            test_number = []
+            if filter_attr in ["channels", "height", "width", "aspect"]:
+                test_number = 0
+                for media in item.media:
+                    attr = getattr(media, filter_actual)
+                    if attr and attr > test_number:
+                        test_number = attr
+            elif filter_attr == "stinger_rating":
+                test_number = None
+                if item.ratingKey in self.movie_rating_key_map and self.movie_rating_key_map[item.ratingKey] in self.config.mediastingers:
+                    test_number = self.config.mediastingers[self.movie_rating_key_map[item.ratingKey]]
+            elif filter_attr == "versions":
+                test_number = len(item.media)
+            elif filter_attr == "audio_language":
+                for media in item.media:
+                    for part in media.parts:
+                        test_number.extend([a.language for a in part.audioStreams()])
+            elif filter_attr == "subtitle_language":
+                for media in item.media:
+                    for part in media.parts:
+                        test_number.extend([s.language for s in part.subtitleStreams()])
+            elif filter_attr == "duration":
+                test_number = getattr(item, filter_actual)
+                if test_number:
+                    test_number /= 60000
+            else:
+                test_number = getattr(item, filter_actual)
+            if modifier in [".count_gt", ".count_gte", ".count_lt", ".count_lte"]:
+                test_number = len(test_number) if test_number else 0
+                modifier = f".{modifier[7:]}"
+            if test_number is None or util.is_number_filter(test_number, modifier, filter_data):
+                return False
+        else:
+            attrs = []
+            if filter_attr in ["resolution", "audio_language", "subtitle_language"]:
+                for media in item.media:
+                    if filter_attr == "resolution":
+                        attrs.append(media.videoResolution)
+                    for part in media.parts:
+                        if filter_attr == "audio_language":
+                            for a in part.audioStreams():
+                                attrs.extend([a.language, a.languageCode])
+                        if filter_attr == "subtitle_language":
+                            for s in part.subtitleStreams():
+                                attrs.extend([s.language, s.languageCode])
+            elif filter_attr in ["content_rating", "year", "rating"]:
+                attrs = [getattr(item, filter_actual)]
+            elif filter_attr in ["actor", "country", "director", "genre", "label", "producer", "composer", "writer",
+                                 "collection", "network"]:
+                attrs = [attr.tag for attr in getattr(item, filter_actual)]
+            else:
+                raise Failed(f"Filter Error: filter: {filter_final} not supported")
+            if modifier == ".regex":
+                has_match = False
+                for reg in filter_data:
+                    pattern = re.compile(reg)
+                    for name in attrs:
+                        if name is None:
+                            continue
+                        if pattern.search(str(name)):
+                            has_match = True
+                            break
+                    if has_match:
+                        break
+                if has_match is False:
+                    return False
+            elif (not list(set(filter_data) & set(attrs)) and modifier == "") \
+                    or (list(set(filter_data) & set(attrs)) and modifier == ".not"):
+                return False
+        return True

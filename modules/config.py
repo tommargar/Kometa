@@ -1284,12 +1284,12 @@ class ConfigFile:
                         params["plex"]["token"] = self.env_plex_token
 
 
-                    server_type = str(self.data.get("settings", {}).get("server_type", "plex")).lower() if self.data else "plex"
-                    if server_type == "emby":
+                    self.server_type = str(self.data.get("settings", {}).get("server_type", "plex")).lower() if self.data else "plex"
+                    if self.server_type == "emby":
                         library = Emby(self, params)
-                    elif server_type == "jellyfin":
+                    elif self.server_type == "jellyfin":
                         library = Jellyfin(self, params)
-                    else:
+                    else: # bug, todo plex
                         library = Plex(self, params)
 
                     logger.info("")

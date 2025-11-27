@@ -13,7 +13,8 @@ logger = util.logger
 
 class Overlays:
     def __init__(self, config, library):
-        self.config = config
+        from modules.config import ConfigFile # avoid circle import
+        self.config : ConfigFile = config
         self.cache = self.config.Cache
         self.library = library
         self.overlays = []
@@ -31,24 +32,25 @@ class Overlays:
             key_to_overlays, properties = self.compile_overlays()
         ignore_list = [rk for rk in key_to_overlays]
 
-        # I guess this block contains Plex legacy stuff
-        old_overlays = [la for la in self.library.Plex.listFilterChoices("label") if str(la.title).lower().endswith(" overlay")]
-        if old_overlays:
-            logger.separator(f"Removing Old Overlays for the {self.library.name} Library")
-            logger.info("")
-            for old_overlay in old_overlays:
-                label_items = self.get_overlay_items(label=old_overlay)
-                if label_items:
-                    logger.info("")
-                    logger.separator(f"Removing {old_overlay.title}")
-                    logger.info("")
-                    for i, item in enumerate(label_items, 1):
-                        item_title = self.library.get_item_display_title(item)
-                        logger.ghost(f"Restoring {old_overlay.title}: {i}/{len(label_items)} {item_title}")
-                        self.remove_overlay(item, item_title, old_overlay.title, [
-                            os.path.join(self.library.overlay_folder, old_overlay.title[:-8], f"{item.ratingKey}.png")
-                        ])
-            logger.info("")
+        if self.config.server_type == "plex":
+            # I guess this block contains Plex legacy stuff
+            old_overlays = [la for la in self.library.Plex.listFilterChoices("label") if str(la.title).lower().endswith(" overlay")]
+            if old_overlays:
+                logger.separator(f"Removing Old Overlays for the {self.library.name} Library")
+                logger.info("")
+                for old_overlay in old_overlays:
+                    label_items = self.get_overlay_items(label=old_overlay)
+                    if label_items:
+                        logger.info("")
+                        logger.separator(f"Removing {old_overlay.title}")
+                        logger.info("")
+                        for i, item in enumerate(label_items, 1):
+                            item_title = self.library.get_item_display_title(item)
+                            logger.ghost(f"Restoring {old_overlay.title}: {i}/{len(label_items)} {item_title}")
+                            self.remove_overlay(item, item_title, old_overlay.title, [
+                                os.path.join(self.library.overlay_folder, old_overlay.title[:-8], f"{item.ratingKey}.png")
+                            ])
+                logger.info("")
 
         # emby_image_manager = Emby_Image_Manager(self.library.name)
         if False: # ToDo: Remove overlays not working as expected - deactiveted
