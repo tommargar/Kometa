@@ -814,19 +814,91 @@ class Emby(Library):
 
         for i, (new_rating, rating_keys) in enumerate(sorted(content_edits.items()), 1):
             log_batch("contentRating", len(rating_keys), display_value=new_rating)
-            self.EmbyServer.multiEditField(self.load_list_from_cache(rating_keys), "contentRating", new_rating)
+            for item in self.load_list_from_cache(rating_keys):
+                entry = get_update_entry(item.ratingKey if hasattr(item, "ratingKey") else item)
+                entry["update"]["OfficialRating"] = new_rating
 
         for i, (new_studio, rating_keys) in enumerate(sorted(studio_edits.items()), 1):
             log_batch("studio", len(rating_keys), display_value=new_studio)
-            self.EmbyServer.multiEditField(self.load_list_from_cache(rating_keys), "studio", new_studio)
+            for item in self.load_list_from_cache(rating_keys):
+                item_id = item.ratingKey if hasattr(item, "ratingKey") else item
+                entry = get_update_entry(item_id)
+                entry["update"]["Studios"] = {"Name": new_studio}
 
         for i, (new_date, rating_keys) in enumerate(sorted(date_edits["originallyAvailableAt"].items()), 1):
             log_batch("originallyAvailableAt", len(rating_keys), display_value=new_date)
-            self.EmbyServer.multiEditField(self.load_list_from_cache(rating_keys), "originallyAvailableAt", new_date)
+            for item in self.load_list_from_cache(rating_keys):
+                entry = get_update_entry(item.ratingKey if hasattr(item, "ratingKey") else item)
+                entry["update"]["PremiereDate"] = new_date
 
         for i, (new_date, rating_keys) in enumerate(sorted(date_edits["addedAt"].items()), 1):
             log_batch("addedAt", len(rating_keys), display_value=new_date)
-            self.EmbyServer.multiEditField(self.load_list_from_cache(rating_keys), "addedAt", new_date)
+            for item in self.load_list_from_cache(rating_keys):
+                entry = get_update_entry(item.ratingKey if hasattr(item, "ratingKey") else item)
+                entry["update"]["DateCreated"] = new_date
+
+        update_field_state(field_map, remove_edits, "remove")
+        update_field_state(field_map, reset_edits, "reset")
+        update_field_state(field_map, lock_edits, "lock")
+        update_field_state(field_map, unlock_edits, "unlock")
+
+        for item_attr, ep_edits in ep_rating_edits.items():
+            for new_rating, rating_keys in sorted(ep_edits.items()):
+                episode_ids = get_ids(rating_keys, is_episode=True)
+                log_batch(item_attr, len(episode_ids), display_value=new_rating, is_episode=True)
+                for item_id in episode_ids:
+                    entry = get_update_entry(item_id)
+                    if item_attr == "audienceRating":
+                        entry["update"]["CommunityRating"] = new_rating
+                    elif item_attr == "rating":
+                        entry["update"]["CriticRating"] = float(new_rating) * 10 if new_rating else None
+                    elif item_attr == "userRating":
+                        provider_ids = entry["update"].setdefault("ProviderIds", {})
+                        provider_ids[self.EmbyServer.CUSTOM_RATING_PROVIDER] = new_rating
+
+        update_field_state(field_map, ep_remove_edits, "remove", is_episode=True)
+        update_field_state(field_map, ep_reset_edits, "reset", is_episode=True)
+        update_field_state(field_map, ep_lock_edits, "lock", is_episode=True)
+        update_field_state(field_map, ep_unlock_edits, "unlock", is_episode=True)
+
+        for item_id, data in item_updates.items():
+            update_payload = dict(data["update"])
+
+            if data["locked_fields"] is not None:
+                update_payload["LockedFields"] = data["locked_fields"]
+
+            if data["labels"]["desired"] is not None:
+                desired_labels = sorted(data["labels"]["desired"])
+                if set(desired_labels) != data["labels"]["current"]:
+                    update_payload.update({
+                        "Tags": desired_labels,
+                        "TagItems": desired_labels,
+                    })
+
+            if data["genres"]["desired"] is not None:
+                desired_genres = sorted(data["genres"]["desired"])
+                if set(desired_genres) != data["genres"]["current"]:
+                    update_payload.update({
+                        "Genres": desired_genres,
+                        "GenreItems": desired_genres,
+                    })
+
+            provider_ids_payload = None
+            if "ProviderIds" in update_payload:
+                provider_ids_payload = dict(update_payload["ProviderIds"])
+            elif "ProviderIds" in get_emby_item(item_id):
+                provider_ids_payload = dict(get_emby_item(item_id).get("ProviderIds") or {})
+
+            if provider_ids_payload is not None:
+                if self.EmbyServer.CUSTOM_RATING_PROVIDER in provider_ids_payload:
+                    normalized_rating = self.EmbyServer._normalize_custom_rating_input(
+                        provider_ids_payload[self.EmbyServer.CUSTOM_RATING_PROVIDER]
+                    )
+                    if normalized_rating is None:
+                        provider_ids_payload.pop(self.EmbyServer.CUSTOM_RATING_PROVIDER, None)
+                    else:
+                        provider_ids_payload[self.EmbyServer.CUSTOM_RATING_PROVIDER] = normalized_rating
+                update_payload["ProviderIds"] = provider_ids_payload
 
         update_field_state(field_map, remove_edits, "remove")
         update_field_state(field_map, reset_edits, "reset")
