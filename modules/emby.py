@@ -2,7 +2,7 @@ import os
 import random
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from urllib import parse
 # from importlib.metadata import pass_none
 from xml.etree.ElementTree import ParseError
@@ -1577,6 +1577,21 @@ class Emby(Library):
 
         return True
 
+
+
+    def _to_aware_utc(self, dt: datetime | None) -> datetime | None:
+        from datetime import datetime
+        if dt is None:
+            return None
+        if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+
+
+    # @retry(stop=stop_after_attempt(6), wait=wait_fixed(10),
+    #        retry=retry_if_not_exception_type((BadRequest, NotFound, Unauthorized)))
+
     def _parse_emby_datetime(self, value):
         """Parse ISO timestamps from Emby and ALWAYS return UTC-aware datetimes (or None)."""
         if not value:
@@ -2571,12 +2586,94 @@ class Emby(Library):
         return self.EmbyServer.get_item(emby_item_id)
         pass
 
+    def smart_filter(self, collection):
+        smart_filter = self.get_collection(collection).content
+        return smart_filter[smart_filter.index("?"):]
 
     def get_provider_ids(self, item):
         return self.EmbyServer.get_provider_ids(item)
 
+    def get_collection_items(self, collection, smart_label_collection):
+        # print(f"{collection} - {smart_label_collection}")
+
+        if smart_label_collection:
+            my_collection= None
+            if hasattr(collection, 'ratingKey'):
+                my_collection = collection.ratingKey
+            else:
+                my_collection:str = self.EmbyServer.get_collection_id(collection if isinstance(collection, str) else collection.title )
+            if my_collection:
+                return self.EmbyServer.get_items_in_boxset(my_collection)
+            return []
+
+            # self.create_blank_collection(collection)
+            # my_collection: str = self.EmbyServer.get_collection_id(collection)
+            # return self.EmbyServer.get_items_in_boxset(my_collection)
+
+            return self.search(label=collection.title if isinstance(collection, Collection) else str(collection))
+        elif isinstance(collection, (Collection, Playlist)):
+            if collection.smart:
+                return self.fetchItems(self.smart_filter(collection))
+            else:
+                my_items = self.EmbyServer.get_items_in_boxset(collection.ratingKey)
+                # my_return = self.query(collection.items)
+                return my_items
+        elif isinstance(collection, str):
+            mycol = self.EmbyServer.get_collection_id(collection)
+            if mycol:
+                my_items = self.EmbyServer.get_items_in_boxset(mycol)
+                return self.EmbyServer.convert_emby_to_plex(my_items)
+
+        return []
+
+
     def image_update(self, item, image, tmdb=None, title=None, poster=True):
-        pass
+        text = f"{f'{title} ' if title else ''}{'Poster' if poster else 'Background'}"
+        attr = self.mass_poster_update["source"] if poster else self.mass_background_update["source"]
+        if attr == "lock":
+            self.query(item.lockPoster if poster else item.lockArt)
+            logger.info(f"{text} | Locked")
+        elif attr == "unlock":
+            self.query(item.unlockPoster if poster else item.unlockArt)
+            logger.info(f"{text} | Unlocked")
+        else:
+            location = "the Assets Directory" if image else ""
+            image_url = False if image else True
+            image = image.location if image else None
+            if not image:
+                if attr == "tmdb" and tmdb:
+                    image = tmdb
+                    location = "TMDb"
+                if not image:
+                    images = item.posters() if poster else item.arts()
+                    temp_image = next((p for p in images), None)
+                    if temp_image:
+                        if temp_image.key.startswith("/"):
+                            image = f"{self.url}{temp_image.key}&X-Plex-Token={self.token}"
+                        else:
+                            image = temp_image.key
+                        location = "Plex"
+            if image:
+                logger.info(f"{text} | Reset from {location}")
+                if poster:
+                    try:
+                        self.upload_poster(item, image, url=image_url)
+                    except BadRequest as e:
+                        logger.stacktrace()
+                        logger.error(f"Plex Error: {e}")
+                else:
+                    try:
+                        self.upload_background(item, image, url=image_url)
+                    except BadRequest as e:
+                        logger.stacktrace()
+                        logger.error(f"Plex Error: {e}")
+                # todo: check for file, no overlay in tags
+                # if poster and "Overlay" in self.item_labels(item):
+                if poster and "Overlay" in [la.tag for la in self.item_labels(item)]:
+                    logger.info(self.edit_tags("label", item, remove_tags="Overlay", do_print=False))
+            else:
+                logger.warning(f"{text} | No Reset Image Found")
+
     def item_labels(self, item):
         try:
             # Prüfe, ob das Plex/Emby-Objekt ein `ratingKey` hat

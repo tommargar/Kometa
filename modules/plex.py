@@ -467,17 +467,7 @@ class Plex(Library):
         self.clean_bundles = params["plex"]["clean_bundles"]
         self.empty_trash = params["plex"]["empty_trash"]
         self.optimize = params["plex"]["optimize"]
-        self.session = self.config.Requests.session # init?
-        # Emby
-        self.filter_items_cache = {}
-        self._search_choices_cache = {}
-        self.emby = params["emby"]
-        self.emby_server_url = self.emby["url"]
-        self.emby_api_key = self.emby["api_key"]
-        self.emby_user_id = self.emby["user_id"]
-        self.overlay_destination_folder = self.emby["overlay_destination_folder"]
-        self.EmbyServer = None
-        # Emby end
+        self.session = self.config.Requests.session
         if self.plex["verify_ssl"] is False and self.config.Requests.global_ssl is True:
             logger.debug("Overriding verify_ssl to False for Plex connection")
             self.session = self.config.Requests.create_session(verify_ssl=False)
@@ -488,16 +478,6 @@ class Plex(Library):
         self.timeout = self.plex["timeout"]
         logger.secret(self.url)
         logger.secret(self.token)
-        try:
-            logger.info("Connecting to Emby ...")
-            self.EmbyServer = EmbyServer(self.emby_server_url, self.emby_user_id, self.emby_api_key, config,
-                                         params["name"])
-            logger.info(f"Connected to server {self.EmbyServer.friendlyName} version {self.EmbyServer.version}")
-            logger.info(f"Running on {self.EmbyServer.platform} version {self.EmbyServer.platformVersion}")
-        except:
-            logger.error(f"Failed to connect to Emby server.")
-            pass
-
         try:
             self.PlexServer = PlexServer(baseurl=self.url, token=self.token, session=self.session, timeout=self.timeout)
             plexapi.server.TIMEOUT = self.timeout
@@ -520,6 +500,8 @@ class Plex(Library):
                     uc_str = f"Public update channel."
                 elif chl_num == "8":
                     uc_str = f"PlexPass update channel."
+                else:
+                    uc_str = f"Unknown update channel: {chl_num}."
             except NotFound:
                 uc_str = f"Unknown update channel."
             logger.info(f"PlexPass: {self.PlexServer.myPlexSubscription} on {uc_str}")
@@ -545,93 +527,29 @@ class Plex(Library):
         library_names = []
         for s in self.PlexServer.library.sections():
             library_names.append(s.title)
-            #emby, just use first lib as dummy
-            # if s.title == params["name"]:
-            self.Plex = s
-            break
-
-        self.Emby = None
-
-        emby_library_names = []
-        # print(params)
-        self.lib_type = None
-
-        # logger.info(self.EmbyServer)
-        for s in self.EmbyServer.get_libraries():
-            # print(s)
-            emby_library_names.append(s["Name"])
-            if s["CollectionType"] == 'tvshows':
-                self.lib_type = "show"
-            elif s["CollectionType"] == 'movies':
-                self.lib_type = "movie"
-            if s["Name"] == params["name"]:
-                self.Emby = s
-                self.EmbyServer.library_id= self.Emby.get('Id')
+            if s.title == params["name"]:
+                self.Plex = s
                 break
-        # print(emby_library_names)
-        if self.Emby is None:
-            raise Failed(f"Emby Error: Emby Library '{params['name']}' not found. Options: {emby_library_names}")
-        # --------------
+        if not self.Plex:
+            raise Failed(f"Plex Error: Plex Library '{params['name']}' not found. Options: {library_names}")
+        if self.Plex.type not in library_types:
+            raise Failed(f"Plex Error: Plex Library must be a Movies, TV Shows, or Music library")
+        if not self.Plex.allowSync:
+            raise Failed("Plex Error: Plex Token is read only. Please get a new token")
 
-        # if not self.Plex:
-        #     raise Failed(f"Plex Error: Plex Library '{params['name']}' not found. Options: {library_names}")
-        # if self.Plex.type not in library_types:
-        #     raise Failed(f"Plex Error: Plex Library must be a Movies, TV Shows, or Music library")
-        # if not self.Plex.allowSync:
-        #     raise Failed("Plex Error: Plex Token is read only. Please get a new token")
-
-        # self.type = self.Plex.type.capitalize()
-        self.type = self.Emby.get("CollectionType", "")
-        # Entferne das 's', wenn self.type 'movies' oder 'shows' ist
-
-        # Now, find out the library type
-        collection_type = self.Emby.get("CollectionType", "").lower()
-        if collection_type == "movies":
-            self.emby_type = "Movie"
-        elif collection_type == "tvshows":
-            self.emby_type = "Show"
-        elif collection_type == "music":
-            self.emby_type = "Artist"
-        else:
-            self.emby_type = "Other"
-        self.type= self.emby_type
-        # print(f"Collection type is: '{collection_type}'")
-        # coll = Collection()
-        if self.emby_type.lower() not in library_types:
-            raise Failed(f"Emby Error: Emby Library must be a Movies, TV Shows, or Music library")
-
-
-
-        # print(f"EMBY Library type: {self.type}")
-        # print(self.type)
+        self.type = self.Plex.type.capitalize()
         self.plex_pass = self.PlexServer.myPlexSubscription
         self._users = []
-        self.emby_users = []
         self._all_items = []
-        self._emby_all_items = []
-        self._emby_all_items_native = []
         self._account = None
         self.agent = self.Plex.agent
         self.scanner = self.Plex.scanner
         source_setting = next((s for s in self.Plex.settings() if s.id in ["ratingsSource"]), None)
-        # Todo
-        # print(f"Checkie: {source_setting}")
-        # Checkie: <Setting:ratingsSource:rottentomatoes>
-        # Checkie: <Setting:ratingsSource:imdb>
-        # Checkie: <Setting:ratingsSource:themoviedb>
         self.ratings_source = source_setting.enumValues[source_setting.value] if source_setting else "N/A"
-
-        # self.is_movie = self.type == "Movie"
-        # self.is_show = self.type == "Show"
-        # self.is_music = self.type == "Artist"
-        # self.is_other = self.agent == "com.plexapp.agents.none"
-
-        self.is_movie = self.emby_type == "Movie"
-        self.is_show = self.emby_type == "Show"
-        self.is_music = self.emby_type == "Artist"
-        self.is_other = self.emby_type == "Other"
-
-        # todo: needed for Emby?
+        self.is_movie = self.type == "Movie"
+        self.is_show = self.type == "Show"
+        self.is_music = self.type == "Artist"
+        self.is_other = self.agent == "com.plexapp.agents.none"
         if self.is_other and self.type == "Movie":
             self.type = "Video"
         if not self.is_music and self.update_blank_track_titles:
@@ -643,22 +561,11 @@ class Plex(Library):
         logger.info(f"Scanner: {self.scanner}")
         logger.info(f"Ratings Source: {self.ratings_source}")
 
-
-
-    def _invalidate_metadata_caches(self, rating_key=None):
-        """Clear search/filter caches for a specific item after metadata mutations."""
-        if hasattr(self, "_search_choices_cache") and isinstance(self._search_choices_cache, dict):
-            self._search_choices_cache.clear()
-        if rating_key is not None and hasattr(self, "filter_items_cache") and isinstance(self.filter_items_cache, dict):
-            self.filter_items_cache.pop(rating_key, None)
-
     def notify(self, text, collection=None, critical=True):
         self.config.notify(text, server=self.PlexServer.friendlyName, library=self.name, collection=collection, critical=critical)
-        # pass
 
     def notify_delete(self, message):
         self.config.notify_delete(message, server=self.PlexServer.friendlyName, library=self.name)
-        # pass
 
     def set_server_preroll(self, preroll):
         self.PlexServer.settings.get('cinemaTrailersPrerollID').set(preroll)
@@ -703,21 +610,7 @@ class Plex(Library):
     def fetchItem(self, data):
         return self.PlexServer.fetchItem(data)
 
-    # modules/plex.py
-    from datetime import datetime
-
-    def _to_aware_utc(self, dt: datetime | None) -> datetime | None:
-        if dt is None:
-            return None
-        if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
-            return dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-
-
-
-    # @retry(stop=stop_after_attempt(6), wait=wait_fixed(10),
-    #        retry=retry_if_not_exception_type((BadRequest, NotFound, Unauthorized)))
-
+    @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type((BadRequest, NotFound, Unauthorized)))
     def fetchItems(self, uri_args):
         return self.Plex.fetchItems(f"/library/sections/{self.Plex.key}/all{'' if uri_args is None else uri_args}")
 
@@ -1230,6 +1123,24 @@ class Plex(Library):
             raise Failed(f"Collection Error: No valid Plex Collections in {collections}")
         return valid_collections
 
+    def _watchlist(self, filter=None, sort=None, libtype=None, maxresults=None, **kwargs):
+        params = {
+            'includeCollections': 1,
+            'includeExternalMedia': 1
+        }
+
+        if not filter:
+            filter = 'all'
+        if sort:
+            params['sort'] = sort
+        if libtype:
+            params['type'] = plexapi.utils.searchType(libtype)
+
+        params.update(kwargs)
+
+        key = f'{self.account.DISCOVER}/library/sections/watchlist/{filter}{plexapi.utils.joinArgs(params)}'
+        return self.account._toOnlineMetadata(self.account.fetchItems(key, maxresults=maxresults), **kwargs)
+
     def get_watchlist(self, sort=None, is_playlist=False):
         if is_playlist:
             libtype = None
@@ -1237,7 +1148,7 @@ class Plex(Library):
             libtype = "movie"
         else:
             libtype = "show"
-        watchlist = self.account.watchlist(sort=watchlist_sorts[sort], libtype=libtype)
+        watchlist = self._watchlist(sort=watchlist_sorts[sort], libtype=libtype)
         ids = []
         for item in watchlist:
             tmdb_id = []
@@ -1334,7 +1245,7 @@ class Plex(Library):
             for i, item in enumerate(all_items, 1):
                 logger.ghost(f"Processing: {i}/{len(all_items)} {item.title}")
                 add_item = True
-                # item = self.reload(item)
+                item = self.reload(item, force=True)
                 for collection in item.collections:
                     if str(collection.tag).lower() in collection_indexes:
                         add_item = False
@@ -1345,42 +1256,19 @@ class Plex(Library):
         else:
             raise Failed(f"Plex Error: Method {method} not supported")
         if not items:
-            # raise Failed("Plex Error: No Items found in Plex")
-            return[]
+            raise Failed("Plex Error: No Items found in Plex")
         return [(item.ratingKey, "ratingKey") for item in items]
 
     def get_collection_items(self, collection, smart_label_collection):
-        # print(f"{collection} - {smart_label_collection}")
-
         if smart_label_collection:
-            my_collection= None
-            if hasattr(collection, 'ratingKey'):
-                my_collection = collection.ratingKey
-            else:
-                my_collection:str = self.EmbyServer.get_collection_id(collection if isinstance(collection, str) else collection.title )
-            if my_collection:
-                return self.EmbyServer.get_items_in_boxset(my_collection)
-            return []
-
-            # self.create_blank_collection(collection)
-            # my_collection: str = self.EmbyServer.get_collection_id(collection)
-            # return self.EmbyServer.get_items_in_boxset(my_collection)
-
             return self.search(label=collection.title if isinstance(collection, Collection) else str(collection))
         elif isinstance(collection, (Collection, Playlist)):
             if collection.smart:
                 return self.fetchItems(self.smart_filter(collection))
             else:
-                my_items = self.EmbyServer.get_items_in_boxset(collection.ratingKey)
-                # my_return = self.query(collection.items)
-                return my_items
-        elif isinstance(collection, str):
-            mycol = self.EmbyServer.get_collection_id(collection)
-            if mycol:
-                my_items = self.EmbyServer.get_items_in_boxset(mycol)
-                return self.EmbyServer.convert_emby_to_plex(my_items)
-
-        return []
+                return self.query(collection.items)
+        else:
+            return []
 
     def get_collection_name_and_items(self, collection, smart_label_collection):
         name = collection.title if isinstance(collection, (Collection, Playlist)) else str(collection)
@@ -1486,8 +1374,6 @@ class Plex(Library):
                     except BadRequest as e:
                         logger.stacktrace()
                         logger.error(f"Plex Error: {e}")
-                # todo: check for file, no overlay in tags
-                # if poster and "Overlay" in self.item_labels(item):
                 if poster and "Overlay" in [la.tag for la in self.item_labels(item)]:
                     logger.info(self.edit_tags("label", item, remove_tags="Overlay", do_print=False))
             else:
@@ -1567,10 +1453,8 @@ class Plex(Library):
                             episode_poster, episode_background, episode_logo, _, _ = self.find_item_assets(episode, item_asset_directory=item_dir, asset_directory=asset_directory, folder_name=name)
                             if episode_poster or episode_background or episode_logo:
                                 found_episode = True
-                                # if "Overlay" not in [la.tag for la in self.item_labels(episode)]:
-                                #todo: check for file, no overlay in tags
-                                if "Overlay" not in self.item_labels(episode):
-                                    self.upload_images(episode, poster=episode_poster, background=episode_background)
+                                if "Overlay" not in [la.tag for la in self.item_labels(episode)]:
+                                    self.upload_images(episode, poster=episode_poster, background=episode_background, logo=episode_logo)
                             elif self.show_missing_episode_assets:
                                 missing_episodes += f"\nMissing {episode.seasonEpisode.upper()} Title Card"
                     except Failed as e:
@@ -1894,7 +1778,6 @@ class Plex(Library):
         check_field("genre", "genre", var_key="genres")
         check_field("writer", "writer", var_key="writers")
         check_field("producer", "producer", var_key="producers")
-        check_field("composer", "composer", var_key="composers")
         check_field("collection", "collection", var_key="collections")
         check_field("label", "label", var_key="labels")
         check_field("mood", "mood", var_key="moods")
