@@ -455,6 +455,7 @@ class Emby(Library):
     def __init__(self, config, params):
         super().__init__(config, params)
 
+        self.agent = None
         self.filter_items_cache = {}
         self.emby = params["emby"]
         self.url = self.emby["url"]
@@ -535,12 +536,14 @@ class Emby(Library):
             emby_library_names.append(s["Name"])
             if s["CollectionType"] == 'tvshows':
                 self.lib_type = "show"
+                self.agent = "tv.plex.agents.series"
             elif s["CollectionType"] == 'movies':
                 self.lib_type = "movie"
+                self.agent = "tv.plex.agents.movie"
             if s["Name"] == params["name"]:
                 self.Emby = s
                 self.EmbyServer.library_id= self.Emby.get('Id')
-                print(s)
+                # print(s)
                 break
         # print(emby_library_names)
         if not self.Emby:

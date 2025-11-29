@@ -480,7 +480,7 @@ class Operations:
                                         raise Failed
                                     multiplier = 10 if item_attr == "rating" else 1
                                     if item_attr == "rating":
-                                        found_rating = f"{(int(found_rating) * multiplier)}"
+                                        found_rating = f"{(float(found_rating) * multiplier)}"
 
                                     # found_rating = f"{found_rating:.1f}"
                                     try:
