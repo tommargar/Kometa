@@ -1583,7 +1583,7 @@ requirements of creating the collection.
             type: custom
             data:
               all-4: All 4
-              appletv: Apple TV+
+              appletv: Apple TV
               bet: BET+
               itvx: ITVX
               disney: Disney+

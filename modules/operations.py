@@ -479,50 +479,54 @@ class Operations:
                                         logger.info(f"No {option} {name_display[item_attr]} Found")
                                         raise Failed
                                     multiplier = 10 if item_attr == "rating" else 1
-                                    found_rating = f"{float(found_rating) * multiplier:.1f}"
+                                    if item_attr == "rating":
+                                        found_rating = f"{(float(found_rating) * multiplier):.1f}"
+
+                                    # found_rating = f"{found_rating:.1f}"
                                     try:
-                                        current *= 10 if item_attr == "rating" else 1
+                                        current *= multiplier
                                     except:
                                         pass
-                                    if current is not None and str(f"{current:.1f}") != str(f"{(float(found_rating)):.1f}") or current is None and found_rating is not None:
-                                        rating_key = item_attr
-                                        payload_key = rating_key
-                                        log_display_key = item_attr
-                                        match item_attr:
-                                            case "rating":
-                                                payload_key = "CriticRating"
-                                            case "userRating":
-                                                payload_key = "ProviderIds"
-                                            case "audienceRating":
-                                                payload_key = "CommunityRating"
-                                        # Plex
-                                        # {'audienceRating': {'6.7': [2391406], '7.3': [2391407]},
-                                        #  'rating': {'5.8': [2391406]}, 'userRating': {}}
+                                    if current is not None and str(f"{current}") == found_rating:
+                                        continue
+                                    rating_key = item_attr
+                                    payload_key = rating_key
+                                    log_display_key = item_attr
+                                    match item_attr:
+                                        case "rating":
+                                            payload_key = "CriticRating"
+                                        case "userRating":
+                                            payload_key = "ProviderIds"
+                                        case "audienceRating":
+                                            payload_key = "CommunityRating"
+                                    # Plex
+                                    # {'audienceRating': {'6.7': [2391406], '7.3': [2391407]},
+                                    #  'rating': {'5.8': [2391406]}, 'userRating': {}}
 
-                                        # Emby
-                                        # 'CommunityRating' = {float}
-                                        # 7.402
-                                        # 'CustomRating' = {str}
-                                        # '6.8'
-                                        # 'CriticRating' = {int}
-                                        # 69
-                                        if rating_key not in rating_edits:
-                                            rating_edits[rating_key] = {}
-                                        if found_rating not in rating_edits[rating_key]:
-                                            rating_edits[rating_key][found_rating] = []
-                                        rating_edits[rating_key][found_rating].append(item.ratingKey)
-                                        if item.ratingKey not in emby_payload:
-                                            emby_payload[item.ratingKey] = {}
-                                        if payload_key == "ProviderIds":
-                                            provider_key = getattr(self.library.EmbyServer, "CUSTOM_RATING_PROVIDER", "CustomRating")
-                                            provider_ids = emby_payload[item.ratingKey].setdefault("ProviderIds", {})
-                                            provider_ids[provider_key] = found_rating
-                                        elif payload_key:
-                                            emby_payload[item.ratingKey][payload_key] = found_rating
-                                        display_label = name_display.get(log_display_key, log_display_key)
-                                        item_edits.append(f"Update {display_label} (Batched) | {found_rating}")
-                                        do_cast_update = True
-                                    break
+                                    # Emby
+                                    # 'CommunityRating' = {float}
+                                    # 7.402
+                                    # 'CustomRating' = {str}
+                                    # '6.8'
+                                    # 'CriticRating' = {int}
+                                    # 69
+                                    if rating_key not in rating_edits:
+                                        rating_edits[rating_key] = {}
+                                    if found_rating not in rating_edits[rating_key]:
+                                        rating_edits[rating_key][found_rating] = []
+                                    rating_edits[rating_key][found_rating].append(item.ratingKey)
+                                    if item.ratingKey not in emby_payload:
+                                        emby_payload[item.ratingKey] = {}
+                                    if payload_key == "ProviderIds":
+                                        provider_key = self.library.EmbyServer.CUSTOM_RATING_PROVIDER
+                                        provider_ids = emby_payload[item.ratingKey].setdefault("ProviderIds", {})
+                                        provider_ids[provider_key] = found_rating
+                                    elif payload_key:
+                                        emby_payload[item.ratingKey][payload_key] = found_rating
+                                    display_label = name_display.get(log_display_key, log_display_key)
+                                    item_edits.append(f"Update {display_label} (Batched) | {found_rating}")
+                                    do_cast_update = True
+                                    # break
                                 except Failed:
                                     continue
 
