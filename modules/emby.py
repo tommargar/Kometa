@@ -844,7 +844,7 @@ class Emby(Library):
                     if item_attr == "audienceRating":
                         entry["update"]["CommunityRating"] = new_rating
                     elif item_attr == "rating":
-                        entry["update"]["CriticRating"] = float(new_rating) # if new_rating else None
+                        entry["update"]["CriticRating"] = new_rating # if new_rating else None
                     elif item_attr == "userRating":
                         provider_ids = entry["update"].setdefault("ProviderIds", {})
                         provider_ids[self.EmbyServer.CUSTOM_RATING_PROVIDER] = new_rating
@@ -888,7 +888,7 @@ class Emby(Library):
                     if item_attr == "audienceRating":
                         entry["update"]["CommunityRating"] = new_rating
                     elif item_attr == "rating":
-                        entry["update"]["CriticRating"] = float(new_rating) #* 10 if new_rating else None
+                        entry["update"]["CriticRating"] = new_rating #* 10 if new_rating else None
                     elif item_attr == "userRating":
                         provider_ids = entry["update"].setdefault("ProviderIds", {})
                         provider_ids[self.EmbyServer.CUSTOM_RATING_PROVIDER] = new_rating

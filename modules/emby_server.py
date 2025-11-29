@@ -2172,7 +2172,7 @@ class EmbyServer:
             self.invalidate_item(item_id)
             return response
         except Exception as e:
-            logger.warning(f"Emby item not longer present, not updated: {item_id}")
+            logger.warning(f"Emby item error, not updated: {item_id}")
             return None
 
     def __add_remove_from_collection(

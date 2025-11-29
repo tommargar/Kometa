@@ -480,14 +480,14 @@ class Operations:
                                         raise Failed
                                     multiplier = 10 if item_attr == "rating" else 1
                                     if item_attr == "rating":
-                                        found_rating = f"{(float(found_rating) * multiplier):.1f}"
+                                        found_rating = f"{(int(found_rating) * multiplier)}"
 
                                     # found_rating = f"{found_rating:.1f}"
                                     try:
                                         current *= multiplier
                                     except:
                                         pass
-                                    if current is not None and str(f"{current}") == found_rating:
+                                    if current is not None and str(f"{current}") == str(f"{float(found_rating):.1f}"):
                                         continue
                                     rating_key = item_attr
                                     payload_key = rating_key
