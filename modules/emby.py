@@ -2659,6 +2659,11 @@ class Emby(Library):
             # return None
             raise Failed(f"Emby Error: Collection {data} not found")
 
+    def get_collection_name_and_items(self, collection, smart_label_collection):
+        name = collection.title if isinstance(collection, (Collection, Playlist)) else str(collection)
+        return name, self.get_collection_items(collection, smart_label_collection)
+
+
     def fetchItem(self, data):
         item = self.EmbyServer.get_item(data)
         return self.EmbyServer.convert_emby_to_plex([item])[0]
