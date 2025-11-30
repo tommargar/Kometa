@@ -2091,6 +2091,7 @@ class EmbyServer:
         self._ensure_http_session()
 
         data = dict(data or {})
+        custom_rating_update = data.pop("CustomRating", None)
 
         if "LockedFields" not in item:
             item["LockedFields"] = []
@@ -2122,6 +2123,12 @@ class EmbyServer:
                 provider_ids_update = dict(provider_ids_update_raw)
             except (TypeError, ValueError):
                 provider_ids_update = {}
+        if custom_rating_update is not None:
+            provider_ids_update = provider_ids_update or {}
+            provider_ids_update[self.CUSTOM_RATING_PROVIDER] = custom_rating_update
+            logger.warning(
+                "CustomRating provided as a top-level field; routing to ProviderIds[CustomRating]."
+            )
         if provider_ids_update:
             normalized_update = {}
             for key, value in provider_ids_update.items():
@@ -2131,13 +2138,6 @@ class EmbyServer:
                     normalized_update[key] = value
             if normalized_update:
                 provider_ids.update(normalized_update)
-
-        if "CustomRating" in data:
-            data.pop("CustomRating", None)
-            logger.warning(
-                "CustomRating updates must be supplied via ProviderIds[CustomRating]; "
-                "ignoring top-level CustomRating value."
-            )
 
         if custom_rating_updated:
             item.pop("CustomRating", None)
