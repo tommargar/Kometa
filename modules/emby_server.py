@@ -2133,8 +2133,11 @@ class EmbyServer:
                 provider_ids.update(normalized_update)
 
         if "CustomRating" in data:
-            rating_value = data.pop("CustomRating")
-            _apply_custom_rating_update(rating_value)
+            data.pop("CustomRating", None)
+            logger.warning(
+                "CustomRating updates must be supplied via ProviderIds[CustomRating]; "
+                "ignoring top-level CustomRating value."
+            )
 
         if custom_rating_updated:
             item.pop("CustomRating", None)
