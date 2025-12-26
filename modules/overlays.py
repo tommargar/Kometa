@@ -329,6 +329,21 @@ class Overlays:
                                                     actual_value = current
                                                 elif mod == "L" and current < actual_value:
                                                     actual_value = current
+                                        elif format_var == "user_rating" and emby_server:
+                                            actual_attr = plex.attribute_translation.get(format_var, format_var)
+                                            actual_value = None
+                                            native_item = None
+                                            if item_id is not None:
+                                                native_item = emby_server.get_item(item_id)
+                                            if native_item:
+                                                actual_value = emby_server.get_custom_rating_from_item(native_item, raw=True)
+                                                if actual_value is None and native_item.get("CustomRating"):
+                                                    logger.warning(
+                                                        "Overlay Warning: Emby custom ratings must be provided via "
+                                                        "ProviderIds['CustomRating']; the CustomRating field is ignored."
+                                                    )
+                                            if actual_value is None and hasattr(item, actual_attr):
+                                                actual_value = getattr(item, actual_attr)
                                         elif format_var in overlay.rating_sources:
                                             found_rating = None
                                             try:
