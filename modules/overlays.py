@@ -122,12 +122,12 @@ class Overlays:
 
                     overlay_compare = [] if overlay_compare is None else util.get_list(overlay_compare, split="|")
                     my_overlay_path = ""
-                    if self.library.Plex:
-                        has_overlay = any(
-                            [item_tag.tag.lower() == "overlay" for item_tag in self.library.item_labels(item)])
-                    elif self.library.EmbyServer:
+                    if self.config.server_type == "emby":
                         my_overlay_path = os.path.join(self.library.overlay_destination_folder, f"{item.ratingKey}.{self.library.overlay_artwork_filetype}")
                         has_overlay = os.path.exists(my_overlay_path)
+                    else:
+                        has_overlay = any(
+                            [item_tag.tag.lower() == "overlay" for item_tag in self.library.item_labels(item)])
 
                     compare_names = {properties[ov].get_overlay_compare(): ov for ov in over_names}
                     blur_num = 0
