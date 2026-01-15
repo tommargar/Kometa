@@ -1040,6 +1040,31 @@ class Emby(Library):
                 return []
         return self.fetchItems(args)
 
+    def parse_relative_date(self, relative_date_str):
+        """
+        Parses a relative date string like '-90d' and returns a datetime object.
+        """
+        match = re.match(r'(-?\d+)([dwmy])', relative_date_str)
+        if not match:
+            return None
+
+        value, unit = match.groups()
+        value = int(value)
+        now = datetime.now()
+
+        if unit == 'd':
+            return now + timedelta(days=value)
+        elif unit == 'w':
+            return now + timedelta(weeks=value)
+        elif unit == 'm':
+            # Approximate a month as 30 days
+            return now + timedelta(days=value * 30)
+        elif unit == 'y':
+            # Approximate a year as 365 days
+            return now + timedelta(days=value * 365)
+        else:
+            return None
+
     def get_rating_keys(self, method, data, is_playlist=False):
         items = []
         if method == "plex_all":
@@ -2764,6 +2789,13 @@ class Emby(Library):
             #                 people['tmdb_id'] = tmdb_id
             return items_data
         plex_items= self.EmbyServer.convert_emby_to_plex(items_data)
+
+        # Emby Path Fix
+        path_map = {i['Id']: i.get('Path') for i in items_data}
+        for item in plex_items:
+            if str(item.ratingKey) in path_map and path_map[str(item.ratingKey)]:
+                item.locations = [path_map[str(item.ratingKey)]]
+
         # if builder_level in [None, "show", "artist", "movie"]:
         self._emby_all_items = plex_items
         return plex_items

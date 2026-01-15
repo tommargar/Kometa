@@ -1157,6 +1157,48 @@ class Operations:
                 ep_unlock_edits=ep_unlock_edits,
                 name_display=name_display,
             )
+
+            if hasattr(self.library, "EmbyServer"):
+                modified_ids = set()
+
+                def collect_ids(obj):
+                    if isinstance(obj, dict):
+                        for v in obj.values():
+                            collect_ids(v)
+                    elif isinstance(obj, list):
+                        for v in obj:
+                            if hasattr(v, "ratingKey"):
+                                try:
+                                    modified_ids.add(int(v.ratingKey))
+                                except (ValueError, TypeError):
+                                    pass
+                            else:
+                                try:
+                                    modified_ids.add(int(v))
+                                except (ValueError, TypeError):
+                                    pass
+
+                collect_ids(label_edits)
+                collect_ids(genre_edits)
+                collect_ids(rating_edits)
+                collect_ids(content_edits)
+                collect_ids(studio_edits)
+                collect_ids(date_edits)
+                collect_ids(remove_edits)
+                collect_ids(reset_edits)
+                collect_ids(lock_edits)
+                collect_ids(unlock_edits)
+                collect_ids(ep_rating_edits)
+                collect_ids(ep_remove_edits)
+                collect_ids(ep_reset_edits)
+                collect_ids(ep_lock_edits)
+                collect_ids(ep_unlock_edits)
+
+                if modified_ids:
+                    if not hasattr(self.library.EmbyServer, "dirty_items"):
+                        self.library.EmbyServer.dirty_items = set()
+                    self.library.EmbyServer.dirty_items.update(modified_ids)
+
             # Emby cast + crew, might be removed
             if people_alias_revert and len(people_alias_revert) > 1:
                 dedup = []
