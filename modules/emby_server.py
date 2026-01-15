@@ -326,7 +326,7 @@ class EmbyServer:
         # client = emby_client.ApiClient(configuration)
 
     @classmethod
-    def _normalize_custom_rating_input(cls, value):
+    def normalize_custom_rating_input(cls, value):
         if value is None:
             return None
         if isinstance(value, str):
@@ -1865,7 +1865,7 @@ class EmbyServer:
             )
             url = self.emby_server_url + endpoint
             headers = {
-                "Content-Type": "image/jpeg",
+                "Content-Type": ext_to_content_type[ext],
                 "X-Emby-Token": self.api_key,
             }
 
@@ -1878,7 +1878,7 @@ class EmbyServer:
             if response.status_code == 204:
                 return True
             else:
-                logger.error(f"Error uploading image for item {item_id}, response: {response}")
+                logger.error(f"Error uploading image for item {item_id}, response: {response} - {response.text}")
                 return False
 
         except Exception as e:
@@ -2110,7 +2110,7 @@ class EmbyServer:
         def _apply_custom_rating_update(rating_value):
             nonlocal custom_rating_updated, provider_ids
             custom_rating_updated = True
-            normalized_rating = self._normalize_custom_rating_input(rating_value)
+            normalized_rating = self.normalize_custom_rating_input(rating_value)
             if normalized_rating is None:
                 provider_ids.pop(self.CUSTOM_RATING_PROVIDER, None)
             else:
@@ -2934,7 +2934,7 @@ class EmbyServer:
             if provider_ids:
                 provider_ids_payload = dict(provider_ids)
                 if self.CUSTOM_RATING_PROVIDER in provider_ids_payload:
-                    normalized_rating = self._normalize_custom_rating_input(
+                    normalized_rating = self.normalize_custom_rating_input(
                         provider_ids_payload[self.CUSTOM_RATING_PROVIDER]
                     )
                     if normalized_rating is None:
@@ -2969,7 +2969,7 @@ class EmbyServer:
                 item.rating = new_value
                 # self.__update_item(item_id,{"CriticRating": new_value})
             elif field_attr == "userRating":
-                normalized = self._normalize_custom_rating_input(new_value)
+                normalized = self.normalize_custom_rating_input(new_value)
                 provider_ids = changes.setdefault("ProviderIds", {})
                 provider_ids[self.CUSTOM_RATING_PROVIDER] = normalized
                 if normalized is None:
@@ -4964,7 +4964,3 @@ class EmbyServer:
                                                           expiration=self.config.Cache.expiration)
                 changed = True
         return changed
-
-
-
-

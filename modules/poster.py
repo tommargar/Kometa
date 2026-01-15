@@ -14,14 +14,7 @@ class ImageData:
         self.is_background = image_type == "background"
         self.is_logo = image_type == "logo"
         self.is_url = is_url
-        if compare:
-            self.compare = compare
-        elif is_url:
-            self.compare = location
-        elif os.path.exists(location):
-            self.compare = f"{location}_{os.stat(location).st_size}_{os.stat(location).st_mtime}"
-        else:
-            self.compare = None
+        self.compare = compare if compare else location if is_url else os.stat(location).st_size
         self.message = f"{prefix}{image_type} to [{'URL' if is_url else 'File'}] {location}"
 
     def __str__(self):
@@ -54,11 +47,11 @@ class ImageBase:
         if "pmm" in file_data and file_data["pmm"]:
             file_path = pmm_items[file_data["pmm"]] if file_data["pmm"] in pmm_items else file_data["pmm"]
             if os.path.exists(file_path):
-                return file_path, f"{os.stat(file_path).st_size}_{os.stat(file_path).st_mtime}"
+                return file_path, os.path.getsize(file_path)
             raise Failed(f"Poster Error: {attr} pmm invalid. Options: {', '.join(pmm_items.keys())}")
         elif "file" in file_data and file_data["file"]:
             if os.path.exists(file_data["file"]):
-                return file_data["file"], f"{os.stat(file_data['file']).st_size}_{os.stat(file_data['file']).st_mtime}"
+                return file_data["file"], os.path.getsize(file_data["file"])
             raise Failed(f"Poster Error: {attr} file not found: {os.path.abspath(file_data['file'])}")
         elif local:
             return None, None
@@ -402,3 +395,4 @@ class KometaImage(ImageBase):
         pmm_image.save(image_path)
 
         return ImageData(self.image_attr, image_path, is_url=False, image_type="poster", compare=self.get_compare_string())
+

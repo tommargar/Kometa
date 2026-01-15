@@ -11,8 +11,6 @@ __pycache__/
 .vscode
 .Python
 /test*
-!/tests/
-!/tests/**
 logs/
 config/*
 !config/overlays/
@@ -144,4 +142,3 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
-/config/

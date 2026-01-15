@@ -681,7 +681,7 @@ class CollectionBuilder:
             else:
                 logger.debug(f"Value: {self.data[methods['smart_label']]}")
                 if isinstance(self.data[methods["smart_label"]], dict):
-                    _data, replaced = util.replace_label(self.original_name, self.data[methods["smart_label"]])
+                    _data, replaced = util.replace_label(self.name, self.data[methods["smart_label"]])
                     if not replaced:
                         raise Failed("Config Error: <<smart_label>> not found in the smart_label attribute data")
                     self.smart_label = _data
@@ -1162,7 +1162,7 @@ class CollectionBuilder:
             else:
                 self.details["label"] = append_labels
 
-        if not self.server_preroll and not self.smart_url and not self.blank_collection and len(self.builders) == 0:
+        if not self.server_preroll and not self.smart and not self.blank_collection and len(self.builders) == 0:
             if self._precheck_skipped_builders and self.ignore_blank_results:
                 logger.warning(f"{self.Type} Warning: All builders were skipped after prevalidation")
             else:

@@ -38,13 +38,13 @@
 | `Oscars Best Director Winners` | `best_director` | Collection of Oscars Best Director Award Winners. |
 <!--oscars-->
 <!--pca-->
-| `People's Choice Award Winners` | `pca` | Collection of People's Choice Award Winners. |
+| `People's Choice Award Winners` | `best` | Collection of People's Choice Award Winners. |
 <!--pca-->
 <!--razzie-->
 | `Razzies Golden Raspberry Winners` | `golden` | Collection of Razzie Golden Raspberry Award Winners. |
 <!--razzie-->
 <!--sag-->
-| `Screen Actors Guild Award Winners` | `golden` | Collection of Screen Actors Guild Award Winners. |
+| `Screen Actors Guild Award Winners` | `best` | Collection of Screen Actors Guild Award Winners. |
 <!--sag-->
 <!--spirit-->
 | `Independent Spirit Best Feature Winners` | `best` | Collection of Independent Spirit Best Feature Award Winners. |
@@ -86,7 +86,7 @@
 {% include-markdown "./base/collection/variables_header.md" exclude-tags="separator" %}
     {%
         include-markdown "./../variable_list.md"
-        include-tags="award|award-data|exclude|collection_mode|sync_mode|format"
+        include-tags="award|award-data|exclude|collection_mode|collection_order|sync_mode|format"
         replace='{
             "DYNAMIC_NAME": "Years", 
             "DYNAMIC_VALUE": "Years",

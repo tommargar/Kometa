@@ -171,7 +171,7 @@ If you *ARE* using the [asset directory](./assets.md) to manage your custom art,
 
 Once the image has been generated and uploaded, Kometa sets a sharing label on the item in Plex: "Overlay"
 
-![](images/overlay_label.png)
+![](../../assets/images/overlay_label.png)
 
 Kometa uses this label as discussed earlier to determine which items already have overlays; this mainly affects where it should get the clean art [in the absence of a asset image].  Is there a label?  Get the art from the backup directory.  No label?  Download the art from Plex.  As above, if there is asset art for this item, the label is not used for this purpose since the asset image is the single source of truth.
 
@@ -240,7 +240,7 @@ Change the art on the item in Plex, and remove the "Overlay" label from the item
         builder_level: season
         item_label.remove: Overlay
         plex_search:
-        all:
+          all:
             season_label: Overlay
             title:  NAME OF SHOW HERE
     ```
@@ -254,7 +254,7 @@ Change the art on the item in Plex, and remove the "Overlay" label from the item
         builder_level: episode
         item_label.remove: Overlay
         plex_search:
-        all:
+          all:
             episode_label: Overlay
             title:  NAME OF SHOW HERE
     ```

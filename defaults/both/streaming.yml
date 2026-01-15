@@ -185,3 +185,6 @@ dynamic_collections:
         hbomax:
           - Max Movies
           - Max Shows
+        appletv:
+          - Apple TV+ Movies
+          - Apple TV+ Shows

@@ -39,20 +39,20 @@ class Convert:
                     self._anilist_to_anidb[anilist_id] = anidb_id
             if "imdb_id" in ids and str(ids["imdb_id"]).startswith("tt"):
                 self._anidb_to_imdb[anidb_id] = util.get_list(ids["imdb_id"])
-                for im_id in util.get_list(ids["imdb_id"]):
+                for im_id in self._anidb_to_imdb[anidb_id]:
                     self._imdb_to_anidb[im_id] = anidb_id
             if "tvdb_id" in ids:
                 self._anidb_to_tvdb[anidb_id] = int(ids["tvdb_id"])
                 if "tvdb_season" in ids and ids["tvdb_season"] in [1, -1] and ids["tvdb_epoffset"] == 0:
                     self._tvdb_to_anidb[int(ids["tvdb_id"])] = anidb_id
             if "tmdb_movie_id" in ids:
-                self._anidb_to_tmdb_movie[anidb_id] = util.get_list(ids["tmdb_movie_id"])
-                for tm_id in util.get_list(ids["tmdb_movie_id"]):
-                    self._tmdb_movie_to_anidb[int(tm_id)] = anidb_id
+                self._anidb_to_tmdb_movie[anidb_id] = util.get_list(ids["tmdb_movie_id"], int_list=True)
+                for tm_id in self._anidb_to_tmdb_movie[anidb_id]:
+                    self._tmdb_movie_to_anidb[tm_id] = anidb_id
             if "tmdb_show_id" in ids:
-                self._anidb_to_tmdb_show[anidb_id] = util.get_list(ids["tmdb_show_id"])
-                for tm_id in util.get_list(ids["tmdb_show_id"]):
-                    self._tmdb_show_to_anidb[int(tm_id)] = anidb_id
+                self._anidb_to_tmdb_show[anidb_id] = util.get_list(ids["tmdb_show_id"], int_list=True)
+                for tm_id in self._anidb_to_tmdb_show[anidb_id]:
+                    self._tmdb_show_to_anidb[tm_id] = anidb_id
 
     def imdb_to_anidb(self, imdb_id):
         if imdb_id in self._imdb_to_anidb:
@@ -216,7 +216,7 @@ class Convert:
         except Failed:
             pass
         if fail:
-            raise Failed(f"Convert Warning: No TMDb ID Found for TVDb ID: https://thetvdb.com/dereferrer/series/{tvdb_id}")
+            raise Failed(f"Convert Warning: No TMDb ID Found for TVDb ID: {tvdb_id}")
         else:
             return None
 
@@ -280,19 +280,19 @@ class Convert:
         guid = urlparse(guid_str)
         return guid.scheme.split(".")[-1], guid.netloc
 
-    def get_id(self, item, library, mydata):
+    def get_id(self, item, library, mydata = None):
         expired = None
         tmdb_id = []
         tvdb_id = []
         imdb_id = []
         anidb_id = None
-        item_type, check_id = self.scan_guid(item.guid)
 
-        item_type = "emby"
+        item_type, check_id = self.scan_guid(item.guid)
+        if mydata:
+            item_type = "emby"
 
         media_id_type, cache_id, imdb_check, expired = self.ids_from_cache(item.ratingKey, item.guid, item_type, check_id, library)
         if (cache_id or imdb_check) and expired is False:
-            # print("cached")
             return media_id_type, cache_id, imdb_check
         try:
             if item_type == "plex":
@@ -410,8 +410,8 @@ class Convert:
                 if self.cache:
                     cache_ids = ",".join([str(c) for c in cache_ids])
                     imdb_in = ",".join([str(i) for i in imdb_in]) if imdb_in else None
-                    ids = f"{item.ratingKey:<13} | {id_type} ID: {cache_ids:<7} | IMDb ID: {str(imdb_in):<10}"
-                    logger.info(f" Cache  |  {'^' if expired else '+'}  | {ids} | {item.title:<20}")
+                    ids = f"{item.guid:<46} | {id_type} ID: {cache_ids:<7} | IMDb ID: {str(imdb_in):<10}"
+                    logger.info(f" Cache  |  {'^' if expired else '+'}  | {ids} | {item.title}")
                     self.cache.update_guid_map(item.guid, cache_ids, imdb_in, expired, guid_type)
 
             if (tmdb_id or imdb_id) and library.is_movie:
@@ -427,11 +427,11 @@ class Convert:
                 logger.debug(f"TMDb: {tmdb_id}, IMDb: {imdb_id}, TVDb: {tvdb_id}")
                 raise Failed(f"No ID to convert")
         except Failed as e:
-            logger.info(f'Mapping Error | {item.ratingKey:<13} | {e} for "{item.title:<20}"')
+            logger.info(f'Mapping Error | {item.guid:<46} | {e} for "{item.title}"')
         except NonExisting as e:
             if not library.is_other:
-                logger.info(f'Mapping Error | {item.ratingKey:<13} | {e} for "{item.title:<20}"')
+                logger.info(f'Mapping Error | {item.guid:<46} | {e} for "{item.title}"')
         except BadRequest:
             logger.stacktrace()
-            logger.info(f'Mapping Error | {item.ratingKey:<13} | Bad Request for "{item.title:<20}"')
+            logger.info(f'Mapping Error | {item.guid:<46} | Bad Request for "{item.title}"')
         return None, None, None

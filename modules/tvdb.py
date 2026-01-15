@@ -61,8 +61,8 @@ class TVDbObj:
         def parse_page(xpath, is_list=False):
             parse_results = data.xpath(xpath)
             if len(parse_results) > 0:
-                parse_results = [r.strip() for r in parse_results if isinstance(r, str) and len(r.strip()) > 0]
-            return parse_results if is_list else (parse_results[0] if len(parse_results) > 0 else None)
+                parse_results = [r.strip() for r in parse_results if len(r) > 0]
+            return parse_results if is_list else parse_results[0] if len(parse_results) > 0 else None
 
         def parse_title_summary(lang=None):
             place = "//div[@class='change_translation_text' and "
@@ -77,14 +77,7 @@ class TVDbObj:
             self.release_date = data["release_date"]
             self.status = data["status"]
             self.genres = data["genres"].split("|")
-
-            # neu: direkt als String aus DB (evtl. leer)
-            self.networks = data.get("networks", "") or ""
-            self.production = data.get("production", "") or ""
-            self.studio = data.get("studio", "") or ""
-
         else:
-            # HTML/DOM scrapen
             self.title, self.summary = parse_title_summary(lang=self._tvdb.language)
             if not self.title and self._tvdb.language in language_translation:
                 self.title, self.summary = parse_title_summary(lang=language_translation[self._tvdb.language])
@@ -108,28 +101,8 @@ class TVDbObj:
 
             self.genres = parse_page("//strong[text()='Genres']/parent::li/span/a/text()[normalize-space()]", is_list=True)
 
-            # neu: Networks / Production / Studio extrahieren
-            networks_list = [] if is_movie else (
-                parse_page("//strong[(text()='Network' or text()='Networks')]/parent::li/span/a/text()[normalize-space()]",
-                           is_list=True) or []
-            )
-            production_list = parse_page(
-                "//strong[(text()='Production Company' or text()='Production Companies')]/parent::li/span/a/text()[normalize-space()]",
-                is_list=True
-            ) or []
-            studio_list = parse_page(
-                "//strong[(text()='Studio' or text()='Studios')]/parent::li/span/a/text()[normalize-space()]",
-                is_list=True
-            ) or []
-
-            # Als Strings mit |-Separator ablegen (wie bei genres in der DB)
-            self.networks = "|".join(networks_list) if networks_list else ""
-            self.production = "|".join(production_list) if production_list else ""
-            self.studio = "|".join(studio_list) if studio_list else ""
-
-            # 4) Cache aktualisieren (schreibt auch networks/production/studio in tvdb_data5)
-            if self._tvdb.cache and not ignore_cache:
-                self._tvdb.cache.update_tvdb(expired, self, self._tvdb.expiration)
+        if self._tvdb.cache and not ignore_cache:
+            self._tvdb.cache.update_tvdb(expired, self, self._tvdb.expiration)
 
 class TVDb:
     def __init__(self, requests, cache, tvdb_language, expiration):
@@ -140,10 +113,6 @@ class TVDb:
 
     def get_tvdb_obj(self, tvdb_url, is_movie=False):
         tvdb_id, _, _ = self.get_id_from_url(tvdb_url, is_movie=is_movie)
-        return TVDbObj(self, tvdb_id, is_movie=is_movie)
-
-    def get_tvdb_obj_from_id(self, tvdb_id, is_movie=False):
-        # tvdb_id, _, _ = self.get_id_from_url(tvdb_url, is_movie=is_movie)
         return TVDbObj(self, tvdb_id, is_movie=is_movie)
 
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type(Failed))

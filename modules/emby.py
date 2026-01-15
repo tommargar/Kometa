@@ -931,7 +931,7 @@ class Emby(Library):
 
             if provider_ids_payload is not None:
                 if self.EmbyServer.CUSTOM_RATING_PROVIDER in provider_ids_payload:
-                    normalized_rating = self.EmbyServer._normalize_custom_rating_input(
+                    normalized_rating = self.EmbyServer.normalize_custom_rating_input(
                         provider_ids_payload[self.EmbyServer.CUSTOM_RATING_PROVIDER]
                     )
                     if normalized_rating is None:
@@ -1134,7 +1134,7 @@ class Emby(Library):
         return hasattr(item, "year") and item.year is not None
 # ToDo - Untested, develop; use this with db cache instead of set_image_smart
     def _upload_image(self, item, image):
-        upload_success = True
+        upload_success = False
         try:
             if image.is_url and "theposterdb.com" in image.location:
                 now = datetime.now()
@@ -1144,22 +1144,24 @@ class Emby(Library):
                         now = datetime.now()
                 self.config.tpdb_timer = now
             if image.is_poster and image.is_url:
-                self.upload_poster(item, image, url=image.location)
+                upload_success = self.upload_poster(item, image, url=image.location)
             elif image.is_poster:
                 upload_success = self.validate_image_size(image)
                 if upload_success:
-                    self.upload_poster(item, image.location)
+                    upload_success = self.upload_poster(item, image)
             elif image.is_background and image.is_url:
-                item.uploadArt(url=image.location)
+                upload_success = self.upload_background(item, image, url=image.location)
             elif image.is_background:
                 upload_success = self.validate_image_size(image)
                 if upload_success:
-                    item.uploadArt(filepath=image.location)
+                    upload_success = self.upload_background(item, image)
             elif image.is_url:
-                item.uploadLogo(url=image.location)
+                upload_success = self.upload_logo(item, image, url=image.location)
             else:
-                item.uploadLogo(filepath=image.location)
-            self.reload(item, force=True)
+                upload_success = self.upload_logo(item, image)
+
+            if upload_success:
+                self.reload(item, force=True)
             return upload_success
         except BadRequest as e:
             item.refresh()
@@ -1660,7 +1662,10 @@ class Emby(Library):
 
                                 # add_label(kometa_labels, item.ratingKey, collection)
                                 # save_labels_to_file(file_path_kometa, kometa_labels)
-                        self.EmbyServer.add_remove_plex_object_from_collection(collection, _items, 'add')
+                        rating_keys = [item.ratingKey for item in _items]
+                        added = self.EmbyServer.add_to_collection(collection, rating_keys)
+                        if not added:
+                            self.EmbyServer.create_collection(collection, rating_keys, locked=locked, parent_id=self.Emby.get("Id"))
 
 
                     else:
@@ -2955,11 +2960,11 @@ class Emby(Library):
         # todo: set dirty
         return item
         pass
-    def upload_poster(self, item, image, url=False):
+    def upload_poster(self, item, image, url=""):
         if url:
-            return self.EmbyServer.set_image_smart(item.ratingKey, image.location)
+            return self.EmbyServer.set_image_smart(item.ratingKey, url, image_type="Primary")
         else:
-            return self.EmbyServer.set_image_smart(item.ratingKey, image.location)
+            return self.EmbyServer.set_image_smart(item.ratingKey, image.location, image_type="Primary")
 
     def create_smart_collection(self, title, smart_type, uri_args, ignore_blank_results, minimum = None):
 
@@ -3012,18 +3017,18 @@ class Emby(Library):
         except Exception as e:
             # print(f"Fehler beim Kopieren der Datei: {e}")
             raise
-    def upload_background(self, item, image, url=False):
+    def upload_background(self, item, image, url=""):
         if url:
-            self.EmbyServer.set_image_smart(item.ratingKey, url, image_type="Backdrop")
+            return self.EmbyServer.set_image_smart(item.ratingKey, url, image_type="Backdrop")
             # item.uploadArt(url=image)
         else:
-            self.EmbyServer.set_image_smart(item.ratingKey, image, image_type="Backdrop")
+            return self.EmbyServer.set_image_smart(item.ratingKey, image.location, image_type="Backdrop")
             # item.uploadArt(filepath=image)
-    def upload_logo(self, item, image, url=False):
+    def upload_logo(self, item, image, url=""):
         if url:
-            self.EmbyServer.set_image_smart(item.ratingKey, url, image_type="ClearLogo")
+            return self.EmbyServer.set_image_smart(item.ratingKey, url, image_type="ClearLogo")
         else:
-            self.EmbyServer.set_image_smart(item.ratingKey, image, image_type="ClearLogo")
+            return self.EmbyServer.set_image_smart(item.ratingKey, image.location, image_type="ClearLogo")
 
     def upload_theme(self, collection, url=None, filepath=None):
         return

@@ -134,35 +134,46 @@ Assets can be stored anywhere on the host system that Kometa has visibility of (
 
 ???+ important
 
-    The below table assumes that your assets are stored within the directory mapped to `config` in your Kometa environment.
+    In this table, `<path_to_assets>` is an asset directory OR some directory below an asset directory, depending on your setting for `asset_depth`.
+
+    For example, if your `asset_directory` is `/config/assets` and your `asset_depth` is 2, then `<path_to_assets>` might be:
+
+    ```
+    /config/assets
+    /config/assets/this
+    /config/assets/this/that
+    ```
+    WHATEVER `this` and `that` are.
+
+    The important detail in this table is what `ASSET_NAME` is and how enabling asset folders affects the thing that Kometa is looking for, not *where* it's looking aside from "in an asset directory".
 
 === "ASSET_FOLDERS=True"
 
-    | Image Type                       | Asset Folders Image Paths<br>`asset_folders: true`       |
-    |:---------------------------------|:---------------------------------------------------------|
-    | Collection/Movie/Show poster     | `<path_to_assets>/ASSET_NAME/poster.ext`                 |
-    | Collection/Movie/Show background | `<path_to_assets>/ASSET_NAME/background.ext`             |
-    | Collection/Movie/Show logo       | `<path_to_assets>/ASSET_NAME/logo.ext`                   |
-    | Season poster                    | `<path_to_assets>/ASSET_NAME/Season##.ext`               |
-    | Season background                | `<path_to_assets>/ASSET_NAME/Season##_background.ext`    |
-    | Season logo                      | `<path_to_assets>/ASSET_NAME/Season##_logo.ext`          |
-    | Episode poster                   | `<path_to_assets>/ASSET_NAME/S##E##.ext`                 |
-    | Episode background               | `<path_to_assets>/ASSET_NAME/S##E##_background.ext`      |
-    | Episode logo                     | `<path_to_assets>/ASSET_NAME/S##E##_logo.ext`            |
+    | Image Type                       | Asset Folders Image Paths<br>`asset_folders: true`    |
+    |:---------------------------------|:------------------------------------------------------|
+    | Collection/Movie/Show poster     | `<path_to_assets>/ASSET_NAME/poster.ext`              |
+    | Collection/Movie/Show background | `<path_to_assets>/ASSET_NAME/background.ext`          |
+    | Collection/Movie/Show logo       | `<path_to_assets>/ASSET_NAME/logo.ext`                |
+    | Season poster                    | `<path_to_assets>/ASSET_NAME/Season##.ext`            |
+    | Season background                | `<path_to_assets>/ASSET_NAME/Season##_background.ext` |
+    | Season logo                      | `<path_to_assets>/ASSET_NAME/Season##_logo.ext`       |
+    | Episode poster                   | `<path_to_assets>/ASSET_NAME/S##E##.ext`              |
+    | Episode background               | `<path_to_assets>/ASSET_NAME/S##E##_background.ext`   |
+    | Episode logo                     | `<path_to_assets>/ASSET_NAME/S##E##_logo.ext`         |
 
 === "ASSET_FOLDERS=False"
 
-    | Image Type                       | Flat Assets Image Paths<br>`asset_folders: false`        |
-    |:---------------------------------|:---------------------------------------------------------|
-    | Collection/Movie/Show poster     | `<path_to_assets>/ASSET_NAME.ext`                        |
-    | Collection/Movie/Show background | `<path_to_assets>/ASSET_NAME_background.ext`             |
-    | Collection/Movie/Show logo       | `<path_to_assets>/ASSET_NAME_logo.ext`                   |
-    | Season poster                    | `<path_to_assets>/ASSET_NAME_Season##.ext`               |
-    | Season background                | `<path_to_assets>/ASSET_NAME_Season##_background.ext`    |
-    | Season logo                      | `<path_to_assets>/ASSET_NAME_Season##_logo.ext`          |
-    | Episode poster                   | `<path_to_assets>/ASSET_NAME_S##E##.ext`                 |
-    | Episode background               | `<path_to_assets>/ASSET_NAME_S##E##_background.ext`      |
-    | Episode logo                     | `<path_to_assets>/ASSET_NAME_S##E##_logo.ext`            |
+    | Image Type                       | Flat Assets Image Paths<br>`asset_folders: false`     |
+    |:---------------------------------|:------------------------------------------------------|
+    | Collection/Movie/Show poster     | `<path_to_assets>/ASSET_NAME.ext`                     |
+    | Collection/Movie/Show background | `<path_to_assets>/ASSET_NAME_background.ext`          |
+    | Collection/Movie/Show logo       | `<path_to_assets>/ASSET_NAME_logo.ext`                |
+    | Season poster                    | `<path_to_assets>/ASSET_NAME_Season##.ext`            |
+    | Season background                | `<path_to_assets>/ASSET_NAME_Season##_background.ext` |
+    | Season logo                      | `<path_to_assets>/ASSET_NAME_Season##_logo.ext`       |
+    | Episode poster                   | `<path_to_assets>/ASSET_NAME_S##E##.ext`              |
+    | Episode background               | `<path_to_assets>/ASSET_NAME_S##E##_background.ext`   |
+    | Episode logo                     | `<path_to_assets>/ASSET_NAME_S##E##_logo.ext`         |
 
 ## Determining the "Asset Name"
 

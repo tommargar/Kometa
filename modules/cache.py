@@ -1,10 +1,6 @@
-import json
-import os
-import random
-import sqlite3
+import json, os, random, sqlite3
 from contextlib import closing
 from datetime import datetime, timedelta
-
 from modules import util
 
 logger = util.logger
@@ -153,6 +149,9 @@ class Cache:
                     rank INTEGER,
                     popularity TEXT,
                     genres TEXT,
+                    explicit_genres TEXT,
+                    themes TEXT,
+                    demographics TEXT,
                     studio TEXT,
                     expiration_date TEXT)"""
                 )
@@ -225,7 +224,7 @@ class Cache:
                 cursor.execute(
                     """CREATE TABLE IF NOT EXISTS tvdb_data5 (
                         key INTEGER PRIMARY KEY,
-                        tvdb_id INTEGER,
+                    tvdb_id INTEGER UNIQUE,
                         type TEXT,
                         title TEXT,
                         status TEXT,
@@ -234,16 +233,12 @@ class Cache:
                         background_url TEXT,
                         release_date TEXT,
                         genres TEXT,
+                        expiration_date TEXT,
                         -- neu:
                         networks TEXT,
                         production TEXT,
-                        studio TEXT,
-                        expiration_date TEXT,
-                        UNIQUE(tvdb_id, type)
-                    )"""
+                        studio TEXT)"""
                 )
-                self._upgrade_tvdb_4_to_5(cursor)
-
                 cursor.execute(
                     """CREATE TABLE IF NOT EXISTS tvdb_map (
                     key INTEGER PRIMARY KEY,
@@ -319,9 +314,9 @@ class Cache:
                     expiration_date TEXT)"""
                 )
                 cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS overlay_special_text (
+                    """CREATE TABLE IF NOT EXISTS overlay_special_text2 (
                     key INTEGER PRIMARY KEY,
-                    rating_key INTEGER,
+                    rating_key TEXT,
                     type TEXT,
                     text TEXT)"""
                 )
@@ -657,6 +652,9 @@ class Cache:
                     mal_dict["rank"] = row["rank"] if row["rank"] else None
                     mal_dict["popularity"] = row["popularity"] if row["popularity"] else None
                     mal_dict["genres"] = row["genres"] if row["genres"] else None
+                    mal_dict["explicit_genres"] = row["explicit_genres"] if row["explicit_genres"] else None
+                    mal_dict["themes"] = row["themes"] if row["themes"] else None
+                    mal_dict["demographics"] = row["demographics"] if row["demographics"] else None
                     mal_dict["studio"] = row["studio"] if row["studio"] else None
                     datetime_object = datetime.strptime(row["expiration_date"], "%Y-%m-%d")
                     time_between_insertion = datetime.now() - datetime_object
@@ -670,10 +668,10 @@ class Cache:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("INSERT OR IGNORE INTO mal_data2(mal_id) VALUES(?)", (mal_id,))
                 update_sql = "UPDATE mal_data2 SET title = ?, title_english = ?, title_japanese = ?, status = ?, airing = ?, " \
-                             "aired = ?, rating = ?, score = ?, rank = ?, popularity = ?, genres = ?, studio = ?, expiration_date = ? WHERE mal_id = ?"
+                             "aired = ?, rating = ?, score = ?, rank = ?, popularity = ?, genres = ?, explicit_genres = ?, themes = ?, demographics = ?, studio = ?, expiration_date = ? WHERE mal_id = ?"
                 cursor.execute(update_sql, (
                     mal.title, mal.title_english, mal.title_japanese, mal.status, mal.airing, mal.aired.strftime("%Y-%m-%d") if mal.aired else None,
-                    mal.rating, mal.score, mal.rank, mal.popularity, "|".join(mal.genres), mal.studio, expiration_date.strftime("%Y-%m-%d"), mal_id
+                    mal.rating, mal.score, mal.rank, mal.popularity, "|".join(mal.genres), "|".join(mal.explicit_genres), "|".join(mal.themes), "|".join(mal.demographics), mal.studio, expiration_date.strftime("%Y-%m-%d"), mal_id
                 ))
 
     def query_tmdb_movie(self, tmdb_id, expiration):
@@ -685,62 +683,51 @@ class Cache:
                 cursor.execute("SELECT * FROM tmdb_movie_data WHERE tmdb_id = ?", (tmdb_id,))
                 row = cursor.fetchone()
                 if row:
-                    tmdb_dict["title"] = row["title"] or ""
-                    tmdb_dict["original_title"] = row["original_title"] or ""
-                    tmdb_dict["studio"] = row["studio"] or ""
-                    tmdb_dict["overview"] = row["overview"] or ""
-                    tmdb_dict["tagline"] = row["tagline"] or ""
-                    tmdb_dict["imdb_id"] = row["imdb_id"] or ""
-                    tmdb_dict["poster_url"] = row["poster_url"] or ""
-                    tmdb_dict["backdrop_url"] = row["backdrop_url"] or ""
-                    tmdb_dict["vote_count"] = row["vote_count"] or 0
-                    tmdb_dict["vote_average"] = row["vote_average"] or 0
-                    tmdb_dict["language_iso"] = row["language_iso"]
-                    tmdb_dict["language_name"] = row["language_name"]
-                    # WICHTIG: als Pipe-String belassen (kompatibel zu _load .split)
-                    tmdb_dict["genres"] = row["genres"] or ""
-                    tmdb_dict["keywords"] = row["keywords"] or ""
-                    tmdb_dict["release_date"] = datetime.strptime(row["release_date"], "%Y-%m-%d") if row[
-                        "release_date"] else None
-                    tmdb_dict["collection_id"] = row["collection_id"]
-                    tmdb_dict["collection_name"] = row["collection_name"]
+                    tmdb_dict["title"] = row["title"] if row["title"] else ""
+                    tmdb_dict["original_title"] = row["original_title"] if row["original_title"] else ""
+                    tmdb_dict["studio"] = row["studio"] if row["studio"] else ""
+                    tmdb_dict["overview"] = row["overview"] if row["overview"] else ""
+                    tmdb_dict["tagline"] = row["tagline"] if row["tagline"] else ""
+                    tmdb_dict["imdb_id"] = row["imdb_id"] if row["imdb_id"] else ""
+                    tmdb_dict["poster_url"] = row["poster_url"] if row["poster_url"] else ""
+                    tmdb_dict["backdrop_url"] = row["backdrop_url"] if row["backdrop_url"] else ""
+                    tmdb_dict["vote_count"] = row["vote_count"] if row["vote_count"] else 0
+                    tmdb_dict["vote_average"] = row["vote_average"] if row["vote_average"] else 0
+                    tmdb_dict["language_iso"] = row["language_iso"] if row["language_iso"] else None
+                    tmdb_dict["language_name"] = row["language_name"] if row["language_name"] else None
+                    tmdb_dict["genres"] = row["genres"] if row["genres"] else ""
+                    tmdb_dict["keywords"] = row["keywords"] if row["keywords"] else ""
+                    tmdb_dict["release_date"] = datetime.strptime(row["release_date"], "%Y-%m-%d") if row["release_date"] else None
+                    tmdb_dict["collection_id"] = row["collection_id"] if row["collection_id"] else None
+                    tmdb_dict["collection_name"] = row["collection_name"] if row["collection_name"] else None
                     # Cast/Crew als JSON speichern/laden
                     tmdb_dict["cast"] = json.loads(row["cast"]) if row["cast"] else []
                     tmdb_dict["crew"] = json.loads(row["crew"]) if row["crew"] else []
                     # Expiration
-                    dt = datetime.strptime(row["expiration_date"], "%Y-%m-%d")
-                    expired = (datetime.now() - dt).days > expiration
+                    datetime_object = datetime.strptime(row["expiration_date"], "%Y-%m-%d")
+                    time_between_insertion = datetime.now() - datetime_object
+                    expired = time_between_insertion.days > expiration
         return tmdb_dict, expired
 
     def update_tmdb_movie(self, expired, obj, expiration):
-        expiration_date = datetime.now() if expired is True else (
-                    datetime.now() - timedelta(days=random.randint(1, expiration)))
+        expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, expiration)))
         with sqlite3.connect(self.cache_path) as connection:
             connection.row_factory = sqlite3.Row
             with closing(connection.cursor()) as cursor:
                 cursor.execute("INSERT OR IGNORE INTO tmdb_movie_data(tmdb_id) VALUES(?)", (obj.tmdb_id,))
-                update_sql = """
-                    UPDATE tmdb_movie_data SET
-                        title = ?, original_title = ?, studio = ?, overview = ?, tagline = ?, imdb_id = ?,
-                        poster_url = ?, backdrop_url = ?, vote_count = ?, vote_average = ?, language_iso = ?,
-                        language_name = ?, genres = ?, keywords = ?, release_date = ?, collection_id = ?,
-                        collection_name = ?, expiration_date = ?, cast = ?, crew = ?
-                    WHERE tmdb_id = ?
-                """
-                genres_str = "|".join(obj.genres or [])
-                keywords_str = "|".join(obj.keywords or [])
+                update_sql = "UPDATE tmdb_movie_data SET title = ?, original_title = ?, studio = ?, overview = ?, tagline = ?, imdb_id = ?, " \
+                             "poster_url = ?, backdrop_url = ?, vote_count = ?, vote_average = ?, language_iso = ?, " \
+                             "language_name = ?, genres = ?, keywords = ?, release_date = ?, collection_id = ?, " \
+                              "collection_name = ?, expiration_date = ?, cast = ?, crew = ? WHERE tmdb_id = ?"
+
                 cast_json = json.dumps(obj.cast or [])
                 crew_json = json.dumps(obj.crew or [])
 
                 cursor.execute(update_sql, (
-                    obj.title, obj.original_title, obj.studio, obj.overview, obj.tagline, obj.imdb_id,
-                    obj.poster_url, obj.backdrop_url, obj.vote_count, obj.vote_average, obj.language_iso,
-                    obj.language_name, genres_str, keywords_str,
-                    obj.release_date.strftime("%Y-%m-%d") if obj.release_date else None,
-                    obj.collection_id, obj.collection_name,
-                    expiration_date.strftime("%Y-%m-%d"),
-                    cast_json, crew_json,
-                    obj.tmdb_id
+                    obj.title, obj.original_title, obj.studio, obj.overview, obj.tagline, obj.imdb_id, obj.poster_url, obj.backdrop_url,
+                    obj.vote_count, obj.vote_average, obj.language_iso, obj.language_name, "|".join(obj.genres), "|".join(obj.keywords),
+                    obj.release_date.strftime("%Y-%m-%d") if obj.release_date else None, obj.collection_id, obj.collection_name,
+                    expiration_date.strftime("%Y-%m-%d"), cast_json, crew_json, obj.tmdb_id
                 ))
         # --- Person-Map aus den bereits vorliegenden cast/crew-Daten vorbefüllen (tmdb_id + name) ---
         try:
@@ -864,73 +851,45 @@ class Cache:
                     expiration_date.strftime("%Y-%m-%d"), obj.tmdb_id, obj.season_number, obj.episode_number
                 ))
 
-    def _tvdb_type(self, is_movie: bool) -> str:
-        return "movie" if is_movie else "show"
-
-
     def query_tvdb(self, tvdb_id, is_movie, expiration):
         tvdb_dict = {}
         expired = None
-        media_type = self._tvdb_type(is_movie)
         with sqlite3.connect(self.cache_path) as connection:
             connection.row_factory = sqlite3.Row
             with closing(connection.cursor()) as cursor:
-                cursor.execute(
-                    "SELECT * FROM tvdb_data5 WHERE tvdb_id = ? AND type = ?",
-                    (tvdb_id, media_type)
-                )
+                cursor.execute("SELECT * FROM tvdb_data4 WHERE tvdb_id = ? and type = ?", (tvdb_id, "movie" if is_movie else "show"))
                 row = cursor.fetchone()
                 if row:
                     tvdb_dict["tvdb_id"] = int(row["tvdb_id"]) if row["tvdb_id"] else 0
-                    tvdb_dict["type"] = row["type"] or ""
-                    tvdb_dict["title"] = row["title"] or ""
-                    tvdb_dict["status"] = row["status"] or ""
-                    tvdb_dict["summary"] = row["summary"] or ""
-                    tvdb_dict["poster_url"] = row["poster_url"] or ""
-                    tvdb_dict["background_url"] = row["background_url"] or ""
-                    tvdb_dict["release_date"] = datetime.strptime(row["release_date"], "%Y-%m-%d") if row[
-                        "release_date"] else None
-                    tvdb_dict["genres"] = row["genres"] or ""
+                    tvdb_dict["type"] = row["type"] if row["type"] else ""
+                    tvdb_dict["title"] = row["title"] if row["title"] else ""
+                    tvdb_dict["status"] = row["status"] if row["status"] else ""
+                    tvdb_dict["summary"] = row["summary"] if row["summary"] else ""
+                    tvdb_dict["poster_url"] = row["poster_url"] if row["poster_url"] else ""
+                    tvdb_dict["background_url"] = row["background_url"] if row["background_url"] else ""
+                    tvdb_dict["release_date"] = datetime.strptime(row["release_date"], "%Y-%m-%d") if row["release_date"] else None
+                    tvdb_dict["genres"] = row["genres"] if row["genres"] else ""
                     # neu:
                     tvdb_dict["networks"] = row["networks"] or ""
                     tvdb_dict["production"] = row["production"] or ""
                     tvdb_dict["studio"] = row["studio"] or ""
 
-                    datetime_object = datetime.strptime(row["expiration_date"], "%Y-%m-%d")
-                    expired = (datetime.now() - datetime_object).days > expiration
+                    time_between_insertion = datetime.now() - datetime_object
+                    expired = time_between_insertion.days > expiration
         return tvdb_dict, expired
 
     def update_tvdb(self, expired, obj, expiration):
-        media_type = self._tvdb_type(obj.is_movie)
-        expiration_date = datetime.now() if expired is True else (
-                    datetime.now() - timedelta(days=random.randint(1, expiration)))
+        expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, expiration)))
         with sqlite3.connect(self.cache_path) as connection:
             connection.row_factory = sqlite3.Row
             with closing(connection.cursor()) as cursor:
-                cursor.execute(
-                    "INSERT OR IGNORE INTO tvdb_data5(tvdb_id, type) VALUES(?, ?)",
-                    (obj.tvdb_id, media_type)
-                )
-                update_sql = (
-                    "UPDATE tvdb_data5 SET title = ?, status = ?, summary = ?, poster_url = ?, background_url = ?, "
-                    "release_date = ?, genres = ?, networks = ?, production = ?, studio = ?, expiration_date = ? "
-                    "WHERE tvdb_id = ? AND type = ?"
-                )
-                tvdb_date = (
-                    f"{obj.release_date.year:04d}-{obj.release_date.month:02d}-{obj.release_date.day:02d}"
-                    if getattr(obj, 'release_date', None) else None
-                )
-                # optional: falls die Attribute fehlen, leer schreiben
-                networks = getattr(obj, "networks", "")
-                production = getattr(obj, "production", "")
-                studio = getattr(obj, "studio", "")
-
+                cursor.execute("INSERT OR IGNORE INTO tvdb_data4(tvdb_id, type) VALUES(?, ?)", (obj.tvdb_id, "movie" if obj.is_movie else "show"))
+                update_sql = "UPDATE tvdb_data4 SET title = ?, status = ?, summary = ?, poster_url = ?, background_url = ?, " \
+                             "release_date = ?, genres = ?,  networks = ?, production = ?, studio = ?, expiration_date = ? WHERE tvdb_id = ? AND type = ?"
+                tvdb_date = f"{str(obj.release_date.year).zfill(4)}-{str(obj.release_date.month).zfill(2)}-{str(obj.release_date.day).zfill(2)}" if obj.release_date else None
                 cursor.execute(update_sql, (
-                    obj.title, obj.status, obj.summary, obj.poster_url, obj.background_url,
-                    tvdb_date, "|".join(obj.genres),
-                    networks, production, studio,
-                    expiration_date.strftime("%Y-%m-%d"),
-                    obj.tvdb_id, media_type
+                    obj.title, obj.status, obj.summary, obj.poster_url, obj.background_url, tvdb_date, "|".join(obj.genres),
+                    expiration_date.strftime("%Y-%m-%d"), obj.tvdb_id, "movie" if obj.is_movie else "show"
                 ))
 
     def query_tvdb_map(self, tvdb_url, expiration):
@@ -1232,7 +1191,7 @@ class Cache:
         with sqlite3.connect(self.cache_path) as connection:
             connection.row_factory = sqlite3.Row
             with closing(connection.cursor()) as cursor:
-                cursor.execute("SELECT * FROM overlay_special_text WHERE rating_key = ?", (rating_key, ))
+                cursor.execute("SELECT * FROM overlay_special_text2 WHERE rating_key = ?", (str(rating_key), ))
                 for row in cursor.fetchall():
                     if row:
                         attrs[row["type"]] = row["text"]
@@ -1242,8 +1201,8 @@ class Cache:
         with sqlite3.connect(self.cache_path) as connection:
             connection.row_factory = sqlite3.Row
             with closing(connection.cursor()) as cursor:
-                cursor.execute("INSERT OR IGNORE INTO overlay_special_text(rating_key, type) VALUES(?, ?)", (rating_key, data_type))
-                cursor.execute("UPDATE overlay_special_text SET text = ? WHERE rating_key = ? AND type = ?", (text, rating_key, data_type))
+                cursor.execute("INSERT OR IGNORE INTO overlay_special_text2(rating_key, type) VALUES(?, ?)", (str(rating_key), data_type))
+                cursor.execute("UPDATE overlay_special_text2 SET text = ? WHERE rating_key = ? AND type = ?", (text, str(rating_key), data_type))
 
     def query_testing(self, name):
         value1 = None

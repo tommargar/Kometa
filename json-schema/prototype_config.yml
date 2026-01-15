@@ -53,7 +53,6 @@ libraries:
     - default: actor
     - default: director
     - default: producer
-    - default: composer
     - default: writer
     - default: year
     - default: decade
@@ -202,7 +201,6 @@ libraries:
     - default: actor
     - default: director
     - default: producer
-    - default: composer
     - default: writer
     - default: year
     - default: decade

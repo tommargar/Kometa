@@ -499,7 +499,6 @@ class Library(ABC):
                 key = item.ratingKey
                 guid = item.guid
             if key not in self.movie_rating_key_map and key not in self.show_rating_key_map:
-                self.config.Convert.scan_guid(guid) # still needed?
                 if isinstance(item, tuple):
                     item_type, check_id = self.config.Convert.scan_guid(guid)
                     id_type, main_id, imdb_id, _ = self.config.Convert.ids_from_cache(key, guid, item_type, check_id, self)

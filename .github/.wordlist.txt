@@ -12,6 +12,8 @@ anidb
 anidb's
 anilist
 anilist's
+anonfawkes
+antwanchild
 api
 apikey
 apis
@@ -127,6 +129,7 @@ hemsworth
 hk
 homescreen
 homescreens
+hlg
 hra
 html
 http
@@ -212,6 +215,7 @@ monetization
 mossi
 movistar
 mpaa
+mrbuckwheet
 mx
 myanimelist
 myanimelist's
@@ -287,6 +291,7 @@ readme
 readwriteonce
 realtime
 reauthenticating
+reauthentication
 reciperr
 reddit
 redheadjedi
