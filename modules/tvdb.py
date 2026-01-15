@@ -77,6 +77,9 @@ class TVDbObj:
             self.release_date = data["release_date"]
             self.status = data["status"]
             self.genres = data["genres"].split("|")
+            self.networks = data["networks"].split("|") if data.get("networks") else []
+            self.production = data["production"].split("|") if data.get("production") else []
+            self.studio = data["studio"].split("|") if data.get("studio") else []
         else:
             self.title, self.summary = parse_title_summary(lang=self._tvdb.language)
             if not self.title and self._tvdb.language in language_translation:
@@ -100,6 +103,9 @@ class TVDbObj:
             self.status = parse_page("//strong[text()='Status']/parent::li/span/text()[normalize-space()]")
 
             self.genres = parse_page("//strong[text()='Genres']/parent::li/span/a/text()[normalize-space()]", is_list=True)
+            self.networks = parse_page("//strong[text()='Network']/parent::li/span/a/text()[normalize-space()]", is_list=True) or []
+            self.production = parse_page("//strong[text()='Production Companies']/parent::li/span/a/text()[normalize-space()]", is_list=True) or []
+            self.studio = parse_page("//strong[text()='Studio']/parent::li/span/a/text()[normalize-space()]", is_list=True) or []
 
         if self._tvdb.cache and not ignore_cache:
             self._tvdb.cache.update_tvdb(expired, self, self._tvdb.expiration)

@@ -1,33 +1,22 @@
-import math
-import os
-import plexapi
-import random
-import re
-import time
-from datetime import datetime, timedelta, timezone
-from urllib.parse import unquote
-from xml.etree.ElementTree import ParseError
-
-import requests
+import os, plexapi, re, time
+from datetime import datetime, timedelta
+from modules import builder, util
+from modules.library import Library
+from modules.poster import ImageData
+from modules.request import parse_qs, quote_plus, urlparse
+from modules.util import Failed
 from PIL import Image
 from plexapi import utils
 from plexapi.audio import Artist, Track, Album
-from plexapi.collection import Collection
 from plexapi.exceptions import BadRequest, NotFound, Unauthorized
+from plexapi.collection import Collection
 from plexapi.library import Role, FilterChoice
 from plexapi.playlist import Playlist
 from plexapi.server import PlexServer
 from plexapi.video import Movie, Show, Season, Episode
 from requests.exceptions import ConnectionError, ConnectTimeout
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_not_exception_type
-
-from modules import builder, util
-from modules.emby_server import EmbyServer, FilterChoiceEmby
-from modules.library import Library
-from modules.logs import WARNING
-from modules.poster import ImageData
-from modules.request import parse_qs, quote_plus, urlparse
-from modules.util import Failed
+from xml.etree.ElementTree import ParseError
 
 logger = util.logger
 
@@ -210,7 +199,7 @@ method_alias = {
     "composers": "composer",
     "writers": "writer",
     "years": "year", "show_year": "year", "show_years": "year",
-    "show_title": "title", "filter": "filters",
+    "filter": "filters",
     "seasonyear": "year", "isadult": "adult", "startdate": "start", "enddate": "end", "averagescore": "score",
     "minimum_tag_percentage": "min_tag_percent", "minimumtagrank": "min_tag_percent", "minimum_tag_rank": "min_tag_percent",
     "anilist_tag": "anilist_search", "anilist_genre": "anilist_search", "anilist_season": "anilist_search",
@@ -522,7 +511,6 @@ class Plex(Library):
             logger.info(f"Plex Error: Plex connection attempt returned 'ConnectionError' or 'ParseError'")
             logger.stacktrace()
             raise Failed("Plex Error: Plex URL is probably invalid")
-
         self.Plex = None
         library_names = []
         for s in self.PlexServer.library.sections():
@@ -701,10 +689,6 @@ class Plex(Library):
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type((BadRequest, NotFound, Unauthorized)))
     def collection_mode_query(self, collection, data):
         collection.modeUpdate(mode=data)
-
-    def needs_collection_mode_update(self, collection, mode):
-        return int(collection.collectionMode) not in collection_mode_keys \
-            or collection_mode_keys[int(collection.collectionMode)] != mode
 
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type((BadRequest, NotFound, Unauthorized)))
     def collection_order_query(self, collection, data):
@@ -1440,7 +1424,7 @@ class Plex(Library):
                     season_poster, season_background, season_logo, _, _ = self.find_item_assets(season, item_asset_directory=item_dir, asset_directory=asset_directory, folder_name=name)
                     if season_poster:
                         found_season = True
-                    elif self.show_missing_season_assets and season.seasonNumber > 0:
+                    elif self.show_missing_season_assets and season.seasonNumber and season.seasonNumber > 0:
                         missing_seasons += f"\nMissing Season {season.seasonNumber} Poster"
                     if season_poster or season_background or season_logo and "Overlay" not in [la.tag for la in self.item_labels(season)]:
                         self.upload_images(season, poster=season_poster, background=season_background, logo=season_logo)

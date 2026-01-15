@@ -121,10 +121,13 @@ class Overlays:
                     # self.library.reload(item, force=True)
 
                     overlay_compare = [] if overlay_compare is None else util.get_list(overlay_compare, split="|")
-
-                    my_overlay_path = os.path.join(self.library.overlay_destination_folder, f"{item.ratingKey}.{self.library.overlay_artwork_filetype}")
-                    has_overlay = os.path.exists(my_overlay_path)
-                    # has_overlay = any([item_tag.lower() == "overlay" for item_tag in self.library.item_labels(item)])
+                    my_overlay_path = ""
+                    if self.library.Plex:
+                        has_overlay = any(
+                            [item_tag.tag.lower() == "overlay" for item_tag in self.library.item_labels(item)])
+                    elif self.library.EmbyServer:
+                        my_overlay_path = os.path.join(self.library.overlay_destination_folder, f"{item.ratingKey}.{self.library.overlay_artwork_filetype}")
+                        has_overlay = os.path.exists(my_overlay_path)
 
                     compare_names = {properties[ov].get_overlay_compare(): ov for ov in over_names}
                     blur_num = 0
@@ -241,7 +244,9 @@ class Overlays:
                                     break
                     try:
                         #todo: for Emby transparent PNG, ignore existing poster files
-                        poster = ImageData("asset_directory", my_overlay_path if has_overlay else "", is_url=False)
+                        poster, background, logo, item_dir, name = self.library.find_item_assets(item)
+                        if self.library.EmbyServer:
+                            poster = ImageData("asset_directory", my_overlay_path if has_overlay else "", is_url=False)
                         # poster = ImageData("asset_directory", emby_poster.get("Path"), is_url=False, compare=poster_compare)
                         # background = ImageData("asset_directory", emby_thumb.get("Path"), compare=emby_item.get("ImageTags").get("Thumb"))
                         item_dir = os.path.dirname(poster.location)
@@ -259,6 +264,8 @@ class Overlays:
                                     logger.warning(f"Asset Warning: No poster '{name}' found in the assets folders")
                         # if background:
                         #     self.library.upload_images(item, background=background)
+                        # if logo:
+                        #     self.library.upload_images(item, logo=logo)
                     except Failed as e:
                         if self.library.assets_for_all and self.library.show_missing_assets:
                             logger.warning(e)
@@ -814,4 +821,4 @@ class Overlays:
                 if os.path.exists(loc):
                     os.remove(loc)
         else:
-            logger.error(f"No Overlay found to remove for {item_title}")
+            logger.error(f"No Poster found to restore for {item_title}")

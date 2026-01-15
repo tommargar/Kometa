@@ -3,9 +3,10 @@ from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
 from modules.logs import MyLogger
+from packaging.version import Version, parse
 
-if sys.version_info[0] != 3 or sys.version_info[1] < 9:
-    print("Python Version %s.%s.%s has been detected and is not supported. Kometa requires a minimum of Python 3.9.0." % (sys.version_info[0], sys.version_info[1], sys.version_info[2]))
+if sys.version_info[0] != 3 or sys.version_info[1] < 10:
+    print("Python Version %s.%s.%s has been detected and is not supported. Kometa requires a minimum of Python 3.10.0." % (sys.version_info[0], sys.version_info[1], sys.version_info[2]))
     sys.exit(0)
 
 try:
@@ -271,6 +272,7 @@ if not uuid_num:
         handle.write(str(uuid_num))
 
 plexapi.BASE_HEADERS["X-Plex-Client-Identifier"] = str(uuid_num)
+
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 if util.windows:
@@ -322,9 +324,18 @@ def start(attrs):
             try:
                 with open(os.path.abspath(os.path.join(os.path.dirname(__file__), "requirements.txt")), "r") as file:
                     required_versions = {ln.split("==")[0]: ln.split("==")[1].split(";")[0].strip() for ln in file.readlines()}
+                v1 = parse("0")
+                v2 = parse("0")
                 for req_name, sys_ver in system_versions.items():
-                    if sys_ver and sys_ver != required_versions[req_name]:
-                        logger.info(f"    {req_name} version: {sys_ver} requires an update to: {required_versions[req_name]}")
+                    if sys_ver:
+                        v1 = parse(sys_ver)
+                    if req_name in required_versions:
+                        v2 = parse(required_versions[req_name])
+                    if sys_ver:
+                        if v1 < v2:
+                            logger.info(f"    {req_name} version: {v1} requires an update to: {v2}")
+                        if v1 > v2:
+                            logger.info(f"    {req_name} version: {v1} does not match expected: {v2}")
             except FileNotFoundError:
                 logger.error("    File Error: requirements.txt not found")
         if "time" in attrs and attrs["time"]:                   start_type = f"{attrs['time']} "
@@ -914,7 +925,6 @@ def run_collection(config, library, metadata, requested_collections):
                             raise Failed(e)
 
                 builder.display_filters()
-                # print(f"Founditems: {builder.found_items}")
 
                 beginning_count = builder.beginning_count if builder.beginning_count is not None else 0
                 if len(builder.found_items) > 0 and len(
@@ -932,6 +942,8 @@ def run_collection(config, library, metadata, requested_collections):
                         library.status[str(mapping_name)]["removed"] = items_removed
 
                 if builder.do_missing and (len(builder.missing_movies) > 0 or len(builder.missing_shows) > 0):
+                    logger.info("")
+                    logger.info(f"Processing missing items: {len(builder.missing_movies)} movies and/or {len(builder.missing_shows)} missing shows")
                     radarr_add, sonarr_add = builder.run_missing()
                     library.stats["radarr"] += radarr_add
                     library.status[str(mapping_name)]["radarr"] += radarr_add
@@ -1231,7 +1243,7 @@ if __name__ == "__main__":
         if run_args["run"] or run_args["tests"] or run_args["run-collections"] or run_args["run-libraries"] or run_args["run-files"] or run_args["resume"]:
             process({"collections": run_args["run-collections"], "libraries": run_args["run-libraries"], "files": run_args["run-files"]})
         else:
-            times_to_run = util.get_list(run_args["times"])
+            times_to_run = util.get_list_bar_then_comma(run_args["times"])
             valid_times = []
             for time_to_run in times_to_run:
                 try:

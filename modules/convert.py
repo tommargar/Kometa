@@ -286,7 +286,6 @@ class Convert:
         tvdb_id = []
         imdb_id = []
         anidb_id = None
-
         item_type, check_id = self.scan_guid(item.guid)
         if mydata:
             item_type = "emby"

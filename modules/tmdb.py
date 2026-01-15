@@ -120,13 +120,20 @@ class TMDbMovie(TMDBObj):
         self.collection_id = data["collection_id"] if isinstance(data, dict) else data.collection.id if data.collection else None
         self.collection_name = data["collection_name"] if isinstance(data, dict) else data.collection.name if data.collection else None
 
+        if isinstance(data, dict):
+            self.cast = data.get("cast", [])
+            self.crew = data.get("crew", [])
+        else:
+            self.cast = [{"id": c.id, "name": c.name, "character": getattr(c, "character", None), "order": getattr(c, "order", None)} for c in getattr(data, "cast", [])]
+            self.crew = [{"id": c.id, "name": c.name, "job": getattr(c, "job", None), "department": getattr(c, "department", None)} for c in getattr(data, "crew", [])]
+
         if self._tmdb.cache and not ignore_cache:
             self._tmdb.cache.update_tmdb_movie(expired, self, self._tmdb.expiration)
 
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type(Failed))
     def load_movie(self):
         try:
-            return self._tmdb.TMDb.movie(self.tmdb_id, partial="external_ids,keywords")
+            return self._tmdb.TMDb.movie(self.tmdb_id, partial="external_ids,keywords,credits")
         except NotFound:
             raise Failed(f"TMDb Error: No Movie found for TMDb ID: {self.tmdb_id}")
         except TMDbException as e:
@@ -157,13 +164,20 @@ class TMDbShow(TMDBObj):
         loop = data.seasons if not isinstance(data, dict) else data["seasons"].split("%|%") if data["seasons"] else [] # noqa
         self.seasons = [TMDbSeason(s) for s in loop]
 
+        if isinstance(data, dict):
+            self.cast = data.get("cast", [])
+            self.crew = data.get("crew", [])
+        else:
+            self.cast = [{"id": c.id, "name": c.name, "character": getattr(c, "character", None), "order": getattr(c, "order", None)} for c in getattr(data, "cast", [])]
+            self.crew = [{"id": c.id, "name": c.name, "job": getattr(c, "job", None), "department": getattr(c, "department", None)} for c in getattr(data, "crew", [])]
+
         if self._tmdb.cache and not ignore_cache:
             self._tmdb.cache.update_tmdb_show(expired, self, self._tmdb.expiration)
 
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type(Failed))
     def load_show(self):
         try:
-            return self._tmdb.TMDb.tv_show(self.tmdb_id, partial="external_ids,keywords")
+            return self._tmdb.TMDb.tv_show(self.tmdb_id, partial="external_ids,keywords,credits")
         except NotFound:
             raise Failed(f"TMDb Error: No Show found for TMDb ID: {self.tmdb_id}")
         except TMDbException as e:

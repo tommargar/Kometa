@@ -1,7 +1,9 @@
-import os, re
+import math, os, re
 from datetime import datetime, timedelta, timezone
-from modules import util, anidb
+from modules import plex, util, anidb
 from modules.util import Failed, LimitReached
+from plexapi.exceptions import NotFound
+from plexapi.video import Movie, Show
 
 logger = util.logger
 
@@ -22,6 +24,10 @@ name_display = {
     "addedAt": "Added At Date",
     "contentRating": "Content Rating"
 }
+
+def _item_batches(items_iterable, batch_size):
+    for batch_num in range(0, math.ceil(len(items_iterable) / batch_size)):
+        yield items_iterable[batch_num * batch_size:(batch_num + 1) * batch_size]
 
 class Operations:
     def __init__(self, config, library):
@@ -122,8 +128,6 @@ class Operations:
             sonarr_adds = []
             label_edits = {"add": {}, "remove": {}}
             rating_edits = {"audienceRating": {}, "rating": {}, "userRating": {}, "CriticRating": {}, "CommunityRating": {}}
-
-
             genre_edits = {"add": {}, "remove": {}}
             content_edits = {}
             studio_edits = {}
@@ -179,7 +183,6 @@ class Operations:
                         new_title = re.sub(" \\(\\w+\\)$", "", item.title)
                         # item.editTitle(new_title)
                         self.library.EmbyServer.editItemTitle(item.ratingKey, new_title)
-
                         item_edits.append(f"\nUpdated Title: {item.title[:25]:<25} | {new_title}")
                 if self.library.mass_imdb_parental_labels:
                 # Emby: not tested
@@ -235,13 +238,22 @@ class Operations:
                         path = path[:-1] if path.endswith(("/", "\\")) else path
                         sonarr_adds.append((tvdb_id, path))
 
+                _trakt_ratings = None
+                def trakt_ratings():
+                    nonlocal _trakt_ratings
+                    if _trakt_ratings is None:
+                        _trakt_ratings = self.config.Trakt.user_ratings(self.library.is_movie)
+                    if not _trakt_ratings:
+                        raise Failed
+                    return _trakt_ratings
+
                 _tmdb_obj = None
-                def tmdb_obj(ignore_cache = False):
+                def tmdb_obj():
                     nonlocal _tmdb_obj
                     if _tmdb_obj is None:
                         _tmdb_obj = False
                         try:
-                            _item = self.config.TMDb.get_item(item, tmdb_id, tvdb_id, imdb_id, is_movie=self.library.is_movie, ignore_cache=ignore_cache )
+                            _item = self.config.TMDb.get_item(item, tmdb_id, tvdb_id, imdb_id, is_movie=self.library.is_movie)
                             if _item:
                                 _tmdb_obj = _item
                         except Failed as err:
@@ -278,7 +290,7 @@ class Operations:
                         _tvdb_obj = False
                         if tvdb_id:
                             try:
-                                _tvdb_obj = self.config.TVDb.get_tvdb_obj_from_id(tvdb_id, is_movie=self.library.is_movie)
+                                _tvdb_obj = self.config.TVDb.get_tvdb_obj(tvdb_id, is_movie=self.library.is_movie)
                             except Failed as err:
                                 logger.error(str(err))
                         else:
@@ -378,7 +390,6 @@ class Operations:
                     if not _mal_obj:
                         raise Failed
                     return _mal_obj
-
 
                 for attribute, item_attr in [
                     (self.library.mass_audience_rating_update, "audienceRating"),
@@ -551,6 +562,8 @@ class Operations:
                                     new_genres = [str(t).title() for t, w in anidb_obj().tags.items() if w >= anidb.weights[str(option)]] # noqa
                                 elif option == "mal":
                                     new_genres = mal_obj().genres # noqa
+                                elif option == "mal_all":
+                                    new_genres = mal_obj().genres + mal_obj().explicit_genres + mal_obj().themes + mal_obj().demographics # noqa
                                 else:
                                     new_genres = option
                                 if not new_genres:
@@ -942,7 +955,7 @@ class Operations:
                     # tick("Emby genres updated", min_ms=5)
 
                 if len(item_edits) > 0:
-                    logger.info("\n".join(item_edits))
+                    logger.info(f"{item_edits[1:]}")
                 else:
                     logger.info("No Item Edits")
 
@@ -1025,7 +1038,7 @@ class Operations:
                                         episode._partial = False
                                         try:
                                             tmdb_episodes[episode.episode_number] = episode
-                                        except Exception:
+                                        except NotFound:
                                             logger.error(f"TMDb Error: An Episode of Season {season.seasonNumber} was Not Found")
 
                                 for episode in self.library.get_episodes(season):
@@ -1246,6 +1259,8 @@ class Operations:
                 except Failed as e:
                     logger.error(e)
 
+            logger.info("")
+
         if self.library.radarr_remove_by_tag:
             logger.info("")
             logger.separator(f"Radarr Remove {len(self.library.radarr_remove_by_tag)} Movies with Tags: {', '.join(self.library.radarr_remove_by_tag)}", space=False, border=False)
@@ -1336,7 +1351,8 @@ class Operations:
                 logger.separator(f"Unconfigured Mass Collection Mode to {self.library.mass_collection_mode} for {self.library.name} Library", space=False, border=False)
                 logger.info("")
                 for col in unconfigured_collections:
-                    if self.library.needs_collection_mode_update(col, self.library.mass_collection_mode):
+                    if int(col.collectionMode) not in plex.collection_mode_keys \
+                            or plex.collection_mode_keys[int(col.collectionMode)] != self.library.mass_collection_mode:
                         self.library.collection_mode_query(col, self.library.mass_collection_mode)
                         logger.info(f"{col.title} Collection Mode Updated")
 
