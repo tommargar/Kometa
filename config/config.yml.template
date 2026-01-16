@@ -13,11 +13,24 @@ plex:                              # Can be individually specified per library a
   empty_trash: false
   optimize: false
   verify_ssl: true
+emby:                              # Can be individually specified per library as well
+  url: http://192.168.1.12:8096    # Enter Emby URL (Optional)
+  api_key:                         # Enter Emby API Key (Optional)
+  user_id:                         # Enter Emby User ID (Optional)
+  overlay_destination_folder:      # Enter Emby Overlay Destination Folder (Optional)
+  timeout: 60
+  db_cache:
+  verify_ssl: true
 tmdb:
   apikey:                          # Enter TMDb API Key (REQUIRED)
   cache_expiration: 60
   language: en
   region:
+tvdb: # NEW API usage
+  apikey:                          # Enter TVDb API Key (Optional)
+  pin:                             # Enter TVDb PIN (Optional)
+  cache_expiration: 60
+  language: en
 
                                    ## At least one library has to be configured for the script to do anything meaningful
 libraries:                         # This is called out once within the config.yml file
@@ -96,8 +109,10 @@ settings:
   playlist_report: false
   verify_ssl: true
   custom_repo:
-  overlay_artwork_filetype: webp_lossy
+  overlay_artwork_filetype: png # Use png for Emby transparent overlays webp_lossy
   overlay_artwork_quality: 90
+  overlay_refresh_emby_items: false
+  server_type: emby # plex or emby
 webhooks:                          # Can be individually specified per library as well
   changes:
   delete:

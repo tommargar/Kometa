@@ -822,7 +822,26 @@ class ConfigFile:
                         logger.info("")
                         logger.separator(f"Skipping {e} Playlist File")
 
-            self.TVDb = TVDb(self.Requests, self.Cache, self.general["tvdb_language"], self.general["cache_expiration"])
+            self.TVDb = None
+            if "tvdb" in self.data:
+                logger.info("Connecting to TVDb...")
+                logger.info("Metadata provided by TheTVDB. Please consider adding missing information or subscribing.")
+                try:
+                    self.TVDb = TVDb(self.Requests, self.Cache, {
+                        "apikey": check_for_attribute(self.data, "apikey", parent="tvdb", throw=True),
+                        "pin": check_for_attribute(self.data, "pin", parent="tvdb", default_is_none=True),
+                        "language": check_for_attribute(self.data, "language", parent="tvdb", default=self.general["tvdb_language"]),
+                        "cache_expiration": check_for_attribute(self.data, "cache_expiration", parent="tvdb", var_type="int", default=self.general["cache_expiration"], int_min=1)
+                    })
+                except Failed as e:
+                    logger.error(e)
+                logger.info(f"TVDb Connection {'Failed' if self.TVDb is None else 'Successful'}")
+
+            if self.TVDb is None:
+                self.TVDb = TVDb(self.Requests, self.Cache, {
+                    "language": self.general["tvdb_language"],
+                    "cache_expiration": self.general["cache_expiration"]
+                })
             self.IMDb = IMDb(self.Requests, self.Cache, self.default_dir)
             self.Convert = Convert(self.Requests, self.Cache, self.TMDb)
             self.AniList = AniList(self.Requests)

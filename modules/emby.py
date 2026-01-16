@@ -1030,16 +1030,6 @@ class Emby(Library):
                 ids.extend([(t_id, "tmdb") for t_id in tmdb_id])
         return ids
 
-    def get_all_collections(self, label=None):
-        args = "?type=18"
-        if label:
-            label_id = next((c.key for c in self.get_tags("label") if c.title == label), None) # noqa
-            if label_id:
-                args = f"{args}&label={label_id}"
-            else:
-                return []
-        return self.fetchItems(args)
-
     def parse_relative_date(self, relative_date_str):
         """
         Parses a relative date string like '-90d' and returns a datetime object.
@@ -2724,16 +2714,9 @@ class Emby(Library):
         if not builder_level:
             builder_level = self.type.lower()
 
-        logger.info(f"Loading All {builder_level.capitalize()}s from Library: {self.Emby.get('Name')}")
+        logger.info(f"Loading All {builder_level.capitalize()}s from Emby Library: {self.Emby.get('Name')}")
 
-        items = []
-        start_index = 0
-        limit = 250
-        total_record_count = 1
-        include_item_types = []
-        # print(builder_type)
-        # Bestimmung der Typen für die Abfrage
-        # ToDo: Add more builder_types
+        include_item_types = ["Movie", "Series", "MusicArtist"]
         if builder_type == "movie":
             include_item_types = ["Movie"]
         elif builder_type == "show":
@@ -2742,56 +2725,19 @@ class Emby(Library):
             include_item_types = ["Season"]
         elif builder_type == "artist":
             include_item_types = ["MusicArtist"]
-        else:
-            logger.warning(f"builder type not supported by 'emby_get_all' - {builder_type}")
-            include_item_types = ["Movie", "Series", "MusicArtist"]
-        items_data =[]
-        while start_index < total_record_count:
-            # Abfrage der Hauptdaten
-            params = {
-                "Recursive": "true",
-                "IncludeItemTypes": ",".join(include_item_types),
-                "StartIndex": start_index,
-                "Limit": limit,
-                "ParentId": self.Emby.get("Id"),
-                "Fields": "Budget,Chapters,DateCreated,Genres,HomePageUrl,IndexOptions,MediaStreams,Overview,ParentId,Path,People,ProductionYear,PremiereDate,ProviderIds,PrimaryImageAspectRatio,Revenue,SortName,Studios,Taglines,CriticRating,CommunityRating,OfficialRating,Tags,TagItems",
-            }
 
-            endpoint = f"{self.url}/emby/Users/{self.emby_user_id}/Items"
-            response = requests.get(endpoint, headers=self.EmbyServer.headers, params=params)
-            # response = self.session.get(endpoint, headers=self.EmbyServer.headers, params=params)
-            response.raise_for_status()
-            data = response.json()
-
-
-            # print(data)
-
-            # Gesamtdatensätze und Fortschritt verfolgen
-            items_data += data.get("Items", [])
-            total_record_count = data.get("TotalRecordCount", 0)
-            start_index += limit
-            logger.ghost(
-                f"Loaded: {start_index if start_index < total_record_count else total_record_count}/{total_record_count}")
+        items_data = self.EmbyServer.get_items(
+            params={"ParentId": self.Emby.get("Id")},
+            fields="Budget,Chapters,DateCreated,Genres,HomePageUrl,IndexOptions,MediaStreams,Overview,ParentId,Path,People,ProductionYear,PremiereDate,ProviderIds,PrimaryImageAspectRatio,Revenue,SortName,Studios,Taglines,CriticRating,CommunityRating,OfficialRating,Tags,TagItems",
+            include_item_types=include_item_types,
+            getAll=True
+        ) or []
 
         self.EmbyServer.cache_filenames(items_data)
 
         logger.info(f"Loaded {len(items_data)} {builder_level.capitalize()}s from Emby")
         self._emby_all_items_native = items_data
         if native:
-            # for item in items_data:
-            #     for people in item.get("People", []):
-            #         params = {
-            #             "Recursive": "true",
-            #             "IncludeItemTypes": "People",
-            #             "Ids": people.get('Id'),
-            #             "Fields": "ProviderIds",
-            #         }
-            #         response = self.session.get(endpoint, headers=self.emby_headers, params=params)
-            #         prov_ids = response.json().get('Items', [])[0].get('ProviderIds')
-            #         if prov_ids:
-            #             tmdb_id = prov_ids.get('Tmdb', None)
-            #             if tmdb_id:
-            #                 people['tmdb_id'] = tmdb_id
             return items_data
         plex_items= self.EmbyServer.convert_emby_to_plex(items_data)
 

@@ -228,7 +228,6 @@ class EmbyServer:
         self._person_dupe_redirect_last = {}
         self._person_dupes_last = {}
         self._person_dupes_choice_last = {}
-        self._http_session = requests.Session()
         self.cached_tmdb_ids = {}
         self.config = config
         self._roman_name_cache = {}  # key: tmdb_person_id(str) -> latin_name(str)|None
@@ -262,11 +261,12 @@ class EmbyServer:
         self.api_batch_size = 50
         self.seconds_between_requests = 0.05
         # get system info to see if it works
+        self.session = None
+        self._ensure_http_session()
         self.system_info = self.get_system_info()
         self.friendlyName = self.system_info.get("ServerName", "")
         self.version = self.system_info.get("Version", "")
         self.platform = self.system_info.get("OperatingSystemDisplayName", "")
-        self.session = requests.Session()
         self.year_cache = {}
         self.library_id = None
 
@@ -486,13 +486,13 @@ class EmbyServer:
     def get_years(self, library_id: str):
         endpoint = f"/emby/Years?Recursive=True&ParentId={library_id}&api_key={self.api_key}"
         url = self.emby_server_url + endpoint
-        response = requests.get(url, headers=self.headers)
+        response = self.session.get(url, headers=self.headers)
         return response.json().get("Items", [])
 
     def get_official_age_ratings(self, library_id: str):
         endpoint = f"/emby/OfficialRatings?Recursive=True&ParentId={library_id}&api_key={self.api_key}"
         url = self.emby_server_url + endpoint
-        response = requests.get(url, headers=self.headers)
+        response = self.session.get(url, headers=self.headers)
         return response.json().get("Items", [])
 
 
@@ -660,7 +660,7 @@ class EmbyServer:
             "api_key": self.api_key
         }
         try:
-            response = requests.get(endpoint, headers=self.headers, params=params)
+            response = self.session.get(endpoint, headers=self.headers, params=params)
             response.raise_for_status()
             items = response.json().get("Items", [])
 
@@ -695,7 +695,7 @@ class EmbyServer:
             "api_key": self.api_key
         }
         try:
-            response = requests.get(endpoint, headers=self.headers, params=params)
+            response = self.session.get(endpoint, headers=self.headers, params=params)
             response.raise_for_status()
             items = response.json().get("Items", [])
 
@@ -715,7 +715,7 @@ class EmbyServer:
         endpoint = "/emby/System/Info"
         url = self.emby_server_url + endpoint
         try:
-            response = requests.get(url, headers=self.headers)
+            response = self.session.get(url, headers=self.headers)
             return response.json()
         except Exception as e:
             logger.error(
@@ -726,7 +726,7 @@ class EmbyServer:
     def get_users(self):
         user_list_endpoint = "/emby/Users"
         user_list_url = self.emby_server_url + user_list_endpoint
-        user_list_response = requests.get(user_list_url, headers=self.headers)
+        user_list_response = self.session.get(user_list_url, headers=self.headers)
         try:
             return user_list_response.json()
         except Exception as e:
@@ -741,8 +741,8 @@ class EmbyServer:
 
         # sort order not settable in Emby other than item sort name
         emby_url_name = f"{self.url}/emby/Users/{self.user_id}/Items/{collection_id}?api_key={self.api_key}"
-        _name = requests.get(emby_url_name, headers=self.headers)
-        response_name = requests.get(emby_url_name, headers=self.headers)
+        _name = self.session.get(emby_url_name, headers=self.headers)
+        response_name = self.session.get(emby_url_name, headers=self.headers)
         response_name.raise_for_status()
         data_name = response_name.json()
 
@@ -766,7 +766,7 @@ class EmbyServer:
 
         try:
             # Perform the GET request to search for the actor
-            response = requests.get(search_url, headers=self.headers, params=params)
+            response = self.session.get(search_url, headers=self.headers, params=params)
             response.raise_for_status()
 
             # Parse the response JSON
@@ -1123,7 +1123,7 @@ class EmbyServer:
         my_search = f"{self.emby_server_url}/Users/{self.user_id}/Items?Recursive=true{search_title}{search_tag}{get_fields}&ParentId={library_id}&IncludeItemTypes=BoxSet&api_key={self.api_key}"
         # my_search = f"{self.emby_server_url}/Items?Recursive=true&SearchTerm={title}&IncludeItemTypes=BoxSets&api_key={self.api_key}"
 
-        title_response = requests.get(
+        title_response = self.session.get(
             my_search
         ).json().get("Items", [])
         my_return = list(title_response)
@@ -1148,7 +1148,7 @@ class EmbyServer:
 
         # todo: nur die collections der library finden
         # 1. alle collections abfragen
-        response = requests.get(
+        response = self.session.get(
             f"{self.url}/Items?IncludeItemTypes=BoxSet&ParentId={library_id}&api_key={self.api_key}"
         )
         collections_with_items = []
@@ -1184,7 +1184,7 @@ class EmbyServer:
         # 5. => boxsets from library
 
         # Schritt 3: Alle Items in der Bibliothek abrufen
-        response = requests.get(
+        response = self.session.get(
             f"{self.url}/Items?ParentId={library_id}&IncludeItemTypes=BoxSet&Recursive=True&s&api_key={self.api_key}"
         )
 
@@ -1249,7 +1249,7 @@ class EmbyServer:
 
             try:
                 # Perform the API request
-                response = requests.get(url, headers=self.headers)
+                response = self.session.get(url, headers=self.headers)
                 response.raise_for_status()
                 items_data = response.json()
                 batch_items = items_data.get("Items", [])
@@ -1300,7 +1300,7 @@ class EmbyServer:
 
             # Create the collection with the first batch of items
             first_batch = item_ids[:100]  # Use the first 100 items for initial creation
-            response = requests.post(
+            response = self.session.post(
                 f"{self.emby_server_url}/Collections?api_key={self.api_key}&IsLocked=true&ParentId={parent_id}&Name={collection_name}&Ids={self.__ids_to_str(first_batch)}"
             )
 
@@ -1318,7 +1318,7 @@ class EmbyServer:
             for i in range(batch_size, len(item_ids), batch_size):
                 batch = item_ids[i:i + batch_size]
                 # string_ids = ','.join(batch)
-                batch_response = requests.post(
+                batch_response = self.session.post(
                     f"{self.emby_server_url}/Collections/{collection_id}/Items?api_key={self.api_key}&Ids={self.__ids_to_str(batch)}"
                 )
 
@@ -1382,7 +1382,7 @@ class EmbyServer:
         """
 
         url = f"{self.emby_server_url}/Items?{item_id}&api_key={self.api_key}"
-        response = requests.delete(url)
+        response = self.session.delete(url)
         if response.status_code == 200:
             return True
         else:
@@ -1464,7 +1464,7 @@ class EmbyServer:
         endpoint = f"/emby/users/{self.user_id}/Items/{item_id}?api_key={self.api_key}"
         url = self.emby_server_url + endpoint
         try:
-            resp = requests.get(url, headers=self.headers)
+            resp = self.session.get(url, headers=self.headers)
             resp.raise_for_status()
             data = resp.json()
             self.item_cache[item_id] = data
@@ -1478,7 +1478,7 @@ class EmbyServer:
         endpoint = f"/emby/Items/{item_id}/Images?api_key={self.api_key}"
         url = self.emby_server_url + endpoint
         try:
-            return requests.get(url, headers=self.headers).json()
+            return self.session.get(url, headers=self.headers).json()
         except Exception as e:
             logger.error(f"Error occurred while getting item image: {e}. URL: {url}.")
             return None
@@ -1512,7 +1512,7 @@ class EmbyServer:
 
     def refresh_item(self, item_id):
         # Refreshes metadata for a specific item
-        response = requests.post(
+        response = self.session.post(
             f"{self.emby_server_url}/Items/{item_id}/Refresh?api_key={self.api_key}&ReplaceAllMetadata=true"
         )
         time.sleep(self.seconds_between_requests)
@@ -1603,6 +1603,7 @@ class EmbyServer:
 
         for batch in batches:
             if batch:
+                logger.ghost(f"Fetching batch #{batches.index(batch) + 1} of {len(batches)} batches)")
                 query_params["Ids"] = ",".join(batch)
             current_index = start_index
 
@@ -1612,7 +1613,7 @@ class EmbyServer:
                 encoded_query = self.custom_encode(query_params)
                 full_url = f"{url}?{encoded_query}"
 
-                response = requests.get(full_url, headers=self.headers)
+                response = self.session.get(full_url, headers=self.headers)
                 try:
                     response_data = response.json()
                 except Exception as e:
@@ -1622,6 +1623,7 @@ class EmbyServer:
                     return None
 
                 if "Items" in response_data:
+                    # logger.ghost(f"Processing Emby items {current_index}/{current_index + len(response_data['Items'])}")
                     items = response_data["Items"]
                     all_items.extend(items)
                     if not items:
@@ -1737,7 +1739,7 @@ class EmbyServer:
         """
         endpoint = f"/emby/Users/{user_id}/PlayedItems/{item_id}"
         url = self.emby_server_url + endpoint
-        response = requests.post(url, headers=self.headers)
+        response = self.session.post(url, headers=self.headers)
         if response.status_code == 200:
             return True
         else:
@@ -1759,7 +1761,7 @@ class EmbyServer:
         """
         endpoint = f"/emby/Users/{user_id}/FavoriteItems/{item_id}"
         url = self.emby_server_url + endpoint
-        response = requests.post(url, headers=self.headers)
+        response = self.session.post(url, headers=self.headers)
         if response.status_code == 200:
             return True
         else:
@@ -1807,7 +1809,7 @@ class EmbyServer:
         }
 
         try:
-            response = requests.post(
+            response = self.session.post(
                 url,
                 headers=self.headers,
                 json=params,
@@ -1869,7 +1871,7 @@ class EmbyServer:
                 "X-Emby-Token": self.api_key,
             }
 
-            response = requests.post(
+            response = self.session.post(
                 url,
                 headers=headers,
                 data=image_data_base64,
@@ -2167,7 +2169,7 @@ class EmbyServer:
         )
         my_= str(item)
         try:
-            response = requests.post(update_item_url, json=item)
+            response = self.session.post(update_item_url, json=item)
             # print(
             #     f"Updated item {item_id} with {data}. Waiting {self.seconds_between_requests} seconds."
             # )
@@ -2205,11 +2207,11 @@ class EmbyServer:
             # print(".", end="", flush=True)
 
             if operation == "add":
-                response = requests.post(
+                response = self.session.post(
                     f"{self.emby_server_url}/Collections/{collection_id}/Items/?api_key={self.api_key}&Ids={self.__ids_to_str(batch_item_ids)}"
                 )
             elif operation == "delete":
-                response = requests.delete(
+                response = self.session.delete(
                     f"{self.emby_server_url}/Collections/{collection_id}/Items/?api_key={self.api_key}&Ids={self.__ids_to_str(batch_item_ids)}"
                 )
 
@@ -2257,11 +2259,11 @@ class EmbyServer:
             # print(".", end="", flush=True)
 
             if operation == "add":
-                response = requests.post(
+                response = self.session.post(
                     f"{self.emby_server_url}/Collections/{collection_id}/Items/?api_key={self.api_key}&Ids={self.__ids_to_str(batch_item_ids)}"
                 )
             elif operation == "delete":
-                response = requests.delete(
+                response = self.session.delete(
                     f"{self.emby_server_url}/Collections/{collection_id}/Items/?api_key={self.api_key}&Ids={self.__ids_to_str(batch_item_ids)}"
                 )
 
@@ -2286,7 +2288,7 @@ class EmbyServer:
             collection_id = collection.ratingKey
         delete_url = f'{self.emby_server_url}/Items/{collection_id}/Delete?api_key={self.api_key}'
         headers = { 'accept': '*/*'}
-        response = requests.post(delete_url, headers=headers)
+        response = self.session.post(delete_url, headers=headers)
         if response.status_code == 204:
             logger.info(f'Successfully deleted collection with ID "{collection_id}"')
         else:
@@ -2301,7 +2303,7 @@ class EmbyServer:
             for i in range(0, len(all_ids), batch_size):
                 batch_ids = all_ids[i:i + batch_size]  # Nimm einen Batch von 100 IDs
                 string_ids = ','.join(batch_ids)  # Verbinde die IDs zu einem String
-                response = requests.delete(
+                response = self.session.delete(
                     f"{self.emby_server_url}/emby/Collections/{collection_id}/Items?Ids={string_ids}&api_key={self.api_key}"
                 )
 
@@ -2573,7 +2575,7 @@ class EmbyServer:
         Returns:
             None
         """
-        response = requests.post(
+        response = self.session.post(
             f"{self.emby_server_url}/Items/{collection_id}?api_key={self.api_key}",
             json={"LockData": True}
         )
@@ -2599,7 +2601,7 @@ class EmbyServer:
             collection_id = self.get_collection_id(collection_name)
         try:
             # API-Endpunkt für das Löschen einer Sammlung
-            response = requests.delete(
+            response = self.session.delete(
                 f"{self.emby_server_url}/Items/{collection_id}?api_key={self.api_key}"
             )
 
@@ -2686,7 +2688,7 @@ class EmbyServer:
 
         # Fallback: einmaliger API-Call (falls nichts im Cache bekannt ist)
         url = f"{self.emby_server_url}/emby/Tags?Recursive=true&ParentId={library_id}&api_key={self.api_key}"
-        data = requests.get(url, headers=self.headers).json()
+        data = self.session.get(url, headers=self.headers).json()
         return sorted({it.get("Name") for it in data.get("Items", []) if it.get("Name")})
 
     def get_emby_item_genres(self, plex_object, library_id: str = "", search_all: bool = False,
@@ -2707,7 +2709,7 @@ class EmbyServer:
             return sorted(agg)
 
         url = f"{self.emby_server_url}/emby/Genres?Recursive=true&ParentId={library_id}&api_key={self.api_key}"
-        data = requests.get(url, headers=self.headers).json()
+        data = self.session.get(url, headers=self.headers).json()
         return sorted({it.get("Name") for it in data.get("Items", []) if it.get("Name")})
 
     def _resolve_item_id_safe(self, plex_object):
@@ -2776,7 +2778,7 @@ class EmbyServer:
 
         # 3) Fallback: Studios-Endpunkt
         url = f"{self.emby_server_url}/emby/Studios?Recursive=true&ParentId={library_id}&api_key={self.api_key}"
-        response = requests.get(url, headers=self.headers)
+        response = self.session.get(url, headers=self.headers)
         if response.status_code != 200:
             raise Failed(
                 f"Failed to retrieve studios for library {library_id}. "
@@ -2831,7 +2833,7 @@ class EmbyServer:
 
         # 3) Fallback auf Studios-Endpunkt, falls Cache leer
         url = f"{self.emby_server_url}/emby/Studios?Recursive=true&ParentId={library_id}&api_key={self.api_key}"
-        response = requests.get(url, headers=self.headers)
+        response = self.session.get(url, headers=self.headers)
         if response.status_code != 200:
             raise Failed(f"Failed to retrieve studios for library {library_id}. "
                          f"Response: {response.status_code} - {response.text}")
@@ -2869,7 +2871,7 @@ class EmbyServer:
             # 2) Fallback API
             if not studios:
                 url = f"{self.emby_server_url}/emby/Studios?ParentId={self.library_id}&api_key={self.api_key}"
-                response = requests.get(url, headers=self.headers)
+                response = self.session.get(url, headers=self.headers)
                 if response.status_code != 200:
                     raise Failed(f"Failed to retrieve studios for library {self.library_id}. "
                                  f"Response: {response.status_code} - {response.text}")
@@ -3081,7 +3083,7 @@ class EmbyServer:
             "api_key": self.api_key,
         }
         try:
-            r = self._http_session.get(base_url, headers=self.headers, params=params, timeout=60)
+            r = self.session.get(base_url, headers=self.headers, params=params, timeout=60)
             r.raise_for_status()
             items = r.json().get("Items", [])
         except Exception:
@@ -3156,7 +3158,7 @@ class EmbyServer:
                 "api_key": self.api_key,
             }
             try:
-                r = self._http_session.get(base_url, headers=self.headers, params=params, timeout=20)
+                r = self.session.get(base_url, headers=self.headers, params=params, timeout=20)
                 r.raise_for_status()
                 items = r.json().get("Items", [])
             except Exception:
@@ -3191,7 +3193,7 @@ class EmbyServer:
             "api_key": self.api_key,
         }
         try:
-            r = self._http_session.get(base_url, headers=self.headers, params=params, timeout=20)
+            r = self.session.get(base_url, headers=self.headers, params=params, timeout=20)
             r.raise_for_status()
             items = r.json().get("Items", [])
         except Exception:
