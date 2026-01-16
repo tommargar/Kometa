@@ -2526,8 +2526,8 @@ class Emby(Library):
                         #         self.EmbyServer.media_by_resolution = resolutions
                         #         media_by_resolutions = resolutions
                         if not isinstance(media_by_resolutions, dict) or normalized_key not in media_by_resolutions:
-                            logger.warning(
-                                "Emby BETA: resolution '%s' not found in cache; skipping filter",
+                            logger.info(
+                                "Emby resolution '%s' not found in selection",
                                 value_decoded,
                             )
                             continue
