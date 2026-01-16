@@ -192,6 +192,7 @@ class CollectionBuilder:
         self.library = library
         self.libraries = []
         self.summaries = {}
+        self.choices_cache = {}
         self.is_playlist = False
         self.playlist = library is None
         self.overlay = overlay
@@ -2841,7 +2842,9 @@ class CollectionBuilder:
         def smart_pair(list_to_pair):
             return [(t, t) for t in list_to_pair] if plex_search else list_to_pair
         if attribute in tag_attributes and modifier in [".regex"]:
-            _, names = self.library.get_search_choices(attribute, title=not plex_search, name_pairs=True)
+            if (attribute, plex_search, "regex") not in self.choices_cache:
+                self.choices_cache[(attribute, plex_search, "regex")] = self.library.get_search_choices(attribute, title=not plex_search, name_pairs=True)
+            _, names = self.choices_cache[(attribute, plex_search, "regex")]
             valid_list = []
             used = []
             for reg in util.validate_regex(data, self.Type, validate=validate):
@@ -2929,7 +2932,13 @@ class CollectionBuilder:
                         final_values.append(value)
             else:
                 final_values = util.get_list(data, trim=False)
-            search_choices, names = self.library.get_search_choices(attribute, title=not plex_search)
+
+            if not validate and plex_search:
+                return [(v, v) for v in final_values]
+
+            if (attribute, plex_search, "normal") not in self.choices_cache:
+                self.choices_cache[(attribute, plex_search, "normal")] = self.library.get_search_choices(attribute, title=not plex_search)
+            search_choices, names = self.choices_cache[(attribute, plex_search, "normal")]
             valid_list = []
             for fvalue in final_values:
                 if str(fvalue) in search_choices or str(fvalue).lower() in search_choices:
@@ -3811,14 +3820,7 @@ class CollectionBuilder:
                 # SortName (Sortiertitel) aktualisieren
             # print(self.obj)
             if "sort_title" in self.details:
-                # todo: add current emby sort title
-                sort_title = str(self.details["sort_title"]).replace("<<title>>", self.name)
                 new_sort_title = str(self.details["sort_title"])
-
-                # '!130_📺 Serien Golden Globe 2023'
-                # '!130_📺 Serien Emmys 2023'
-                # '!130_📺 Serien Emmys 2024'
-                # '!130_Emmys !'
 
                 if "<<title>>" in new_sort_title:
                     title = self.name
@@ -3827,39 +3829,26 @@ class CollectionBuilder:
                             title = f"{title[len(op):].strip()}, {op.strip()}"
                             break
                     new_sort_title = new_sort_title.replace("<<title>>", title)
-                else:
-                    parts = new_sort_title.split("_", 1)
-                    # expected_prefix = f"{self.icon}{self.library.name} " # entsricht '📺 Serien '
-
-                    # new_sort_title = f"{expected_prefix}_{new_sort_title}"
-                    if False: # OLD
-                        if len(parts) > 1 and not parts[1].startswith(expected_prefix) and not parts[1][1:].startswith(f"!{expected_prefix}"):
-                            # Ergänzen, falls der gewünschte Prefix nicht vorhanden ist
-                            new_sort_title = f"{parts[0]}_{expected_prefix}{parts[1]}"
-                        # elif len(parts) == 1:  # Kein Unterstrich vorhanden, einfach anhängen
-                        #     new_sort_title = f"{new_sort_title}_{expected_prefix}"
 
                 if new_sort_title.endswith(" !"):
                     new_sort_title = new_sort_title[:-2]
 
-                expected_prefix = f"{self.icon}{self.library.name}" # entsricht '📺 Serien '
+                expected_prefix = f"{self.icon}{self.library.name}"
 
                 # Put the library name in front for better sorting of Emnby collections
                 original_prefix = f"{self.icon}{self.library.name} "
                 new_sort_title = new_sort_title.replace(original_prefix, "")
                 new_sort_title = f"{expected_prefix}_{new_sort_title}"
 
-                # append icon for filtering the libraries
-                if False:  # OLD
-                    new_sort_title = f"{self.icon}{new_sort_title}"
-
-                if new_sort_title != sort_title:
+                if new_sort_title != self.obj.titleSort:
                     batch_display += f"\nSort Title | {new_sort_title}"
-                # Konstruiere die URL für den API-Request
-                # print(self.obj['Id'])
-                # print(self.obj.ratingKey)
-                new_properties["ForcedSortName"] = new_sort_title
-                # embyserver.set_item_property(self.obj.ratingKey, "ForcedSortName", new_sort_title)
+                    new_properties["ForcedSortName"] = new_sort_title
+
+                    emby_item = embyserver.get_item(self.obj.ratingKey)
+                    locked_fields = emby_item.get("LockedFields", [])
+                    if "SortName" not in locked_fields:
+                        locked_fields.append("SortName")
+                    new_properties["LockedFields"] = locked_fields
 
 
             # todo add content rating
@@ -4034,7 +4023,7 @@ class CollectionBuilder:
                 updated_details.append("Image")
             else:
                 # pass
-                logger.warning(f"Failed to update Backdrop: {response.text}")
+                logger.warning(f"Failed to update Backdrop for {self.name}")
 
         return updated_details
 

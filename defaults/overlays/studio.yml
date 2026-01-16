@@ -1133,7 +1133,7 @@ overlays:
     template: [name: standard, name: studios]
 
   Metro-Goldwyn-Mayer:
-    template: [name: standard, {name: studios, search: [Metro-Goldwyn-Mayer, MGM]}]
+    template: [name: standard, {name: studios, search: [Metro-Goldwyn-Mayer, MGM, MGM Cartoon Studio]}]
 
   Michael Patrick King Productions:
     template: [name: standard, name: studios]

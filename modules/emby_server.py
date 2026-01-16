@@ -277,6 +277,9 @@ class EmbyServer:
                     # print(s)
                     break
 
+        # self.get_resolutions()
+
+
     def _get_false_friend_names(self) -> set[str]:
         if self._false_friend_names is None:
             try:
@@ -537,6 +540,9 @@ class EmbyServer:
         #     "dvhdr": r'(?i)\bdv(.hdr10?\b)',  # DV HDR10
         #     "dvhdrplus": r'(?i)\bdv.HDR10(\+|P(lus)?\b)',  # DV HDR10+
         # }
+
+
+
         resolution_patterns = {
             "4k": [r"(?i)(?<!\w)(?:4k|2160p|uhd)(?!\w)"],
             "1080p": [r"(?i)(?<!\w)(?:1080p|2k)(?!\w)"],
@@ -560,6 +566,9 @@ class EmbyServer:
             "dvhdrplus": [
                 r"(?i)(?<!\w)dv[\W_]*hdr10\+",
                 r"(?i)(?<!\w)dv[\W_]*hdr10plus(?!\w)",
+            ],
+            "hlg": [
+                r"(?i)(?<!\w)hlg(?!\w)",
             ],
         }
 
@@ -989,7 +998,7 @@ class EmbyServer:
         if libtype == "show":
             my_list = ['genre', 'year', 'contentRating', 'studio', 'network', 'country', 'collection', 'director', 'actor', 'writer', 'producer', 'unwatchedLeaves', 'unmatched', 'label', 'show.label', 'show.studio']
         else:
-            my_list = ['genre', 'year', 'decade', 'contentRating', 'collection', 'director', 'actor', 'writer', 'producer', 'composer', 'country', 'studio', 'resolution', 'hdr', 'unwatched', 'inProgress', 'unmatched', 'audioLanguage', 'subtitleLanguage', 'editionTitle', 'label', 'duplicate']
+            my_list = ['genre', 'year', 'decade', 'contentRating', 'collection', 'director', 'actor', 'writer', 'producer', 'composer', 'country', 'studio', 'resolution', 'hdr', 'hlg', 'unwatched', 'inProgress', 'unmatched', 'audioLanguage', 'subtitleLanguage', 'editionTitle', 'label', 'duplicate']
 
         return tag in my_list
 

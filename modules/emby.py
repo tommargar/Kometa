@@ -24,7 +24,7 @@ from urllib.parse import unquote, parse_qsl, parse_qs, urlparse
 
 logger = util.logger
 
-builders = ["plex_all", "plex_watchlist", "plex_pilots", "plex_collectionless", "plex_search"]
+builders = ["plex_all", "plex_watchlist", "plex_pilots", "plex_collectionless", "plex_search", "emby_search", "emby_all",]
 library_types = ["movie", "show", "artist"]
 search_translation = {
     "episode_actor": "episode.actor",
@@ -966,11 +966,14 @@ class Emby(Library):
             # ToDo - Not working / tested
             return f"{item_to_sort.show().titleSort if sort else item_to_sort.grandparentTitle} {item_to_sort.seasonEpisode.upper()}"
         else:
-            key = item_to_sort.ratingKey if not (isinstance(item_to_sort, int) or isinstance(item_to_sort, str)) else str(item_to_sort)
-            # must bei str Id
-            item = self.EmbyServer.get_item(key)
-            return item.get("SortName") if sort else item.get("Name")
-
+            try:
+                key = item_to_sort.ratingKey if not (isinstance(item_to_sort, int) or isinstance(item_to_sort, str)) else str(item_to_sort)
+                # must bei str Id
+                item = self.EmbyServer.get_item(key)
+                return item.get("SortName") if sort else item.get("Name")
+            except:
+                logger.stacktrace()
+                print(item_to_sort)
             return item_to_sort.titleSort if sort else item_to_sort.title
 
 
@@ -2172,17 +2175,19 @@ class Emby(Library):
         require_hdr = query_params.get("_RequireHdr")
         if resolution_filters or require_hdr:
             allowed_ids = None
-            if resolution_filters:
-                allowed_ids = set()
-                for res_key in resolution_filters:
-                    allowed_ids.update(str(i) for i in self.EmbyServer.media_by_resolution.get(res_key, []))
-            if require_hdr:
-                hdr_ids = set()
-                for hdr_key in ["dvhdr", "dvhdrplus", "hdr", "plus"]:
-                    hdr_ids.update(str(i) for i in self.EmbyServer.media_by_resolution.get(hdr_key, []))
-                allowed_ids = hdr_ids if allowed_ids is None else allowed_ids.intersection(hdr_ids)
-            if allowed_ids is not None:
-                filtered = [item for item in filtered if str(item.get("Id")) in allowed_ids]
+            media_res = getattr(self.EmbyServer, "media_by_resolution", None)
+            if isinstance(media_res, dict):
+                if resolution_filters:
+                    allowed_ids = set()
+                    for res_key in resolution_filters:
+                        allowed_ids.update(str(i) for i in media_res.get(res_key, []))
+                if require_hdr:
+                    hdr_ids = set()
+                    for hdr_key in ["dvhdr", "dvhdrplus", "hdr", "plus", "hlg"]:
+                        hdr_ids.update(str(i) for i in media_res.get(hdr_key, []))
+                    allowed_ids = hdr_ids if allowed_ids is None else allowed_ids.intersection(hdr_ids)
+                if allowed_ids is not None:
+                    filtered = [item for item in filtered if str(item.get("Id")) in allowed_ids]
 
         if "PersonIds" in query_params:
             person_ids = {pid.strip() for pid in query_params["PersonIds"].split(",") if pid.strip()}
@@ -2514,15 +2519,15 @@ class Emby(Library):
                         normalized_key = lower_index
                         if normalized_key == "4k":
                             normalized_key = "4k"
-                        media_by_resolutions = getattr(self.EmbyServer, "media_by_resolution", None)
-                        if not media_by_resolutions or normalized_key not in media_by_resolutions:
-                            get_resolutions = getattr(self.EmbyServer, "get_resolutions", None)
-                            if callable(get_resolutions):
-                                get_resolutions()
-                                media_by_resolutions = getattr(self.EmbyServer, "media_by_resolution", None)
-                        if not media_by_resolutions or normalized_key not in media_by_resolutions:
+                        media_by_resolutions = self.EmbyServer.media_by_resolution
+                        # if not isinstance(media_by_resolutions, dict) or normalized_key not in media_by_resolutions:
+                        #     resolutions = self.EmbyServer.get_resolutions()
+                        #     if isinstance(resolutions, dict):
+                        #         self.EmbyServer.media_by_resolution = resolutions
+                        #         media_by_resolutions = resolutions
+                        if not isinstance(media_by_resolutions, dict) or normalized_key not in media_by_resolutions:
                             logger.warning(
-                                "Emby BETA: resolution '%s' is not cached; skipping filter",
+                                "Emby BETA: resolution '%s' not found in cache; skipping filter",
                                 value_decoded,
                             )
                             continue
@@ -2579,10 +2584,10 @@ class Emby(Library):
         )
         if needs_resolution_filter:
             media_by_resolutions = getattr(self.EmbyServer, "media_by_resolution", None)
-            if not media_by_resolutions:
+            if not isinstance(media_by_resolutions, dict):
                 get_resolutions = getattr(self.EmbyServer, "get_resolutions", None)
                 if callable(get_resolutions):
-                    get_resolutions()
+                    resolutions = get_resolutions()
 
         if unknown_params:
             logger.error(f"Emby BETA: unknown parameters: {unknown_params}")
@@ -2734,6 +2739,7 @@ class Emby(Library):
         ) or []
 
         self.EmbyServer.cache_filenames(items_data)
+        self.EmbyServer.get_resolutions()
 
         logger.info(f"Loaded {len(items_data)} {builder_level.capitalize()}s from Emby")
         self._emby_all_items_native = items_data
