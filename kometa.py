@@ -642,6 +642,7 @@ def run_libraries(config):
             logger.separator(f"{library.original_mapping_name} Library")
 
             logger.debug("")
+            logger.debug(f"Library Type: {str.upper(library.mc_type)}")
             logger.debug(f"Library Name: {library.name}")
             logger.debug(f"Run Order: {', '.join(library.run_order)}")
             logger.debug(f"Folder Name: {library.mapping_name}")

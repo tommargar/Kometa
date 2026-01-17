@@ -454,7 +454,7 @@ MAX_IMAGE_SIZE = 10480000  # a little less than 10MB
 class Emby(Library):
     def __init__(self, config, params):
         super().__init__(config, params)
-
+        self.mc_type = "emby"
         self.agent = None
         self.filter_items_cache = {}
         self.emby = params["emby"]

@@ -566,6 +566,8 @@ class Operations:
                                     new_genres = mal_obj().genres + mal_obj().explicit_genres + mal_obj().themes + mal_obj().demographics # noqa
                                 else:
                                     new_genres = option
+                                if new_genres:
+                                    new_genres = [g for g in new_genres if str(g).strip()]
                                 if not new_genres:
                                     logger.info(f"No {option} Genres Found")
                                     raise Failed
@@ -955,7 +957,8 @@ class Operations:
                     # tick("Emby genres updated", min_ms=5)
 
                 if len(item_edits) > 0:
-                    logger.info(f"{item_edits[1:]}")
+                    # logger.info(f"{item_edits[1:]}")
+                    logger.info(f"{item_edits}")
                 else:
                     logger.info("No Item Edits")
 

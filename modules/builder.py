@@ -2623,7 +2623,7 @@ class CollectionBuilder:
                             logger.info(f"{name} {self.Type} | X | {current_title}")
         if self.do_report and filtered_items:
             self.library.add_filtered(self.name, [(i.title, self.library.get_id_from_maps(i.ratingKey)) for i in filtered_items], self.library.is_movie)
-        logger.info(f"{total} IDs Processed | {len(self.found_items)} Items Matched | {len(filtered_items)} Items Filtered")
+        # logger.info(f"{total} IDs Processed | {len(self.found_items)} Items Matched | {len(filtered_items)} Items Filtered")
 
     def build_filter(self, method, plex_filter, display=False, default_sort=None, prevalidated=None):
         if display:

@@ -131,6 +131,7 @@ class Library(ABC):
         self.status = {}
         self.plex_bulk_edit_batch_size = params["plex_bulk_edit_batch_size"]
         self.EmbyServer=None
+        self.mc_type = "plex"
         self.url = None
         self.items_library_operation = True if self.assets_for_all or self.mass_genre_update or self.remove_title_parentheses \
                                                or self.mass_audience_rating_update or self.mass_critic_rating_update or self.mass_user_rating_update \
