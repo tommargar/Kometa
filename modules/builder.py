@@ -2598,12 +2598,13 @@ class CollectionBuilder:
             logger.info("")
             logger.info("Filtering Builders:")
         filtered_items = []
+        found_rating_keys = {i.ratingKey for i in self.found_items}
         for i, item in enumerate(items, 1):
             if not isinstance(item, (Movie, Show, Season, Episode, Artist, Album, Track)):
                 logger.error(f"{self.Type} Error: Item: {item} is an invalid type")
                 continue
             # if item not in self.found_items:
-            if item.ratingKey not in [found_item.ratingKey for found_item in self.found_items]:
+            if item.ratingKey not in found_rating_keys:
                     # Weiteres Processing
                 if item.ratingKey in self.filtered_keys:
                     if self.details["show_filtered"] is True:
@@ -2612,6 +2613,7 @@ class CollectionBuilder:
                     current_title = util.item_title(item)
                     if self.check_filters(item, f"{(' ' * (max_length - len(str(i))))}{i}/{total}"):
                         self.found_items.append(item)
+                        found_rating_keys.add(item.ratingKey)
                         if self.details["show_unfiltered"] is True:
                             logger.info(f"{name} {self.Type} | = | {current_title}")
                     else:
@@ -2621,6 +2623,7 @@ class CollectionBuilder:
                             logger.info(f"{name} {self.Type} | X | {current_title}")
         if self.do_report and filtered_items:
             self.library.add_filtered(self.name, [(i.title, self.library.get_id_from_maps(i.ratingKey)) for i in filtered_items], self.library.is_movie)
+        logger.info(f"{total} IDs Processed | {len(self.found_items)} Items Matched | {len(filtered_items)} Items Filtered")
 
     def build_filter(self, method, plex_filter, display=False, default_sort=None, prevalidated=None):
         if display:
