@@ -603,7 +603,7 @@ class CollectionBuilder:
             "delete_below_minimum": self.library.delete_below_minimum,
             "delete_not_scheduled": self.library.delete_not_scheduled,
             "changes_webhooks": self.library.changes_webhooks,
-            "cache_builders": self.library.cache_builders
+            "cache_builders": 0 if self.overlay else self.library.cache_builders
         }
         if self.library.mass_collection_mode:
             self.details["collection_mode"] = self.library.mass_collection_mode

@@ -3044,7 +3044,7 @@ class Emby(Library):
                     attr = getattr(media, filter_actual)
                     if attr and attr not in values:
                         values.append(attr)
-            elif filter_attr in ["filepath", "folder"]:
+            elif emby_item and filter_attr in ["filepath", "folder"]:
                 values = [emby_item.get("Path")]
                 # values = [loc for loc in item.locations if loc]
             else:

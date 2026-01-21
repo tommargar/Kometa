@@ -75,16 +75,19 @@ class ImageBase:
             ext = "webp"
         else:
             ext = "png"
+        temp_dir = os.path.join(self.code_base, "defaults", "posters")
+        if not os.path.exists(temp_dir):
+            os.makedirs(temp_dir)
         num = ""
-        image_path = os.path.join(self.images_dir, f"temp{num}.{ext}")
+        image_path = os.path.join(temp_dir, f"temp{num}.{ext}")
         while os.path.exists(image_path):
             num = 1 if not num else num + 1
-            image_path = os.path.join(self.images_dir, f"temp{num}.{ext}")
+            image_path = os.path.join(temp_dir, f"temp{num}.{ext}")
         with open(image_path, "wb") as handler:
             handler.write(response.content)
         while util.is_locked(image_path):
             time.sleep(1)
-        return image_path, url
+        return image_path, os.path.getsize(image_path)
 
     def check_color(self, attr):
         if attr not in self.methods or not self.data[self.methods[attr]]:
@@ -395,4 +398,3 @@ class KometaImage(ImageBase):
         pmm_image.save(image_path)
 
         return ImageData(self.image_attr, image_path, is_url=False, image_type="poster", compare=self.get_compare_string())
-

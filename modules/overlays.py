@@ -339,20 +339,27 @@ class Overlays:
                                         elif format_var == "user_rating" and emby_server:
                                             actual_attr = plex.attribute_translation.get(format_var, format_var)
                                             actual_value = None
-                                            native_item = None
-                                            if item_id is not None:
-                                                native_item = emby_server.get_item(item_id)
-                                            if native_item:
-                                                actual_value = emby_server.get_custom_rating_from_item(native_item, raw=True)
-                                                if actual_value in [None, ""] and native_item.get("ProviderIds") and "CustomRating" in native_item["ProviderIds"]:
-                                                    actual_value = native_item["ProviderIds"]["CustomRating"]
-                                                if actual_value is None and native_item.get("CustomRating"):
-                                                    logger.warning(
-                                                        "Overlay Warning: Emby custom ratings must be provided via "
-                                                        "ProviderIds['CustomRating']; the CustomRating field is ignored."
-                                                    )
-                                            if actual_value is None and hasattr(item, actual_attr):
+                                            if hasattr(item, actual_attr):
                                                 actual_value = getattr(item, actual_attr)
+                                            if actual_value is None:
+                                                native_item = None
+                                                if item_id is not None:
+                                                    native_item = emby_server.get_item(item_id)
+                                                    if native_item:
+                                                        actual_value = emby_server.get_custom_rating_from_item(native_item, raw=True)
+                                                        if actual_value in [None, ""] and native_item.get("ProviderIds") and "CustomRating" in native_item["ProviderIds"]:
+                                                            actual_value = native_item["ProviderIds"]["CustomRating"]
+                                                    if actual_value is None:
+                                                        native_item = emby_server.get_item(item_id, force_refresh=True)
+                                                        if native_item:
+                                                            actual_value = emby_server.get_custom_rating_from_item(native_item, raw=True)
+                                                            if actual_value in [None, ""] and native_item.get("ProviderIds") and "CustomRating" in native_item["ProviderIds"]:
+                                                                actual_value = native_item["ProviderIds"]["CustomRating"]
+                                                    if actual_value is None and native_item and native_item.get("CustomRating"):
+                                                        logger.warning(
+                                                            "Overlay Warning: Emby custom ratings must be provided via "
+                                                            "ProviderIds['CustomRating']; the CustomRating field is ignored."
+                                                        )
                                         elif format_var in overlay.rating_sources:
                                             found_rating = None
                                             try:
@@ -518,10 +525,24 @@ class Overlays:
                                         else:
                                             # match actual_attr:
                                             #     case 'rating':
+                                            actual_value = getattr(item, actual_attr, None)
+                                            if actual_value is None and emby_server and item_id:
+                                                native_item = emby_server.get_item(item_id)
+                                                if native_item:
+                                                    if format_var == "audience_rating":
+                                                        actual_value = native_item.get("CommunityRating")
+                                                    elif format_var == "critic_rating":
+                                                        actual_value = native_item.get("CriticRating")
+                                                if actual_value is None:
+                                                    native_item = emby_server.get_item(item_id, force_refresh=True)
+                                                    if native_item:
+                                                        if format_var == "audience_rating":
+                                                            actual_value = native_item.get("CommunityRating")
+                                                        elif format_var == "critic_rating":
+                                                            actual_value = native_item.get("CriticRating")
 
-                                            if not hasattr(item, actual_attr) or getattr(item, actual_attr) is None:
+                                            if actual_value is None:
                                                 raise Failed(f"Overlay Warning: No {full_text} found")
-                                            actual_value = getattr(item, actual_attr)
                                             if format_var == "versions":
                                                 actual_value = len(actual_value)
                                         if self.cache:

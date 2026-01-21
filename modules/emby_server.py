@@ -1427,10 +1427,20 @@ class EmbyServer:
         """Remove a single item from all local caches (data + object)."""
 
         item_id_str = str(item_id)
+        try:
+            item_id_int = int(item_id)
+        except (ValueError, TypeError):
+            item_id_int = None
+
         self._items_cache.pop(item_id_str, None)
+        if item_id_int is not None:
+            self._items_cache.pop(item_id_int, None)
+
         self._items_cache_fields.pop(item_id_str, None)
         self._items_cache_ts.pop(item_id_str, None)
         self.cached_plex_objects.pop(item_id_str, None)
+        if item_id_int is not None:
+            self.cached_plex_objects.pop(item_id_int, None)
 
     def invalidate_item(self, item_id: int | str) -> None:
         """Von außen aufrufen, wenn du ein Item (z.B. Genres) geändert hast."""
@@ -1477,6 +1487,8 @@ class EmbyServer:
             resp.raise_for_status()
             data = resp.json()
             self.item_cache[item_id] = data
+            self.cached_plex_objects.pop(str(item_id), None)
+            self.cached_plex_objects.pop(item_id, None)
             self.dirty_items.discard(item_id)  # wieder „sauber“
             return data
         except Exception as e:
@@ -1916,6 +1928,7 @@ class EmbyServer:
 
             if item_id_int is not None and item_id_int in self.dirty_items:
                 self.cached_plex_objects.pop(str(item_id), None)
+                self.cached_plex_objects.pop(item_id_int, None)
 
             if item_id in self.cached_plex_objects:
                 plex_object = self.cached_plex_objects[item_id]
