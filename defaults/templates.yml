@@ -100,6 +100,7 @@ templates:
       visible_home_<<key>>: <<visible_home>>
       visible_shared_<<key>>: <<visible_shared>>
       minimum_items_<<key>>: <<minimum_items>>
+      cache_builders_<<key>>: <<cache_builders>>
     optional:
       - use_<<key>>
       - allowed_libraries
@@ -125,6 +126,7 @@ templates:
       - name_mapping
       - delete_collections_named
       - schedule
+      - cache_builders
     run_definition:
       - <<final_use>>
       - <<use_<<key>>>>
@@ -153,6 +155,7 @@ templates:
     minimum_items: <<minimum_items_<<key>>>>
     delete_collections_named: <<delete_collections_named>>
     schedule: <<schedule_<<key>>>>
+    cache_builders: <<cache_builders_<<key>>>>
 
   trakt:
     optional:

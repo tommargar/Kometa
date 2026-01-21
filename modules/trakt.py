@@ -461,13 +461,7 @@ class Trakt:
         for value in values:
             if isinstance(value, dict):
                 raise Failed("Trakt Error: List cannot be a dictionary")
-            try:
-                self._list(value)
-                trakt_values.append(value)
-            except Failed as e:
-                logger.error(e)
-        if len(trakt_values) == 0:
-            raise Failed(f"Trakt Error: No valid Trakt Lists in {values}")
+            trakt_values.append(value)
         return trakt_values
 
     def validate_chart(self, err_type, method_name, data, is_movie):

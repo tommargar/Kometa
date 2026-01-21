@@ -188,6 +188,27 @@ The available setting attributes which can be set at each level are outlined bel
           cache_expiration: 30
         ```
 
+??? blank "`cache_builders` - Used to control how long builder data is cached for.<a class="headerlink" href="#cache-builders" title="Permanent link">¶</a>"
+
+    <div id="cache-builders" />Set the number of days before each builder cache expires and has to be re-cached.
+
+    <hr style="margin: 0px;">
+
+    **Attribute:** `cache_builders`
+
+    **Levels with this Attribute:** Global/Library/Collection/Playlist
+
+    **Accepted Values:** Integer greater than 0.
+
+    **Default Value:** `0`
+
+    ???+ example "Example"
+
+        ```yaml
+        settings:
+          cache_builders: 7
+        ```
+
 
 ??? blank "`create_asset_folders` - Used to automatically create asset folders when none exist.<a class="headerlink" href="#create-asset-folders title="Permanent link">¶</a>"
 

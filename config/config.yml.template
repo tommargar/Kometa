@@ -73,6 +73,7 @@ settings:
   - overlays
   cache: true
   cache_expiration: 60
+  cache_builders: 7
   asset_directory:
   - config/assets
   asset_folders: true

@@ -603,7 +603,7 @@ class CollectionBuilder:
             "delete_below_minimum": self.library.delete_below_minimum,
             "delete_not_scheduled": self.library.delete_not_scheduled,
             "changes_webhooks": self.library.changes_webhooks,
-            "cache_builders": 0
+            "cache_builders": self.library.cache_builders
         }
         if self.library.mass_collection_mode:
             self.details["collection_mode"] = self.library.mass_collection_mode
@@ -901,52 +901,60 @@ class CollectionBuilder:
                 else:
                     raise Failed(f"{self.Type} Error: No valid TMDb Person IDs in {self.data[methods['tmdb_person']]}")
 
+        now = datetime(self.current_time.year, self.current_time.month, self.current_time.day)
+
+        def get_date(year, month, day):
+            try:
+                return datetime(year, month, day)
+            except ValueError:
+                return datetime(year, month, 28)
+
         for attr in ["tmdb_birthday", "tmdb_deathday"]:
             tmdb_day = getattr(self, attr)
+            if not tmdb_day:
+                continue
+
+            if "tmdb_person" not in methods:
+                raise NotScheduled(f"Skipped because tmdb_person is required when using {attr}")
+
             tmdb_person_day = getattr(self, attr.replace("_", "_person_"))
-            if tmdb_day:
-                if "tmdb_person" not in methods:
-                    raise NotScheduled(f"Skipped because tmdb_person is required when using {attr}")
-                if not tmdb_person_day:
-                    raise NotScheduled(f"Skipped because No {attr[5:]} was found for {first_person}")
-                now = datetime(self.current_time.year, self.current_time.month, self.current_time.day)
+            if not tmdb_person_day:
+                raise NotScheduled(f"Skipped because No {attr[5:]} was found for {first_person}")
 
-                try:
-                    delta = datetime(now.year, tmdb_person_day.month, tmdb_person_day.day)
-                except ValueError:
-                    delta = datetime(now.year, tmdb_person_day.month, 28)
+            msg = ""
+            if tmdb_day["this_month"]:
+                if now.month != tmdb_person_day.month:
+                    msg = f"Skipped because {attr[5:]} Month: {tmdb_person_day.month} is not {now.month}"
+            else:
+                current_date = get_date(now.year, tmdb_person_day.month, tmdb_person_day.day)
 
-                before_delta = delta
-                after_delta = delta
-                if delta < now:
+                if current_date < now:
+                    next_date = get_date(now.year + 1, tmdb_person_day.month, tmdb_person_day.day)
+                    last_date = current_date
+                elif current_date > now:
+                    next_date = current_date
+                    last_date = get_date(now.year - 1, tmdb_person_day.month, tmdb_person_day.day)
+                else:
+                    next_date = current_date
+                    last_date = current_date
+
+                days_until = (next_date - now).days
+                days_since = (now - last_date).days
+
+                if days_until > tmdb_day["before"] and days_since > tmdb_day["after"]:
+                    msg = f"Skipped because days until {tmdb_person_day.month}/{tmdb_person_day.day}: {days_until} > {tmdb_day['before']} and days after {tmdb_person_day.month}/{tmdb_person_day.day}: {days_since} > {tmdb_day['after']}"
+
+            if msg:
+                suffix = ""
+                if self.details["delete_not_scheduled"]:
                     try:
-                        before_delta = datetime(now.year + 1, tmdb_person_day.month, tmdb_person_day.day)
-                    except ValueError:
-                        before_delta = datetime(now.year + 1, tmdb_person_day.month, 28)
-                elif delta > now:
-                    try:
-                        after_delta = datetime(now.year - 1, tmdb_person_day.month, tmdb_person_day.day)
-                    except ValueError:
-                        after_delta = datetime(now.year - 1, tmdb_person_day.month, 28)
-                days_after = (now - after_delta).days
-                days_before = (before_delta - now).days
-                msg = ""
-                if tmdb_day["this_month"]:
-                    if now.month != tmdb_person_day.month:
-                        msg = f"Skipped because {attr[5:]} Month: {tmdb_person_day.month} is not {now.month}"
-                elif days_before > tmdb_day["before"] and days_after > tmdb_day["after"]:
-                    msg = f"Skipped because days until {tmdb_person_day.month}/{tmdb_person_day.day}: {days_before} > {tmdb_day['before']} and days after {tmdb_person_day.month}/{tmdb_person_day.day}: {days_after} > {tmdb_day['after']}"
-                if msg:
-                    suffix = ""
-                    if self.details["delete_not_scheduled"]:
-                        try:
-                            self.obj = self.library.get_playlist(self.name) if self.playlist else self.library.get_collection(self.name, force_search=True)
-                            logger.info(self.delete())
-                            self.deleted = True
-                            suffix = f" and was deleted"
-                        except Failed:
-                            suffix = f" and could not be found to delete"
-                    raise NotScheduled(f"{msg}{suffix}")
+                        self.obj = self.library.get_playlist(self.name) if self.playlist else self.library.get_collection(self.name, force_search=True)
+                        logger.info(self.delete())
+                        self.deleted = True
+                        suffix = f" and was deleted"
+                    except Failed:
+                        suffix = f" and could not be found to delete"
+                raise NotScheduled(f"{msg}{suffix}")
 
         self.smart_url = None
         self.smart_type_key = None
@@ -2342,7 +2350,10 @@ class CollectionBuilder:
         expired = None
         list_key = None
         if self.config.Cache and self.details["cache_builders"]:
-            list_key, expired = self.config.Cache.query_list_cache(f"{self.library.type}:{method}", str(value), self.details["cache_builders"])
+            cache_key = f"{self.library.type}:{method}"
+            if "plex" in method or "tautulli" in method:
+                cache_key = f"{self.library.name}:{cache_key}"
+            list_key, expired = self.config.Cache.query_list_cache(cache_key, str(value), self.details["cache_builders"])
             if list_key and expired is False:
                 logger.info(f"Builder: {method} loaded from Cache")
                 return self.config.Cache.query_list_ids(list_key)
@@ -2387,7 +2398,10 @@ class CollectionBuilder:
         if self.config.Cache and self.details["cache_builders"] and ids:
             if list_key:
                 self.config.Cache.delete_list_ids(list_key)
-            list_key = self.config.Cache.update_list_cache(f"{self.library.type}:{method}", str(value), expired, self.details["cache_builders"])
+            cache_key = f"{self.library.type}:{method}"
+            if "plex" in method or "tautulli" in method:
+                cache_key = f"{self.library.name}:{cache_key}"
+            list_key = self.config.Cache.update_list_cache(cache_key, str(value), expired, self.details["cache_builders"])
             self.config.Cache.update_list_ids(list_key, ids)
         return ids
 
@@ -2583,7 +2597,10 @@ class CollectionBuilder:
                             else:
                                 items.append(item)
                         except Failed as e:
-                            logger.error(e)
+                            if "not found" in str(e).lower():
+                                logger.debug(e)
+                            else:
+                                logger.error(e)
                 except Exception as e:
                     logger.stacktrace()
                     logger.error(e)
@@ -3426,6 +3443,9 @@ class CollectionBuilder:
                         path = os.path.dirname(str(item.locations[0]))
                     elif self.library.is_show:
                         path = str(item.locations[0])
+                elif self.library.EmbyServer:
+                    emby_item = self.library.EmbyServer.get_item(item.ratingKey)
+                    path = emby_item.get("Path")
                 if not path:
                     logger.error(f"Plex Error: No location found for {item.title}: {item.locations}")
             if path and self.library.Radarr and item.ratingKey in self.library.movie_rating_key_map:

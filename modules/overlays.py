@@ -344,6 +344,8 @@ class Overlays:
                                                 native_item = emby_server.get_item(item_id)
                                             if native_item:
                                                 actual_value = emby_server.get_custom_rating_from_item(native_item, raw=True)
+                                                if actual_value in [None, ""] and native_item.get("ProviderIds") and "CustomRating" in native_item["ProviderIds"]:
+                                                    actual_value = native_item["ProviderIds"]["CustomRating"]
                                                 if actual_value is None and native_item.get("CustomRating"):
                                                     logger.warning(
                                                         "Overlay Warning: Emby custom ratings must be provided via "

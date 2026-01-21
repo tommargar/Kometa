@@ -403,7 +403,7 @@ class Cache:
         return id_to_return, imdb_id, media_type, expired
 
     def update_guid_map(self, plex_guid, t_id, imdb_id, expired, media_type):
-        expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, self.expiration)))
+        expiration_date = datetime.now() if expired else (datetime.now() - timedelta(days=random.randint(1, self.expiration)))
         with sqlite3.connect(self.cache_path) as connection:
             connection.row_factory = sqlite3.Row
             with closing(connection.cursor()) as cursor:
@@ -481,7 +481,7 @@ class Cache:
             return id_to_return, expired
 
     def _update_map(self, map_name, val1_name, val1, val2_name, val2, expired, media_type=None):
-        expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, self.expiration)))
+        expiration_date = datetime.now() if expired else (datetime.now() - timedelta(days=random.randint(1, self.expiration)))
         with sqlite3.connect(self.cache_path) as connection:
             connection.row_factory = sqlite3.Row
             with closing(connection.cursor()) as cursor:
@@ -522,7 +522,7 @@ class Cache:
         return omdb_dict, expired
 
     def update_omdb(self, expired, omdb, expiration):
-        expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, expiration)))
+        expiration_date = datetime.now() if expired else (datetime.now() - timedelta(days=random.randint(1, expiration)))
         with sqlite3.connect(self.cache_path) as connection:
             connection.row_factory = sqlite3.Row
             with closing(connection.cursor()) as cursor:
@@ -574,7 +574,7 @@ class Cache:
         return mdb_dict, expired
 
     def update_mdb(self, expired, key_id, mdb, expiration):
-        expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, expiration)))
+        expiration_date = datetime.now() if expired else (datetime.now() - timedelta(days=random.randint(1, expiration)))
         with sqlite3.connect(self.cache_path) as connection:
             connection.row_factory = sqlite3.Row
             with closing(connection.cursor()) as cursor:
@@ -619,7 +619,7 @@ class Cache:
         return anidb_dict, expired
 
     def update_anidb(self, expired, anidb_id, anidb, expiration):
-        expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, expiration)))
+        expiration_date = datetime.now() if expired else (datetime.now() - timedelta(days=random.randint(1, expiration)))
         with sqlite3.connect(self.cache_path) as connection:
             connection.row_factory = sqlite3.Row
             with closing(connection.cursor()) as cursor:
@@ -663,7 +663,7 @@ class Cache:
         return mal_dict, expired
 
     def update_mal(self, expired, mal_id, mal, expiration):
-        expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, expiration)))
+        expiration_date = datetime.now() if expired else (datetime.now() - timedelta(days=random.randint(1, expiration)))
         with sqlite3.connect(self.cache_path) as connection:
             connection.row_factory = sqlite3.Row
             with closing(connection.cursor()) as cursor:
@@ -711,7 +711,7 @@ class Cache:
         return tmdb_dict, expired
 
     def update_tmdb_movie(self, expired, obj, expiration):
-        expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, expiration)))
+        expiration_date = datetime.now() if expired else (datetime.now() - timedelta(days=random.randint(1, expiration)))
         with sqlite3.connect(self.cache_path) as connection:
             connection.row_factory = sqlite3.Row
             with closing(connection.cursor()) as cursor:
@@ -730,30 +730,45 @@ class Cache:
                     obj.release_date.strftime("%Y-%m-%d") if obj.release_date else None, obj.collection_id, obj.collection_name,
                     expiration_date.strftime("%Y-%m-%d"), cast_json, crew_json, obj.tmdb_id
                 ))
-        # --- Person-Map aus den bereits vorliegenden cast/crew-Daten vorbefüllen (tmdb_id + name) ---
-        try:
-            def _iter_people(lst):
-                for it in (obj.cast or [] if lst == "cast" else obj.crew or []):
-                    if isinstance(it, dict):
-                        tid = it.get("person_id") or it.get("id")
-                        nm = it.get("name")
-                    else:
-                        tid = getattr(it, "person_id", None) or getattr(it, "id", None)
-                        nm = getattr(it, "name", None)
-                    if tid and nm and str(tid).isdigit():
-                        yield int(tid), str(nm)
 
-            seen = set()
-            for tid, nm in list(_iter_people("cast")) + list(_iter_people("crew")):
-                if tid in seen:
-                    continue
-                seen.add(tid)
+                # --- Person-Map aus den bereits vorliegenden cast/crew-Daten vorbefüllen (tmdb_id + name) ---
+                # Optimiert: Verwendet die bestehende Verbindung anstatt für jede Person eine neue zu öffnen
                 try:
-                    self.update_tmdb_person_map(False, tid, name=nm, expiration=self.expiration)
+                    def _iter_people(lst):
+                        for it in (obj.cast or [] if lst == "cast" else obj.crew or []):
+                            if isinstance(it, dict):
+                                tid = it.get("person_id") or it.get("id")
+                                nm = it.get("name")
+                            else:
+                                tid = getattr(it, "person_id", None) or getattr(it, "id", None)
+                                nm = getattr(it, "name", None)
+                            if tid and nm and str(tid).isdigit():
+                                yield int(tid), str(nm)
+
+                    seen = set()
+                    person_expiration = self.expiration if hasattr(self, "expiration") else 30
+                    person_expiration_date = datetime.now() - timedelta(days=random.randint(1, person_expiration))
+                    person_expiration_str = person_expiration_date.strftime("%Y-%m-%d")
+
+                    for tid, nm in list(_iter_people("cast")) + list(_iter_people("crew")):
+                        if tid in seen:
+                            continue
+                        seen.add(tid)
+                        
+                        cursor.execute("INSERT OR IGNORE INTO tmdb_person_map(tmdb_id) VALUES(?)", (tid,))
+                        cursor.execute("SELECT emby_id, alias, meta_json FROM tmdb_person_map WHERE tmdb_id = ?", (tid,))
+                        row = cursor.fetchone()
+                        
+                        cur_emby = row["emby_id"] if row else None
+                        cur_alias = row["alias"] if row else None
+                        cur_meta = row["meta_json"] if row else None
+
+                        cursor.execute(
+                            "UPDATE tmdb_person_map SET emby_id = ?, name = ?, alias = ?, meta_json = ?, expiration_date = ? WHERE tmdb_id = ?",
+                            (cur_emby, nm, cur_alias, cur_meta, person_expiration_str, tid)
+                        )
                 except Exception:
                     pass
-        except Exception:
-            pass
 
     def query_tmdb_show(self, tmdb_id, expiration):
         tmdb_dict = {}
@@ -791,7 +806,7 @@ class Cache:
         return tmdb_dict, expired
 
     def update_tmdb_show(self, expired, obj, expiration):
-        expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, expiration)))
+        expiration_date = datetime.now() if expired else (datetime.now() - timedelta(days=random.randint(1, expiration)))
         with sqlite3.connect(self.cache_path) as connection:
             connection.row_factory = sqlite3.Row
             with closing(connection.cursor()) as cursor:
@@ -835,7 +850,7 @@ class Cache:
         return tmdb_dict, expired
 
     def update_tmdb_episode(self, expired, obj, expiration):
-        expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, expiration)))
+        expiration_date = datetime.now() if expired else (datetime.now() - timedelta(days=random.randint(1, expiration)))
         with sqlite3.connect(self.cache_path) as connection:
             connection.row_factory = sqlite3.Row
             with closing(connection.cursor()) as cursor:
@@ -881,7 +896,7 @@ class Cache:
         return tvdb_dict, expired
 
     def update_tvdb(self, expired, obj, expiration):
-        expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, expiration)))
+        expiration_date = datetime.now() if expired else (datetime.now() - timedelta(days=random.randint(1, expiration)))
         with sqlite3.connect(self.cache_path) as connection:
             connection.row_factory = sqlite3.Row
             with closing(connection.cursor()) as cursor:
@@ -911,7 +926,7 @@ class Cache:
         return tvdb_id, expired
 
     def update_tvdb_map(self, expired, tvdb_url, tvdb_id, expiration):
-        expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, expiration)))
+        expiration_date = datetime.now() if expired else (datetime.now() - timedelta(days=random.randint(1, expiration)))
         with sqlite3.connect(self.cache_path) as connection:
             connection.row_factory = sqlite3.Row
             with closing(connection.cursor()) as cursor:
@@ -939,7 +954,7 @@ class Cache:
         return ids, expired
 
     def update_anime_map(self, expired, anime_ids):
-        expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, self.expiration)))
+        expiration_date = datetime.now() if expired else (datetime.now() - timedelta(days=random.randint(1, self.expiration)))
         with sqlite3.connect(self.cache_path) as connection:
             connection.row_factory = sqlite3.Row
             with closing(connection.cursor()) as cursor:
@@ -1050,7 +1065,7 @@ class Cache:
 
     def update_list_cache(self, list_type, list_data, expired, expiration):
         list_key = None
-        expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=expiration))
+        expiration_date = datetime.now() if expired else (datetime.now() - timedelta(days=expiration))
         with sqlite3.connect(self.cache_path) as connection:
             connection.row_factory = sqlite3.Row
             with closing(connection.cursor()) as cursor:
@@ -1119,7 +1134,7 @@ class Cache:
         return imdb_dict, expired
 
     def update_imdb_keywords(self, expired, imdb_id, keywords, expiration):
-        expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, expiration)))
+        expiration_date = datetime.now() if expired else (datetime.now() - timedelta(days=random.randint(1, expiration)))
         with sqlite3.connect(self.cache_path) as connection:
             connection.row_factory = sqlite3.Row
             with closing(connection.cursor()) as cursor:
@@ -1147,7 +1162,7 @@ class Cache:
         return imdb_dict, expired
 
     def update_imdb_parental(self, expired, imdb_id, parental, expiration):
-        expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, expiration)))
+        expiration_date = datetime.now() if expired else (datetime.now() - timedelta(days=random.randint(1, expiration)))
         with sqlite3.connect(self.cache_path) as connection:
             connection.row_factory = sqlite3.Row
             with closing(connection.cursor()) as cursor:
@@ -1179,7 +1194,7 @@ class Cache:
         return ergast_list, expired
 
     def update_ergast(self, expired, season, races, expiration):
-        expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, expiration)))
+        expiration_date = datetime.now() if expired else (datetime.now() - timedelta(days=random.randint(1, expiration)))
         with sqlite3.connect(self.cache_path) as connection:
             connection.row_factory = sqlite3.Row
             with closing(connection.cursor()) as cursor:
@@ -1339,7 +1354,7 @@ class Cache:
     def update_tmdb_person_map(self, expired, tmdb_id, emby_id=None, name=None, alias=None, meta_patch=None, expiration=None):
         if expiration is None:
             expiration = self.expiration if hasattr(self, "expiration") else 30
-        expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, expiration)))
+        expiration_date = datetime.now() if expired else (datetime.now() - timedelta(days=random.randint(1, expiration)))
 
         with sqlite3.connect(self.cache_path) as connection:
             connection.row_factory = sqlite3.Row

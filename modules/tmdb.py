@@ -72,6 +72,15 @@ class TMDbCountry:
         return f"{self.iso_3166_1}:{self.name}"
 
 
+class TMDbLanguage:
+    def __init__(self, data):
+        self.iso_639_1 = data.split(":")[0] if isinstance(data, str) else data.iso_639_1
+        self.name = data.split(":")[1] if isinstance(data, str) else data.name
+
+    def __repr__(self):
+        return f"{self.iso_639_1}:{self.name}"
+
+
 class TMDbSeason:
     def __init__(self, data):
         self.season_number = int(data.split("%:%")[0]) if isinstance(data, str) else data.season_number
@@ -119,6 +128,10 @@ class TMDbMovie(TMDBObj):
         self.studio = data["studio"] if isinstance(data, dict) else data.companies[0].name if data.companies else None
         self.collection_id = data["collection_id"] if isinstance(data, dict) else data.collection.id if data.collection else None
         self.collection_name = data["collection_name"] if isinstance(data, dict) else data.collection.name if data.collection else None
+        loop = data.production_countries if not isinstance(data, dict) else data.get("countries", "").split("|") if data.get("countries") else []
+        self.countries = [TMDbCountry(c) for c in loop]
+        loop = data.spoken_languages if not isinstance(data, dict) else data.get("languages", "").split("|") if data.get("languages") else []
+        self.languages = [TMDbLanguage(l) for l in loop]
 
         if isinstance(data, dict):
             self.cast = data.get("cast", [])
@@ -161,6 +174,8 @@ class TMDbShow(TMDBObj):
         self.tvdb_id = data["tvdb_id"] if isinstance(data, dict) else data.tvdb_id
         loop = data.origin_countries if not isinstance(data, dict) else data["countries"].split("|") if data["countries"] else [] # noqa
         self.countries = [TMDbCountry(c) for c in loop]
+        loop = data.spoken_languages if not isinstance(data, dict) else data.get("languages", "").split("|") if data.get("languages") else []
+        self.languages = [TMDbLanguage(l) for l in loop]
         loop = data.seasons if not isinstance(data, dict) else data["seasons"].split("%|%") if data["seasons"] else [] # noqa
         self.seasons = [TMDbSeason(s) for s in loop]
 
@@ -332,12 +347,8 @@ class TMDb:
 
     def validate_tmdb_ids(self, tmdb_ids, tmdb_method):
         tmdb_list = util.get_int_list(tmdb_ids, f"TMDb {type_map[tmdb_method]} ID")
-        tmdb_values = []
-        for tmdb_id in tmdb_list:
-            try:                                        tmdb_values.append(self.validate_tmdb(tmdb_id, tmdb_method))
-            except Failed as e:                         logger.error(e)
-        if len(tmdb_values) == 0:                   raise Failed(f"TMDb Error: No valid TMDb IDs in {tmdb_list}")
-        return tmdb_values
+        if len(tmdb_list) == 0:                   raise Failed(f"TMDb Error: No valid TMDb IDs in {tmdb_list}")
+        return tmdb_list
 
     def validate_tmdb(self, tmdb_id, tmdb_method):
         tmdb_type = type_map[tmdb_method]

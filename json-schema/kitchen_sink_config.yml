@@ -153,6 +153,14 @@ libraries:
         data:
           depth: 1
           limit: 15
+    - default: composer                             # Composers - *Emby exclusive*
+      template_variables:                           # bw, rainier, diiivoy, diiivoycolor, or orig style is used. depth and limit is set low, but sometimes I boost to 10, 150
+        exclude:                                    # ever have some random person... you can exclude them if you want
+        - John Williams
+        style: signature
+        data:
+          depth: 1
+          limit: 15
     - default: audio_language                       # English, French, Arabic, German, etc. audio language
     - default: content_rating_nz                    # Choose content_rating_nz, content_rating_au, content_rating_uk, content_rating_us, content_rating_de, content_rating_mal, content_rating_cs, or all
     - default: content_rating_au                    # Choose content_rating_nz, content_rating_au, content_rating_uk, content_rating_us, content_rating_de, content_rating_mal, content_rating_cs, or all

@@ -54,6 +54,7 @@ libraries:
     - default: director
     - default: producer
     - default: writer
+    - default: director
     - default: year
     - default: decade
     - default: collectionless

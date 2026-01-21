@@ -27,24 +27,111 @@ class Letterboxd:
     def _parse_page(self, list_url, language):
         if "ajax" not in list_url:
             list_url = list_url.replace("https://letterboxd.com/films", "https://letterboxd.com/films/ajax")
-        response = self._request(list_url, language)
-        letterboxd_elements = response.xpath("//div[@data-film-id]")
+
+        def get_elements(resp):
+            els = resp.xpath("//li[contains(@class, 'posteritem')]")
+            if not els:
+                els = resp.xpath("//div[@data-film-id]")
+            if not els:
+                els = resp.xpath("//*[@data-film-id]")
+            # logger.debug(f"Found {len(els)} elements")
+            # for i, el in enumerate(els[:5]):
+            #     logger.debug(f"Element {i}: {el.tag} {el.attrib}")
+            return els
+
+        # response = self._request(list_url, language)
+        # letterboxd_elements = get_elements(response)
+        letterboxd_elements = None
+
+        if not letterboxd_elements:
+            # logger.debug(f"No items found, trying Cloudscraper for {list_url}")
+            try:
+                response = self.requests.get_scrape_html(list_url)
+                letterboxd_elements = get_elements(response)
+            except Exception as e:
+                logger.debug(f"Cloudscraper failed: {e}")
+
         items = []
-        for letterboxd_element in letterboxd_elements:
-            slug = letterboxd_element.xpath("@data-target-link")[0]
-            letterboxd_id = letterboxd_element.xpath("@data-film-id")[0]
-            comments = letterboxd_element.xpath(f"parent::article/div[@class='body']/div/p/text()")
-            ratings = letterboxd_element.xpath("parent::article/div[@class='body']/div/span/@class")
-            if not ratings:
-                ratings = letterboxd_element.xpath("parent::li/p/span[contains(@class, 'rating')]/@class")
-            years = letterboxd_element.xpath(f"parent::article/div[@class='body']/div/header/span/span/a/text()")
-            rating = None
-            if ratings:
-                match = re.search("rated-(\\d+)", ratings[0])
-                if match:
-                    rating = int(match.group(1))
-            items.append((letterboxd_id, slug, int(years[0]) if years else None, comments[0] if comments else None, rating))
+        if letterboxd_elements:
+            for element in letterboxd_elements:
+                try:
+                    data_el = element
+                    if element.tag == 'li':
+                        children = element.xpath(".//*[@data-film-id]")
+                        if children:
+                            data_el = children[0]
+                        else:
+                            children = element.xpath(".//*[@data-target-link]")
+                            if children:
+                                data_el = children[0]
+                            else:
+                                logger.debug(f"Found li element but no film data inside.")
+                                continue
+
+                    slugs = data_el.xpath("@data-target-link")
+                    if slugs:
+                        slug = slugs[0]
+                    else:
+                        slugs = data_el.xpath("@data-item-slug")
+                        if slugs:
+                            slug = f"/film/{slugs[0]}/"
+                        else:
+                            logger.debug("No slug found for item")
+                            continue
+
+                    ids = data_el.xpath("@data-film-id")
+                    if ids:
+                        letterboxd_id = ids[0]
+                    else:
+                        logger.debug(f"No film ID found for {slug}")
+                        continue
+
+                    year = None
+                    item_names = data_el.xpath("@data-item-name")
+                    if item_names:
+                        match = re.search(r"\((\d{4})\)$", item_names[0])
+                        if match:
+                            year = int(match.group(1))
+
+                    if not year:
+                        years = element.xpath(f".//div[@class='body']/div/header/span/span/a/text()")
+                        if not years and element.tag != 'li':
+                             years = element.xpath(f"parent::article/div[@class='body']/div/header/span/span/a/text()")
+                        if years:
+                            year = int(years[0])
+
+                    comments = element.xpath(f".//div[@class='body']/div/p/text()")
+                    if not comments and element.tag != 'li':
+                        comments = element.xpath(f"parent::article/div[@class='body']/div/p/text()")
+
+                    rating = None
+                    ratings = element.xpath(".//span[contains(@class, 'rating')]/@class")
+                    if not ratings and element.tag != 'li':
+                         ratings = element.xpath("parent::article/div[@class='body']/div/span/@class")
+                    if not ratings and element.tag != 'li':
+                         ratings = element.xpath("parent::li/p/span[contains(@class, 'rating')]/@class")
+
+                    if ratings:
+                        match = re.search("rated-(\\d+)", ratings[0])
+                        if match:
+                            rating = int(match.group(1))
+
+                    if rating is None:
+                        if element.tag == 'li':
+                            owner_ratings = element.xpath("@data-owner-rating")
+                        else:
+                            owner_ratings = element.xpath("parent::li/@data-owner-rating")
+
+                        if owner_ratings and str(owner_ratings[0]).isdigit():
+                            rating = int(owner_ratings[0])
+
+                    items.append((letterboxd_id, slug, year, comments[0] if comments else None, rating))
+                except Exception as e:
+                    logger.error(f"Letterboxd Error: Failed to parse item: {e}")
+
         next_url = response.xpath("//a[@class='next']/@href")
+        if not items and next_url:
+             logger.warning(f"No items found on page but next page exists: {list_url}")
         return items, next_url
 
     def _parse_list(self, list_url, limit, language):
@@ -58,11 +145,27 @@ class Letterboxd:
         return items
 
     def _tmdb(self, letterboxd_url, language):
-        ids = self._request(letterboxd_url, language, "//a[@data-track-action='TMDb' or @data-track-action='TMDB']/@href")
-        if len(ids) > 0 and ids[0]:
-            if "themoviedb.org/movie" in ids[0]:
+        def get_id(resp):
+            ids = resp.xpath("//*[@data-tmdb-id]/@data-tmdb-id")
+            if ids and ids[0]:
+                return int(ids[0])
+            ids = resp.xpath("//a[contains(@href, 'themoviedb.org')]/@href")
+            if len(ids) > 0 and ids[0]:
                 return util.regex_first_int(ids[0], "TMDb Movie ID")
-            raise Failed(f"Letterboxd Error: TMDb Movie ID not found in {ids[0]}")
+            # print(resp.text)
+            return None
+        # try:
+        #     tmdb_id = get_id(self._request(letterboxd_url, language))
+        #     if tmdb_id:
+        #         return tmdb_id
+        # except Exception:
+        #     pass
+        try:
+            tmdb_id = get_id(self.requests.get_scrape_html(letterboxd_url))
+            if tmdb_id:
+                return tmdb_id
+        except Exception as e:
+            logger.debug(f"Cloudscraper failed: {e}")
         raise Failed(f"Letterboxd Error: TMDb Movie ID not found at {letterboxd_url}")
 
     def get_user_lists(self, username, sort, language):
@@ -96,8 +199,6 @@ class Letterboxd:
             }
             if not final["url"].startswith(base_url):
                 raise Failed(f"{err_type} Error: {final['url']} must begin with: {base_url}")
-            elif not self._parse_page(final["url"], language)[0]:
-                raise Failed(f"{err_type} Error: {final['url']} failed to parse")
             valid_lists.append(final)
         return valid_lists
 

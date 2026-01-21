@@ -205,7 +205,7 @@ class ConfigFile:
         with open(self.config_path, encoding="utf-8") as fp:
             logger.separator("Redacted Config", space=False, border=False, debug=True)
             for line in fp.readlines():
-                logger.debug(re.sub(r"(token|client.*|url|api_*key|secret|error|delete|run_start|run_end|version|changes|username|password): .+", r"\1: (redacted)", line.strip("\r\n")))
+                logger.debug(re.sub(r"(token|client.*|url|api_*key|secret|error|delete|run_start|run_end|version|changes|username|password): .+", r"\\1: (redacted)", line.strip("\\r\\n")))
             logger.debug("")
 
         self.data = self.Requests.file_yaml(self.config_path).data
@@ -396,7 +396,7 @@ class ConfigFile:
                 message = f"{text} not found"
                 if parent and save is True:
                     yaml = self.Requests.file_yaml(self.config_path)
-                    endline = f"\n{parent} sub-attribute {attribute} added to config"
+                    endline = f"\\n{parent} sub-attribute {attribute} added to config"
                     if parent not in yaml.data or not yaml.data[parent]:
                         yaml.data[parent] = {attribute: default}
                     elif attribute not in yaml.data[parent]:
@@ -453,7 +453,7 @@ class ConfigFile:
                         temp_list.append(p)
                     else:
                         if len(warning_message) > 0:
-                            warning_message += "\n"
+                            warning_message += "\\n"
                         warning_message += f"Config Warning: Path does not exist: {os.path.abspath(p)}"
                 if do_print and warning_message:
                     logger.warning(warning_message)
@@ -482,11 +482,11 @@ class ConfigFile:
             if test_list:
                 for test_option, test_description in test_list.items():
                     if len(options) > 0:
-                        options = f"{options}\n"
+                        options = f"{options}\\n"
                     options = f"{options}    {test_option} ({test_description})"
             if (default is None and not default_is_none) or throw:
                 if len(options) > 0:
-                    message = message + "\n" + options
+                    message = message + "\\n" + options
                 raise Failed(f"Config Error: {message}")
             if do_print:
                 logger.warning(f"Config Warning: {message}")
@@ -537,7 +537,8 @@ class ConfigFile:
             "overlay_artwork_quality": check_for_attribute(self.data, "overlay_artwork_quality", parent="settings", var_type="int", default=90, int_min=1, int_max=100),
             "overlay_refresh_emby_items": check_for_attribute(self.data, "overlay_refresh_emby_items", parent="settings", var_type="bool", default=False),
             "assets_for_all": check_for_attribute(self.data, "assets_for_all", parent="settings", var_type="bool", default=False, save=False, do_print=False),
-            "assets_for_all_collections": check_for_attribute(self.data, "assets_for_all_collections", parent="settings", var_type="bool", default=False, save=False, do_print=False)
+            "assets_for_all_collections": check_for_attribute(self.data, "assets_for_all_collections", parent="settings", var_type="bool", default=False, save=False, do_print=False),
+            "cache_builders": check_for_attribute(self.data, "cache_builders", parent="settings", var_type="int", default=0, int_min=0)
         }
         self.custom_repo = None
         if self.general["custom_repo"]:
@@ -971,6 +972,7 @@ class ConfigFile:
                 params["overlay_artwork_filetype"] = check_for_attribute(lib, "overlay_artwork_filetype", parent="settings", test_list=filetype_list, translations={"webp": "webp_lossy"}, default=self.general["overlay_artwork_filetype"], do_print=False, save=False)
                 params["overlay_artwork_quality"] = check_for_attribute(lib, "overlay_artwork_quality", parent="settings", var_type="int", default=self.general["overlay_artwork_quality"], default_is_none=True, int_min=1, int_max=100, do_print=False, save=False)
                 params["overlay_refresh_emby_items"] = check_for_attribute(lib, "overlay_refresh_emby_items", parent="settings", var_type="bool", default=self.general["overlay_refresh_emby_items"], do_print=False, save=False)
+                params["cache_builders"] = check_for_attribute(lib, "cache_builders", parent="settings", var_type="int", default=self.general["cache_builders"], do_print=False, save=False)
                 params["changes_webhooks"] = check_for_attribute(lib, "changes", parent="webhooks", var_type="list", default=self.webhooks["changes"], do_print=False, save=False, default_is_none=True)
                 params["report_path"] = None
                 if lib and "report_path" in lib and lib["report_path"]:

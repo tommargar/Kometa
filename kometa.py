@@ -272,6 +272,8 @@ if not uuid_num:
         handle.write(str(uuid_num))
 
 plexapi.BASE_HEADERS["X-Plex-Client-Identifier"] = str(uuid_num)
+plexapi.BASE_HEADERS["X-Plex-Provides"] = "sync"
+plexapi.BASE_HEADERS["X-Plex-Product"] = "Kometa"
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -955,8 +957,6 @@ def run_collection(config, library, metadata, requested_collections):
                     raise NonExisting(f"{builder.Type} Warning: No items found")
 
             valid = True
-            # builder.beginning_count = 0
-            # if builder.build_collection and not builder.blank_collection and items_added + builder.beginning_count < builder.minimum:
             if builder.build_collection and not builder.blank_collection and items_added + builder.beginning_count - items_removed < builder.minimum:
                 logger.info("")
                 logger.info(f"{builder.Type} Minimum: {builder.minimum} not met for {mapping_name} Collection")

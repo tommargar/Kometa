@@ -206,10 +206,10 @@ class TVDb:
 
         data = response["data"]
         # print(data)
-        companies = data.get("companies", [])
+        companies = data.get("companies") or []
         if isinstance(companies, dict):
-            production = [c["name"] for c in companies.get("production", [])]
-            studios = [c["name"] for c in companies.get("studio", [])]
+            production = [c["name"] for c in (companies.get("production") or [])]
+            studios = [c["name"] for c in (companies.get("studio") or [])]
         else:
             production = [c["name"] for c in companies]
             studios = [c["name"] for c in companies]
@@ -221,8 +221,8 @@ class TVDb:
             "background_url": data.get("art"),
             "release_date": data.get("firstAired"),
             "status": data.get("status", {}).get("name") if isinstance(data.get("status"), dict) else data.get("status"),
-            "genres": [g["name"] for g in data.get("genres", [])],
-            "networks": [n["name"] for n in data.get("networks", [])] if "networks" in data else [],
+            "genres": [g["name"] for g in (data.get("genres") or [])],
+            "networks": [n["name"] for n in (data.get("networks") or [])],
             "production": production,
             "studio": studios
         }

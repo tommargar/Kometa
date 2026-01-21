@@ -96,6 +96,7 @@ class Library(ABC):
         self.overlay_refresh_emby_items = params.get("overlay_refresh_emby_items")
         self.assets_for_all = params["assets_for_all"]
         self.assets_for_all_collections = params["assets_for_all_collections"]
+        self.cache_builders = params["cache_builders"]
         self.delete_collections = params["delete_collections"]
         self.mass_studio_update = params["mass_studio_update"]
         self.mass_genre_update = params["mass_genre_update"]

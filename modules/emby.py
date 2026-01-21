@@ -2691,6 +2691,9 @@ class Emby(Library):
 
     def fetchItem(self, data):
         item = self.EmbyServer.get_item(data)
+        if not item:
+            raise Failed(f"Emby Error: Item {data} not found")
+
         return self.EmbyServer.convert_emby_to_plex([item])[0]
 
     def get_all(self, builder_level=None, load=False, native = False):
