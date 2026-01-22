@@ -42,7 +42,7 @@ class Letterboxd:
         # response = self._request(list_url, language)
         # letterboxd_elements = get_elements(response)
         letterboxd_elements = None
-
+        response = None
         if not letterboxd_elements:
             # logger.debug(f"No items found, trying Cloudscraper for {list_url}")
             try:
@@ -128,11 +128,12 @@ class Letterboxd:
                     items.append((letterboxd_id, slug, year, comments[0] if comments else None, rating))
                 except Exception as e:
                     logger.error(f"Letterboxd Error: Failed to parse item: {e}")
-
-        next_url = response.xpath("//a[@class='next']/@href")
-        if not items and next_url:
-             logger.warning(f"No items found on page but next page exists: {list_url}")
-        return items, next_url
+        if response:
+            next_url = response.xpath("//a[@class='next']/@href")
+            if not items and next_url:
+                 logger.warning(f"No items found on page but next page exists: {list_url}")
+            return items, next_url
+        return items, None
 
     def _parse_list(self, list_url, limit, language):
         items, next_url = self._parse_page(list_url, language)

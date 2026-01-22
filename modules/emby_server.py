@@ -1609,7 +1609,7 @@ class EmbyServer:
             if len(the_studio) == 0:
                 return []
 
-        limit_query = 100
+        limit_query = 250
         if not "Ids" in query_params:
             query_params["Recursive"] = "true"
 

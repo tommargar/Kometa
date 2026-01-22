@@ -146,11 +146,13 @@ plex_token = None
 i = 0
 while i < len(unknown):
     test_var = str(unknown[i]).lower().replace("_", "-")
-    if test_var.startswith(("--pmm-", "--kometa-")) or test_var in ["-pu", "--plex-url", "-pt", "--plex-token"]:
+    if test_var.startswith(("--pmm-", "--kometa-")) or test_var in ["-pu", "--plex-url", "-pt", "--plex-token", "-eu", "--emby-url", "-et", "--emby-token", "-ea", "--emby-apikey"]:
         if test_var in ["-pu", "--plex-url"]:
             plex_url = str(unknown[i + 1])
         elif test_var in ["-pt", "--plex-token"]:
             plex_token = str(unknown[i + 1])
+        elif test_var in ["-eu", "--emby-url", "-et", "--emby-token", "-ea", "--emby-apikey"]:
+            secret_args[test_var.lstrip("-")] = str(unknown[i + 1])
         elif test_var.startswith("--kometa-"):
             secret_args[test_var[9:]] = str(unknown[i + 1])
         elif test_var.startswith("--pmm-"):

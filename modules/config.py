@@ -205,7 +205,7 @@ class ConfigFile:
         with open(self.config_path, encoding="utf-8") as fp:
             logger.separator("Redacted Config", space=False, border=False, debug=True)
             for line in fp.readlines():
-                logger.debug(re.sub(r"(token|client.*|url|api_*key|secret|error|delete|run_start|run_end|version|changes|username|password): .+", r"\\1: (redacted)", line.strip("\\r\\n")))
+                logger.debug(re.sub(r"(token|client.*|url|api_*key|secret|error|delete|run_start|run_end|version|changes|username|password|user_id): .+", r"\\1: (redacted)", line.strip("\\r\\n")))
             logger.debug("")
 
         self.data = self.Requests.file_yaml(self.config_path).data

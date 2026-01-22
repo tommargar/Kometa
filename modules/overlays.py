@@ -29,6 +29,15 @@ class Overlays:
         key_to_overlays = {}
         properties = {}
         if not self.library.remove_overlays:
+            emby_server = getattr(self.library, "EmbyServer", None)
+            if emby_server and emby_server.dirty_items:
+                logger.info("")
+                logger.separator(f"Refreshing {len(emby_server.dirty_items)} Dirty Items for the {self.library.name} Library")
+                logger.info("")
+                for i, item_id in enumerate(emby_server.dirty_items, 1):
+                    logger.ghost(f"Refreshing {i}/{len(emby_server.dirty_items)} Item ID: {item_id}")
+                    emby_server.get_item(item_id, force_refresh=True)
+                logger.info("")
             key_to_overlays, properties = self.compile_overlays()
         ignore_list = [rk for rk in key_to_overlays]
 
@@ -91,6 +100,7 @@ class Overlays:
             total_keys = len(key_to_overlays)
             for i, (over_key, (item, over_names)) in enumerate(sorted(key_to_overlays.items(), key=lambda io: self.library.get_item_display_title(io[1][0], sort=True)), 1):
                 emby_server = getattr(self.library, "EmbyServer", None)
+                item_id = None
                 if emby_server and getattr(item, "ratingKey", None):
                     item_id = getattr(item, "ratingKey", None)
                     try:
@@ -302,6 +312,7 @@ class Overlays:
                                     new_poster = new_poster.filter(ImageFilter.GaussianBlur(blur_num))
 
                                 def get_text(text_overlay):
+                                    fresh_emby_item = None
                                     full_text = text_overlay.name[5:-1]
                                     for format_var in overlay.vars_by_type[text_overlay.level]:
                                         if f"<<{format_var}" in full_text and format_var == "originally_available[":
@@ -339,27 +350,26 @@ class Overlays:
                                         elif format_var == "user_rating" and emby_server:
                                             actual_attr = plex.attribute_translation.get(format_var, format_var)
                                             actual_value = None
-                                            if hasattr(item, actual_attr):
-                                                actual_value = getattr(item, actual_attr)
-                                            if actual_value is None:
-                                                native_item = None
-                                                if item_id is not None:
-                                                    native_item = emby_server.get_item(item_id)
-                                                    if native_item:
-                                                        actual_value = emby_server.get_custom_rating_from_item(native_item, raw=True)
-                                                        if actual_value in [None, ""] and native_item.get("ProviderIds") and "CustomRating" in native_item["ProviderIds"]:
-                                                            actual_value = native_item["ProviderIds"]["CustomRating"]
-                                                    if actual_value is None:
-                                                        native_item = emby_server.get_item(item_id, force_refresh=True)
-                                                        if native_item:
-                                                            actual_value = emby_server.get_custom_rating_from_item(native_item, raw=True)
-                                                            if actual_value in [None, ""] and native_item.get("ProviderIds") and "CustomRating" in native_item["ProviderIds"]:
-                                                                actual_value = native_item["ProviderIds"]["CustomRating"]
-                                                    if actual_value is None and native_item and native_item.get("CustomRating"):
+                                            if item_id is not None:
+                                                if fresh_emby_item is None:
+                                                    fresh_emby_item = emby_server.get_item(item_id, force_refresh=True)
+                                                native_item = fresh_emby_item
+                                                if native_item:
+                                                    actual_value = emby_server.get_custom_rating_from_item(native_item, raw=True)
+                                                    if actual_value in [None, ""] and native_item.get("ProviderIds") and "CustomRating" in native_item["ProviderIds"]:
+                                                        actual_value = native_item["ProviderIds"]["CustomRating"]
+                                                    if actual_value is None and native_item.get("CustomRating"):
                                                         logger.warning(
                                                             "Overlay Warning: Emby custom ratings must be provided via "
                                                             "ProviderIds['CustomRating']; the CustomRating field is ignored."
                                                         )
+                                            if actual_value is None and hasattr(item, actual_attr):
+                                                actual_value = getattr(item, actual_attr)
+                                            if actual_value is not None and "%" in full_text:
+                                                try:
+                                                    actual_value = float(actual_value) / 10
+                                                except (ValueError, TypeError):
+                                                    pass
                                         elif format_var in overlay.rating_sources:
                                             found_rating = None
                                             try:
@@ -525,7 +535,20 @@ class Overlays:
                                         else:
                                             # match actual_attr:
                                             #     case 'rating':
-                                            actual_value = getattr(item, actual_attr, None)
+                                            actual_value = None
+                                            if emby_server and item_id and format_var in ["critic_rating", "audience_rating"]:
+                                                if fresh_emby_item is None:
+                                                    fresh_emby_item = emby_server.get_item(item_id, force_refresh=True)
+                                                native_item = fresh_emby_item
+                                                if native_item:
+                                                    if format_var == "audience_rating":
+                                                        actual_value = native_item.get("CommunityRating")
+                                                    elif format_var == "critic_rating":
+                                                        actual_value = native_item.get("CriticRating")
+
+                                            if actual_value is None:
+                                                actual_value = getattr(item, actual_attr, None)
+
                                             if actual_value is None and emby_server and item_id:
                                                 native_item = emby_server.get_item(item_id)
                                                 if native_item:
@@ -533,13 +556,21 @@ class Overlays:
                                                         actual_value = native_item.get("CommunityRating")
                                                     elif format_var == "critic_rating":
                                                         actual_value = native_item.get("CriticRating")
-                                                if actual_value is None:
-                                                    native_item = emby_server.get_item(item_id, force_refresh=True)
+                                                if actual_value is None and fresh_emby_item is None:
+                                                    fresh_emby_item = emby_server.get_item(item_id, force_refresh=True)
+                                                    native_item = fresh_emby_item
                                                     if native_item:
                                                         if format_var == "audience_rating":
                                                             actual_value = native_item.get("CommunityRating")
                                                         elif format_var == "critic_rating":
                                                             actual_value = native_item.get("CriticRating")
+
+                                            if actual_value is not None and format_var in ["critic_rating", "audience_rating"] and "%" in full_text:
+                                                try:
+                                                    if float(actual_value) > 10:
+                                                        actual_value = float(actual_value) / 10
+                                                except (ValueError, TypeError):
+                                                    pass
 
                                             if actual_value is None:
                                                 raise Failed(f"Overlay Warning: No {full_text} found")
@@ -666,12 +697,12 @@ class Overlays:
 
                                 poster_compare = os.stat(temp).st_size  # poster.compare if poster else item.thumb
 
-                            logger.info(f"  Overlays Applied: {', '.join(over_names)}")
+                            logger.info(f"  Overlays Applied {item_id}: {', '.join(over_names)}")
                         except (OSError, BadRequest, SyntaxError) as e:
                             logger.stacktrace()
                             raise Failed(f"  Overlay Error: {e}")
                     else:
-                        logger.info(f"  Overlay Update Not Needed (Current Overlays: {', '.join(over_names)})")
+                        logger.info(f"  Overlay Update Not Needed {item_id} (Current Overlays: {', '.join(over_names)})")
 
                     if self.cache and poster_compare:
                         self.cache.update_image_map(item.ratingKey, f"{self.library.image_table_name}_overlays", item.thumb, poster_compare, overlay='|'.join(compare_names))

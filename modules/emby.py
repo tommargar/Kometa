@@ -24,6 +24,18 @@ from urllib.parse import unquote, parse_qsl, parse_qs, urlparse
 
 logger = util.logger
 
+emby_lang_map = {
+    "eng": "en", "fre": "fr", "ger": "de", "ita": "it", "spa": "es", "jpn": "ja", "kor": "ko", "chi": "zh",
+    "rus": "ru", "por": "pt", "swe": "sv", "nor": "no", "dan": "da", "fin": "fi", "dut": "nl", "pol": "pl",
+    "tur": "tr", "cze": "cs", "hun": "hu", "tha": "th", "gre": "el", "heb": "he", "hin": "hi", "ind": "id",
+    "may": "ms", "vie": "vi", "rum": "ro", "ukr": "uk", "bul": "bg", "hrv": "hr", "slv": "sl", "lit": "lt",
+    "lav": "lv", "est": "et", "per": "fa", "urd": "ur", "ara": "ar", "alb": "sq", "arm": "hy", "aze": "az",
+    "baq": "eu", "ben": "bn", "bos": "bs", "bre": "br", "bur": "my", "cat": "ca", "ice": "is", "mac": "mk",
+    "mlt": "mt", "mon": "mn", "nep": "ne", "pan": "pa", "san": "sa", "sin": "si", "slo": "sk", "som": "so",
+    "swa": "sw", "tam": "ta", "tel": "te", "tib": "bo", "uzb": "uz", "wel": "cy", "yid": "yi", "zul": "zu",
+    "nob": "nb", "nno": "nn"
+}
+
 builders = ["plex_all", "plex_watchlist", "plex_pilots", "plex_collectionless", "plex_search", "emby_search", "emby_all",]
 library_types = ["movie", "show", "artist"]
 search_translation = {
@@ -476,6 +488,12 @@ class Emby(Library):
         self.emby_user_id = self.emby["user_id"]
         self.overlay_destination_folder = self.emby["overlay_destination_folder"]
         self.timeout = self.emby["timeout"]
+        self.language_conversion_cache = {}
+        for k, v in emby_lang_map.items():
+            if v not in self.language_conversion_cache:
+                self.language_conversion_cache[v] = []
+            if k not in self.language_conversion_cache[v]:
+                self.language_conversion_cache[v].append(k)
         logger.secret(self.url)
         logger.secret(self.emby_api_key)
         logger.secret(self.emby_user_id)
@@ -1494,6 +1512,41 @@ class Emby(Library):
         elif my_search in ['resolution']:
             my_dict = self.EmbyServer.get_resolutions()
             return my_dict
+        elif my_search in ['audioLanguage', 'subtitleLanguage']:
+            include_types = []
+            if self.lib_type == "movie":
+                include_types = ["Movie"]
+            elif self.lib_type == "show":
+                include_types = ["Episode"]
+
+            try:
+                items = self.EmbyServer.get_items(
+                    params={"ParentId": self.Emby.get("Id"), "Recursive": "true"},
+                    fields="MediaStreams",
+                    include_item_types=include_types,
+                    getAll=True
+                )
+                languages = set()
+                target_type = "Audio" if my_search == "audioLanguage" else "Subtitle"
+
+                if items:
+                    for item in items:
+                        for stream in item.get("MediaStreams", []):
+                            if stream.get("Type") == target_type:
+                                lang = stream.get("Language")
+                                if lang:
+                                    short_lang = emby_lang_map.get(lang, lang)
+                                    languages.add(short_lang)
+                                    if short_lang not in self.language_conversion_cache:
+                                        self.language_conversion_cache[short_lang] = []
+                                    if lang not in self.language_conversion_cache[short_lang]:
+                                        self.language_conversion_cache[short_lang].append(lang)
+                # todo: cleanup languages maybe?
+                for lang in sorted(languages):
+                    emby_items.append(FilterChoiceEmby(key=lang, title=lang))
+            except Exception as e:
+                logger.error(f"Emby Error: Failed to fetch {my_search} filters: {e}")
+            return emby_items
                 # key = str(dec)
                 # title = f"{str(dec)}s"
                 #
@@ -2535,6 +2588,14 @@ class Emby(Library):
                     elif key_decoded == 'hdr':
                         if value_decoded == "1":
                             emby_query_params['_RequireHdr'] = True
+                    elif key_decoded in ['audio_language', 'audioLanguage']:
+                        if 'AudioLanguages' not in emby_query_params:
+                            emby_query_params['AudioLanguages'] = []
+                        emby_query_params['AudioLanguages'].extend(self.language_conversion_cache.get(value_decoded, [value_decoded]))
+                    elif key_decoded in ['subtitle_language', 'subtitleLanguage']:
+                        if 'SubtitleLanguages' not in emby_query_params:
+                            emby_query_params['SubtitleLanguages'] = []
+                        emby_query_params['SubtitleLanguages'].extend(self.language_conversion_cache.get(value_decoded, [value_decoded]))
 
                     else:
                         if key_decoded not in ["pop", "push", "or"]:
@@ -2567,6 +2628,10 @@ class Emby(Library):
             emby_query_params['PersonTypes'] = ','.join(set(emby_query_params['PersonTypes']))
         if 'OfficialRatings' in emby_query_params:
             emby_query_params['OfficialRatings'] = '|'.join(set(emby_query_params['OfficialRatings']))
+        if 'AudioLanguages' in emby_query_params:
+            emby_query_params['AudioLanguages'] = ','.join(emby_query_params['AudioLanguages'])
+        if 'SubtitleLanguages' in emby_query_params:
+            emby_query_params['SubtitleLanguages'] = ','.join(emby_query_params['SubtitleLanguages'])
 
 
         # Set 'Years' parameter if years_list is not empty
@@ -3139,10 +3204,21 @@ class Emby(Library):
             test_number = []
             if filter_attr in ["channels", "height", "width", "aspect"]:
                 test_number = 0
-                for media in item.media:
-                    attr = getattr(media, filter_actual)
-                    if attr and attr > test_number:
-                        test_number = attr
+                for media in emby_item.get("MediaStreams", []):
+                    if media.get("Type") == "Video":
+                        if filter_attr in "aspect":
+                            aspect_ratio : str = media.get("AspectRatio", "0:1")
+                            ar = aspect_ratio.split(":")
+                            actual_ar = int(ar[0])/int(ar[1])
+                            if actual_ar > test_number:
+                                test_number = actual_ar
+                else:
+                    logger.error(f"Filter for Emby not integrated: {filter_attr}")
+
+                # for media in item.media:
+                #     attr = getattr(media, filter_actual)
+                #     if attr and attr > test_number:
+                #         test_number = attr
             elif filter_attr == "stinger_rating":
                 test_number = None
                 if item.ratingKey in self.movie_rating_key_map and self.movie_rating_key_map[item.ratingKey] in self.config.mediastingers:
@@ -3150,13 +3226,13 @@ class Emby(Library):
             elif filter_attr == "versions":
                 test_number = len(item.media)
             elif filter_attr == "audio_language":
-                for media in item.media:
-                    for part in media.parts:
-                        test_number.extend([a.language for a in part.audioStreams()])
+                for stream in emby_item.get("MediaStreams", []):
+                    if stream.get("Type") == "Audio" and stream.get("Language"):
+                        test_number.append(stream.get("Language"))
             elif filter_attr == "subtitle_language":
-                for media in item.media:
-                    for part in media.parts:
-                        test_number.extend([s.language for s in part.subtitleStreams()])
+                for stream in emby_item.get("MediaStreams", []):
+                    if stream.get("Type") == "Subtitle" and stream.get("Language"):
+                        test_number.append(stream.get("Language"))
             elif filter_attr == "duration":
                 test_number = getattr(item, filter_actual)
                 if test_number:
@@ -3171,16 +3247,17 @@ class Emby(Library):
         else:
             attrs = []
             if filter_attr in ["resolution", "audio_language", "subtitle_language"]:
-                for media in item.media:
-                    if filter_attr == "resolution":
+                if filter_attr == "audio_language":
+                    for stream in emby_item.get("MediaStreams", []):
+                        if stream.get("Type") == "Audio" and stream.get("Language"):
+                            attrs.append(emby_lang_map.get(stream.get("Language"), stream.get("Language")))
+                elif filter_attr == "subtitle_language":
+                    for stream in emby_item.get("MediaStreams", []):
+                        if stream.get("Type") == "Subtitle" and stream.get("Language"):
+                            attrs.append(emby_lang_map.get(stream.get("Language"), stream.get("Language")))
+                elif filter_attr == "resolution":
+                    for media in item.media:
                         attrs.append(media.videoResolution)
-                    for part in media.parts:
-                        if filter_attr == "audio_language":
-                            for a in part.audioStreams():
-                                attrs.extend([a.language, a.languageCode])
-                        if filter_attr == "subtitle_language":
-                            for s in part.subtitleStreams():
-                                attrs.extend([s.language, s.languageCode])
             elif filter_attr in ["content_rating", "year", "rating"]:
                 attrs = [getattr(item, filter_actual)]
             elif filter_attr in ["actor", "country", "director", "genre", "label", "producer", "composer", "writer",
