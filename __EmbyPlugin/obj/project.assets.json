@@ -1,0 +1,212 @@
+{
+  "version": 3,
+  "targets": {
+    "net8.0": {
+      "MediaBrowser.Common/4.9.1.90": {
+        "type": "package",
+        "compile": {
+          "lib/netstandard2.0/Emby.Media.Model.dll": {
+            "related": ".pdb;.xml"
+          },
+          "lib/netstandard2.0/Emby.Web.GenericEdit.dll": {
+            "related": ".pdb;.xml"
+          },
+          "lib/netstandard2.0/MediaBrowser.Common.dll": {
+            "related": ".pdb;.xml"
+          },
+          "lib/netstandard2.0/MediaBrowser.Model.dll": {
+            "related": ".pdb;.xml"
+          }
+        },
+        "runtime": {
+          "lib/netstandard2.0/Emby.Media.Model.dll": {
+            "related": ".pdb;.xml"
+          },
+          "lib/netstandard2.0/Emby.Web.GenericEdit.dll": {
+            "related": ".pdb;.xml"
+          },
+          "lib/netstandard2.0/MediaBrowser.Common.dll": {
+            "related": ".pdb;.xml"
+          },
+          "lib/netstandard2.0/MediaBrowser.Model.dll": {
+            "related": ".pdb;.xml"
+          }
+        }
+      },
+      "MediaBrowser.Server.Core/4.9.1.90": {
+        "type": "package",
+        "dependencies": {
+          "MediaBrowser.Common": "4.9.1.90"
+        },
+        "compile": {
+          "lib/netstandard2.0/Emby.Naming.dll": {
+            "related": ".pdb;.xml"
+          },
+          "lib/netstandard2.0/MediaBrowser.Controller.dll": {
+            "related": ".pdb;.xml"
+          }
+        },
+        "runtime": {
+          "lib/netstandard2.0/Emby.Naming.dll": {
+            "related": ".pdb;.xml"
+          },
+          "lib/netstandard2.0/MediaBrowser.Controller.dll": {
+            "related": ".pdb;.xml"
+          }
+        }
+      },
+      "System.Memory/4.6.3": {
+        "type": "package",
+        "compile": {
+          "lib/netcoreapp2.1/_._": {}
+        },
+        "runtime": {
+          "lib/netcoreapp2.1/_._": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "MediaBrowser.Common/4.9.1.90": {
+      "sha512": "QzXFYh7TPskAtctdCguJxep9aMSfIrsT4F+xUrdAVh4pj2KAD3DzwkY1DDPIUUD6M+Lgwag/NesBgd1pgLffbQ==",
+      "type": "package",
+      "path": "mediabrowser.common/4.9.1.90",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "lib/netstandard2.0/Emby.Media.Model.dll",
+        "lib/netstandard2.0/Emby.Media.Model.pdb",
+        "lib/netstandard2.0/Emby.Media.Model.xml",
+        "lib/netstandard2.0/Emby.Web.GenericEdit.dll",
+        "lib/netstandard2.0/Emby.Web.GenericEdit.pdb",
+        "lib/netstandard2.0/Emby.Web.GenericEdit.xml",
+        "lib/netstandard2.0/MediaBrowser.Common.dll",
+        "lib/netstandard2.0/MediaBrowser.Common.pdb",
+        "lib/netstandard2.0/MediaBrowser.Common.xml",
+        "lib/netstandard2.0/MediaBrowser.Model.dll",
+        "lib/netstandard2.0/MediaBrowser.Model.pdb",
+        "lib/netstandard2.0/MediaBrowser.Model.xml",
+        "mediabrowser.common.4.9.1.90.nupkg.sha512",
+        "mediabrowser.common.nuspec"
+      ]
+    },
+    "MediaBrowser.Server.Core/4.9.1.90": {
+      "sha512": "lyThQ7kXhzLNisMfqzSoxrhG/7gnK9/lJyNfV/TCo10c30oKiTR2n5nG+ognv6hCNz9jmcPpAt3561Oj7EIVwQ==",
+      "type": "package",
+      "path": "mediabrowser.server.core/4.9.1.90",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "lib/netstandard2.0/Emby.Naming.dll",
+        "lib/netstandard2.0/Emby.Naming.pdb",
+        "lib/netstandard2.0/Emby.Naming.xml",
+        "lib/netstandard2.0/MediaBrowser.Controller.dll",
+        "lib/netstandard2.0/MediaBrowser.Controller.pdb",
+        "lib/netstandard2.0/MediaBrowser.Controller.xml",
+        "mediabrowser.server.core.4.9.1.90.nupkg.sha512",
+        "mediabrowser.server.core.nuspec"
+      ]
+    },
+    "System.Memory/4.6.3": {
+      "sha512": "qdcDOgnFZY40+Q9876JUHnlHu7bosOHX8XISRoH94fwk6hgaeQGSgfZd8srWRZNt5bV9ZW2TljcegDNxsf+96A==",
+      "type": "package",
+      "path": "system.memory/4.6.3",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "Icon.png",
+        "PACKAGE.md",
+        "buildTransitive/net461/System.Memory.targets",
+        "buildTransitive/net462/_._",
+        "lib/net462/System.Memory.dll",
+        "lib/net462/System.Memory.xml",
+        "lib/netcoreapp2.1/_._",
+        "lib/netstandard2.0/System.Memory.dll",
+        "lib/netstandard2.0/System.Memory.xml",
+        "lib/netstandard2.1/_._",
+        "system.memory.4.6.3.nupkg.sha512",
+        "system.memory.nuspec"
+      ]
+    }
+  },
+  "projectFileDependencyGroups": {
+    "net8.0": [
+      "MediaBrowser.Server.Core >= 4.9.1.90",
+      "System.Memory >= 4.6.3"
+    ]
+  },
+  "packageFolders": {
+    "C:\\Users\\tmgae\\.nuget\\packages\\": {}
+  },
+  "project": {
+    "version": "1.0.0",
+    "restore": {
+      "projectUniqueName": "N:\\Kometa\\__EmbyPlugin\\EmbyPluginUiDemo.csproj",
+      "projectName": "EmbyPluginUiDemo",
+      "projectPath": "N:\\Kometa\\__EmbyPlugin\\EmbyPluginUiDemo.csproj",
+      "packagesPath": "C:\\Users\\tmgae\\.nuget\\packages\\",
+      "outputPath": "N:\\Kometa\\__EmbyPlugin\\obj\\",
+      "projectStyle": "PackageReference",
+      "configFilePaths": [
+        "C:\\Users\\tmgae\\AppData\\Roaming\\NuGet\\NuGet.Config",
+        "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+      ],
+      "originalTargetFrameworks": [
+        "net8.0"
+      ],
+      "sources": {
+        "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
+        "https://api.nuget.org/v3/index.json": {}
+      },
+      "frameworks": {
+        "net8.0": {
+          "targetAlias": "net8.0",
+          "projectReferences": {}
+        }
+      },
+      "warningProperties": {
+        "warnAsError": [
+          "NU1605"
+        ]
+      },
+      "restoreAuditProperties": {
+        "enableAudit": "true",
+        "auditLevel": "low",
+        "auditMode": "direct"
+      },
+      "SdkAnalysisLevel": "9.0.300"
+    },
+    "frameworks": {
+      "net8.0": {
+        "targetAlias": "net8.0",
+        "dependencies": {
+          "MediaBrowser.Server.Core": {
+            "target": "Package",
+            "version": "[4.9.1.90, )"
+          },
+          "System.Memory": {
+            "target": "Package",
+            "version": "[4.6.3, )"
+          }
+        },
+        "imports": [
+          "net461",
+          "net462",
+          "net47",
+          "net471",
+          "net472",
+          "net48",
+          "net481"
+        ],
+        "assetTargetFallback": true,
+        "warn": true,
+        "frameworkReferences": {
+          "Microsoft.NETCore.App": {
+            "privateAssets": "all"
+          }
+        },
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\9.0.307/PortableRuntimeIdentifierGraph.json"
+      }
+    }
+  }
+}

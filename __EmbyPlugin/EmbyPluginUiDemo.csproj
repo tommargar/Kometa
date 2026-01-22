@@ -1,0 +1,57 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPublishable>True</IsPublishable>
+    <ErrorReport>none</ErrorReport>
+    <AssemblyVersion>4.9.0.0</AssemblyVersion>
+    <FileVersion>4.9.0.0</FileVersion>
+    <AssemblyInformationalVersion>4.8.0.0</AssemblyInformationalVersion>
+    <ProductVersion>4.8.0.0</ProductVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="meet\GetSomeData.cs" />
+    <Compile Remove="meet\RibbonProcessor.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Remove="PluginUiThumb.jpg" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="PluginUiThumb.jpg" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="meet\GetSomeData.cs" />
+    <None Include="meet\RibbonProcessor.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="MediaBrowser.Server.Core" Version="4.9.1.90" />
+    <PackageReference Include="System.Memory" Version="4.6.3" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="Emby.Drawing.Skia">
+      <HintPath>C:\Users\tmgae\AppData\Roaming\Emby-Server\system\Emby.Drawing.Skia.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="SkiaSharp">
+      <HintPath>C:\Users\tmgae\AppData\Roaming\Emby-Server\system\SkiaSharp.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Update="Properties\Resources.Designer.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>Resources.resx</DependentUpon>
+    </Compile>
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Update="Properties\Resources.resx">
+      <Generator>ResXFileCodeGenerator</Generator>
+      <LastGenOutput>Resources.Designer.cs</LastGenOutput>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+    <Exec Command="copy &quot;$(TargetPath)&quot; &quot;%25AppData%25\Emby-Server\programdata\plugins\&quot;" />
+  </Target>
+
+</Project>
