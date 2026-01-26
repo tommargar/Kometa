@@ -34,7 +34,7 @@ class Overlays:
                 logger.info("")
                 logger.separator(f"Refreshing {len(emby_server.dirty_items)} Dirty Items for the {self.library.name} Library")
                 logger.info("")
-                for i, item_id in enumerate(emby_server.dirty_items, 1):
+                for i, item_id in enumerate(list(emby_server.dirty_items), 1):
                     logger.ghost(f"Refreshing {i}/{len(emby_server.dirty_items)} Item ID: {item_id}")
                     emby_server.get_item(item_id, force_refresh=True)
                 logger.info("")
@@ -139,7 +139,10 @@ class Overlays:
                         has_overlay = any(
                             [item_tag.tag.lower() == "overlay" for item_tag in self.library.item_labels(item)])
 
+                    special_text_cache = self.cache.query_overlay_special_text(item.ratingKey) if self.cache else {}
                     compare_names = {properties[ov].get_overlay_compare(): ov for ov in over_names}
+                    overlay_change = self.get_overlay_change_reason(item, over_names, properties, overlay_compare,compare_names, has_overlay, special_text_cache)
+
                     blur_num = 0
                     applied_names = []
                     queue_overlays = {}
@@ -159,99 +162,6 @@ class Overlays:
                         else:
                             applied_names.append(over_name)
 
-                    overlay_change = "" if has_overlay else "No Overlay Label"
-                    if not overlay_change:
-                        for oc in overlay_compare:
-                            if oc not in compare_names:
-                                overlay_change = f"{oc} not in {compare_names}"
-
-                    if not overlay_change:
-                        for compare_name, original_name in compare_names.items():
-                            if compare_name not in overlay_compare or properties[original_name].updated:
-                                overlay_change = f"{compare_name} not in {overlay_compare} or {properties[original_name].updated}"
-
-                    special_text_cache = self.cache.query_overlay_special_text(item.ratingKey) if self.cache else {}
-                    if self.cache:
-                        for over_name in over_names:
-                            if overlay_change:
-                                break
-                            current_overlay = properties[over_name]
-                            if not current_overlay.name.startswith("text"):
-                                continue
-                            if "<<" not in current_overlay.name:
-                                continue
-                            full_text = current_overlay.name[5:-1]
-                            matches = re.findall(r"<<([^<>]+)>>", full_text)
-                            if not matches:
-                                continue
-                            expected_vars = set()
-                            for match in matches:
-                                base_var = match
-                                if base_var.startswith("originally_available["):
-                                    base_var = "originally_available"
-                                else:
-                                    stripped = False
-                                    for mod in overlay.double_mods:
-                                        if base_var.endswith(mod):
-                                            base_var = base_var[:-len(mod)]
-                                            stripped = True
-                                            break
-                                    if not stripped:
-                                        for mod in overlay.single_mods:
-                                            if base_var.endswith(mod):
-                                                base_var = base_var[:-len(mod)]
-                                                break
-                                expected_vars.add(base_var)
-                            for format_var in expected_vars:
-                                if overlay_change:
-                                    break
-                                cached_value = special_text_cache.get(format_var) if special_text_cache else None
-                                if cached_value is None:
-                                    overlay_change = f"Missing Special Text Cache for {format_var}"
-                                    break
-                                real_value = None
-                                if format_var == "show_title":
-                                    attr = "parentTitle" if current_overlay.level == "season" else "grandparentTitle"
-                                    real_value = getattr(item, attr, None)
-                                elif format_var == "runtime" and current_overlay.level in ["show", "season", "artist", "album"]:
-                                    if hasattr(item, "duration") and item.duration:
-                                        real_value = item.duration
-                                    else:
-                                        sub_items = item.episodes() if current_overlay.level in ["show", "season"] else item.tracks()
-                                        durations = [getattr(ep, "duration", None) for ep in sub_items]
-                                        durations = [d for d in durations if d]
-                                        if durations:
-                                            real_value = sum(durations) / len(durations)
-                                elif format_var == "total_runtime":
-                                    sub_items = item.episodes() if current_overlay.level in ["show", "season"] else item.tracks()
-                                    durations = [getattr(ep, "duration", None) for ep in sub_items]
-                                    durations = [d for d in durations if d]
-                                    if durations:
-                                        real_value = sum(durations)
-                                else:
-                                    actual_attr = plex.attribute_translation.get(format_var, format_var)
-                                    if hasattr(item, actual_attr):
-                                        real_value = getattr(item, actual_attr)
-                                if real_value is None:
-                                    continue
-                                if format_var == "versions":
-                                    real_value = len(real_value) if isinstance(real_value, (list, tuple, set)) else real_value
-                                try:
-                                    if format_var in overlay.float_vars:
-                                        real_value = float(real_value)
-                                        compare_value = float(cached_value)
-                                    elif format_var in overlay.int_vars:
-                                        real_value = int(real_value)
-                                        compare_value = int(cached_value)
-                                    else:
-                                        compare_value = cached_value
-                                    if format_var in overlay.date_vars and hasattr(real_value, "strftime"):
-                                        real_value = real_value.strftime("%Y-%m-%d")
-                                except (TypeError, ValueError):
-                                    continue
-                                if real_value != compare_value:
-                                    overlay_change = f"Special Text Changed from {cached_value} to {real_value}"
-                                    break
                     try:
                         #todo: for Emby transparent PNG, ignore existing poster files
                         poster, background, logo, item_dir, name = self.library.find_item_assets(item)
@@ -297,6 +207,15 @@ class Overlays:
                             # canvas_width = emby_poster.get('Width', 0)
                             # canvas_height = emby_poster.get('Height',0)
                             canvas_width, canvas_height = overlay.get_canvas_size(item)
+                            if self.config.server_type == "emby" and isinstance(item, Episode):
+                                try:
+                                    emby_item = emby_server.get_item(item.ratingKey)
+                                    if emby_item and "PrimaryImageAspectRatio" in emby_item:
+                                        aspect_ratio = float(emby_item["PrimaryImageAspectRatio"])
+                                        canvas_height = 1080
+                                        canvas_width = int(canvas_height * aspect_ratio)
+                                except Exception:
+                                    pass
 
                             # todo if filetype png / emby overlay
                             # canvas_width, canvas_height = overlay.get_canvas_size(item)
@@ -314,6 +233,17 @@ class Overlays:
                                 def get_text(text_overlay):
                                     fresh_emby_item = None
                                     full_text = text_overlay.name[5:-1]
+                                    # Detect Provider based on Overlay Image Path
+                                    provider = None
+                                    if text_overlay.path:
+                                        lower_path = text_overlay.path.lower()
+                                        if "letterboxd" in lower_path: provider = "letterboxd"
+                                        elif "imdb" in lower_path: provider = "imdb"
+                                        elif "tmdb" in lower_path: provider = "tmdb"
+                                        elif "rotten" in lower_path or "rt_" in lower_path: provider = "rt"
+                                        elif "metacritic" in lower_path: provider = "metacritic"
+                                        elif "trakt" in lower_path: provider = "trakt"
+
                                     for format_var in overlay.vars_by_type[text_overlay.level]:
                                         if f"<<{format_var}" in full_text and format_var == "originally_available[":
                                             mod = re.search("<<originally_available\\[(.+)]>>", full_text).group(1)
@@ -365,18 +295,19 @@ class Overlays:
                                                         )
                                             if actual_value is None and hasattr(item, actual_attr):
                                                 actual_value = getattr(item, actual_attr)
-                                            if actual_value is not None and "%" in full_text:
-                                                try:
-                                                    actual_value = float(actual_value) / 10
-                                                except (ValueError, TypeError):
-                                                    pass
+                                            # if actual_value is not None and "%" in full_text:
+                                            #     try:
+                                            #         actual_value = float(actual_value) / 10
+                                            #     except (ValueError, TypeError):
+                                            #         pass
                                         elif format_var in overlay.rating_sources:
                                             found_rating = None
                                             try:
-                                                item_to_id = item.show() if isinstance(item, (Season, Episode)) else item
-                                                tmdb_id, tvdb_id, imdb_id = self.library.get_ids(item_to_id)
+                                                tmdb_id, tvdb_id, imdb_id = self.library.get_ids(item)
                                                 if format_var == "tmdb_rating":
-                                                    _item = self.config.TMDb.get_item(item_to_id, tmdb_id, tvdb_id, imdb_id, is_movie=self.library.is_movie)
+                                                    item_to_id = item.show() if isinstance(item, (Season, Episode)) else item
+                                                    t_tmdb_id, t_tvdb_id, t_imdb_id = self.library.get_ids(item_to_id)
+                                                    _item = self.config.TMDb.get_item(item_to_id, t_tmdb_id, t_tvdb_id, t_imdb_id, is_movie=self.library.is_movie)
                                                     if _item:
                                                         if isinstance(item, Episode):
                                                             found_rating = self.config.TMDb.get_episode(_item.tmdb_id, item.seasonNumber, item.episodeNumber).vote_average
@@ -411,7 +342,10 @@ class Overlays:
                                                     if self.config.MDBList.limit is False:
                                                         if self.library.is_show and tvdb_id:
                                                             try:
-                                                                mdb_item = self.config.MDBList.get_series(tvdb_id)
+                                                                use_tvdb_id = tvdb_id
+                                                                if isinstance(item, (Season, Episode)):
+                                                                    _, use_tvdb_id, _ = self.library.get_ids(item.show())
+                                                                mdb_item = self.config.MDBList.get_series(use_tvdb_id)
                                                             except LimitReached as err:
                                                                 logger.debug(err)
                                                             except Failed as err:
@@ -536,7 +470,7 @@ class Overlays:
                                             # match actual_attr:
                                             #     case 'rating':
                                             actual_value = None
-                                            if emby_server and item_id and format_var in ["critic_rating", "audience_rating"]:
+                                            if emby_server and item_id and format_var in ["critic_rating", "audience_rating", "user_rating"]:
                                                 if fresh_emby_item is None:
                                                     fresh_emby_item = emby_server.get_item(item_id, force_refresh=True)
                                                 native_item = fresh_emby_item
@@ -545,6 +479,8 @@ class Overlays:
                                                         actual_value = native_item.get("CommunityRating")
                                                     elif format_var == "critic_rating":
                                                         actual_value = native_item.get("CriticRating")
+                                                    elif format_var == "user_rating":
+                                                        actual_value = emby_server.get_custom_rating_from_item(native_item, raw=True)
 
                                             if actual_value is None:
                                                 actual_value = getattr(item, actual_attr, None)
@@ -556,6 +492,9 @@ class Overlays:
                                                         actual_value = native_item.get("CommunityRating")
                                                     elif format_var == "critic_rating":
                                                         actual_value = native_item.get("CriticRating")
+                                                    elif format_var == "user_rating":
+                                                        actual_value = emby_server.get_custom_rating_from_item(native_item,
+                                                                                                           raw=True)
                                                 if actual_value is None and fresh_emby_item is None:
                                                     fresh_emby_item = emby_server.get_item(item_id, force_refresh=True)
                                                     native_item = fresh_emby_item
@@ -564,21 +503,31 @@ class Overlays:
                                                             actual_value = native_item.get("CommunityRating")
                                                         elif format_var == "critic_rating":
                                                             actual_value = native_item.get("CriticRating")
+                                                        elif format_var == "user_rating":
+                                                            actual_value = emby_server.get_custom_rating_from_item(native_item, raw=True)
 
-                                            if actual_value is not None and format_var in ["critic_rating", "audience_rating"] and "%" in full_text:
-                                                try:
-                                                    if float(actual_value) > 10:
-                                                        actual_value = float(actual_value) / 10
-                                                except (ValueError, TypeError):
-                                                    pass
+
 
                                             if actual_value is None:
                                                 raise Failed(f"Overlay Warning: No {full_text} found")
+
                                             if format_var == "versions":
                                                 actual_value = len(actual_value)
                                         if self.cache:
                                             cache_store = actual_value.strftime("%Y-%m-%d") if format_var in overlay.date_vars else actual_value
                                             self.cache.update_overlay_special_text(item.ratingKey, format_var, cache_store)
+
+                                        # Apply Provider Specific Scaling if using generic rating variables
+                                        if provider and actual_value is not None and format_var in ["critic_rating"]:
+                                            try:
+                                                val = float(actual_value)
+                                                # if provider == "letterboxd":
+                                                #     actual_value = val / 2 if format_var != "critic_rating" else val / 20 # Scale 0-10 to 0-5
+                                                if format_var == "critic_rating" and provider not in ["tmdb", "trakt", "rt", "metacritic"]:
+                                                    actual_value = val / 10
+                                            except (ValueError, TypeError):
+                                                pass
+
                                         sub_value = None
                                         if format_var == "originally_available":
                                             if mod:
@@ -593,6 +542,12 @@ class Overlays:
                                                 final_value = int((actual_value / 60000) % 60)
                                             else:
                                                 final_value = int(actual_value / 60000)
+                                        elif provider in ["tmdb", "rt", "metacritic", "trakt"]:
+                                            # Ensure percentage is calculated from the scaled value
+                                            val = float(actual_value)
+                                            if format_var != "critic_rating":
+                                                val *= 10
+                                            final_value = int(val)
                                         elif mod == "%":
                                             final_value = int(float(actual_value) * 10)
                                         elif mod == "#":
@@ -616,7 +571,7 @@ class Overlays:
                                             final_value = str(actual_value).lower()
                                         elif mod == "P":
                                             final_value = str(actual_value).title()
-                                        elif format_var in overlay.rating_sources:
+                                        elif format_var in overlay.rating_sources or format_var == "audience_rating":
                                             final_value = f"{float(actual_value):.1f}"
                                         else:
                                             final_value = actual_value
@@ -681,6 +636,25 @@ class Overlays:
                                             else:
                                                 overlay_box = current_overlay.get_coordinates((canvas_width, canvas_height), box=current_overlay.image.size, new_cords=cord)
                                             new_poster.paste(current_overlay.image, overlay_box, current_overlay.image)
+
+                                if isinstance(item, Episode) and getattr(self.library, "overlay_show_logo", False):
+                                    try:
+                                        show_item = item.show()
+                                        _, _, show_logo, _, _ = self.library.find_item_assets(show_item)
+                                        if show_logo:
+                                            with Image.open(show_logo.location) as logo_img:
+                                                logo_img = logo_img.convert("RGBA")
+                                                l_w, l_h = logo_img.size
+                                                ratio = min(canvas_width * 0.3 / l_w, canvas_height * 0.3 / l_h)
+                                                new_l_w = int(l_w * ratio)
+                                                new_l_h = int(l_h * ratio)
+                                                logo_img = logo_img.resize((new_l_w, new_l_h), Image.Resampling.LANCZOS)
+                                                padding = int(canvas_width * 0.02)
+                                                box = (padding, canvas_height - new_l_h - padding)
+                                                new_poster.paste(logo_img, box, logo_img)
+                                    except Exception as e:
+                                        logger.warning(f"  Overlay Warning: Failed to apply show logo: {e}")
+
                                 # ext = "webp" if self.library.overlay_artwork_filetype.startswith("webp") else self.library.overlay_artwork_filetype
                                 ext = "webp" if self.library.overlay_artwork_filetype.startswith("webp") else self.library.overlay_artwork_filetype
                                 temp = os.path.join(self.library.overlay_folder, f"temp.{ext}")
@@ -722,6 +696,105 @@ class Overlays:
         logger.info("")
         logger.separator(f"Finished {self.library.name} Library Overlays\nOverlays Run Time: {overlay_run_time}")
         return overlay_run_time
+
+    def get_overlay_change_reason(self, item, over_names, properties, overlay_compare, compare_names, has_overlay, special_text_cache):
+        if not has_overlay:
+            return "No Overlay Label"
+
+        for oc in overlay_compare:
+            if oc not in compare_names:
+                return f"{oc} not in {compare_names}"
+
+        for compare_name, original_name in compare_names.items():
+            if compare_name not in overlay_compare:
+                return f"{compare_name} not in {overlay_compare}"
+            if properties[original_name].updated:
+                return f"{properties[original_name].updated}"
+
+        if self.cache:
+            for over_name in over_names:
+                current_overlay = properties[over_name]
+                if not current_overlay.name.startswith("text") or "<<" not in current_overlay.name:
+                    continue
+
+                full_text = current_overlay.name[5:-1]
+                matches = re.findall(r"<<([^<>]+)>>", full_text)
+                if not matches:
+                    continue
+
+                expected_vars = set()
+                for match in matches:
+                    base_var = match
+                    if base_var.startswith("originally_available["):
+                        base_var = "originally_available"
+                    else:
+                        stripped = False
+                        for mod in overlay.double_mods:
+                            if base_var.endswith(mod):
+                                base_var = base_var[:-len(mod)]
+                                stripped = True
+                                break
+                        if not stripped:
+                            for mod in overlay.single_mods:
+                                if base_var.endswith(mod):
+                                    base_var = base_var[:-len(mod)]
+                                    break
+                    expected_vars.add(base_var)
+
+                for format_var in expected_vars:
+                    cached_value = special_text_cache.get(format_var) if special_text_cache else None
+                    if cached_value is None:
+                        return f"Missing Special Text Cache for {format_var}"
+
+                    real_value = None
+                    if format_var == "show_title":
+                        attr = "parentTitle" if current_overlay.level == "season" else "grandparentTitle"
+                        real_value = getattr(item, attr, None)
+                    elif format_var == "runtime" and current_overlay.level in ["show", "season", "artist", "album"]:
+                        if hasattr(item, "duration") and item.duration:
+                            real_value = item.duration
+                        else:
+                            sub_items = item.episodes() if current_overlay.level in ["show", "season"] else item.tracks()
+                            durations = [getattr(ep, "duration", None) for ep in sub_items]
+                            durations = [d for d in durations if d]
+                            if durations:
+                                real_value = sum(durations) / len(durations)
+                    elif format_var == "total_runtime":
+                        sub_items = item.episodes() if current_overlay.level in ["show", "season"] else item.tracks()
+                        durations = [getattr(ep, "duration", None) for ep in sub_items]
+                        durations = [d for d in durations if d]
+                        if durations:
+                            real_value = sum(durations)
+                    else:
+                        actual_attr = plex.attribute_translation.get(format_var, format_var)
+                        if hasattr(item, actual_attr):
+                            real_value = getattr(item, actual_attr)
+
+                    if real_value is None:
+                        # Warnung: Externe Ratings (TMDB, Trakt, etc.) werden in dieser Prüf-Funktion
+                        # aktuell nicht neu abgerufen. Änderungen an diesen Werten werden hier ignoriert.
+                        continue
+
+                    if format_var == "versions":
+                        real_value = len(real_value) if isinstance(real_value, (list, tuple, set)) else real_value
+
+                    try:
+                        if format_var in overlay.float_vars:
+                            real_value = float(real_value)
+                            compare_value = float(cached_value)
+                        elif format_var in overlay.int_vars:
+                            real_value = int(real_value)
+                            compare_value = int(cached_value)
+                        else:
+                            compare_value = cached_value
+                        if format_var in overlay.date_vars and hasattr(real_value, "strftime"):
+                            real_value = real_value.strftime("%Y-%m-%d")
+                    except (TypeError, ValueError):
+                        continue
+
+                    if real_value != compare_value:
+                        return f"Special Text Changed from {cached_value} to {real_value}"
+        return ""
 
     def compile_overlays(self):
         key_to_item = {}
@@ -839,16 +912,17 @@ class Overlays:
         return key_to_overlays, properties
 
     def get_overlay_items(self, label="Overlay", libtype=None, ignore=None):
-        # items = self.library.search(label=label, libtype=libtype)
+        if self.config.server_type == "plex":
+            items = self.library.search(label=label, libtype=libtype)
+            return items if not ignore else [o for o in items if o.ratingKey not in ignore]
+
         if libtype:
             emby_items = self.library.EmbyServer.get_items(include_item_types=[libtype], params={"ParentId": self.library.EmbyServer.library_id, "Recursive": "True"})
         else:
             emby_items = self.library.EmbyServer.get_items(params={"ParentId": self.library.EmbyServer.library_id, "Recursive": "True"},include_item_types =["Series,Movie,Season,Episode"])
         all_emby_ids = [item.get("Id") for item in emby_items]
         all_emby_ids = all_emby_ids if not ignore else [o for o in all_emby_ids if o not in ignore]
-        # todo: WIP
         return all_emby_ids
-        return items if not ignore else [o for o in items if o.ratingKey not in ignore]
 
     def remove_overlay(self, item, item_title, label, locations):
         #todo: delete overlay png from Emby plugin folder

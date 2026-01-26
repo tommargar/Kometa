@@ -372,7 +372,7 @@ overlays:
   DR1:
     variables: { weight: 10}
     template: [name: standard, name: networks]
-
+    
   Dropout:
     variables: { weight: 10}
     template: [name: standard, name: networks]
@@ -385,10 +385,10 @@ overlays:
     variables: { weight: 10}
     template: [name: standard, name: networks]
 
-  ENA:
+  ENA: 
     variables: { weight: 10}
     template: [name: standard, name: networks]
-
+    
   Epix:
     variables: { weight: 10}
     template: [name: standard, name: networks]
@@ -1012,7 +1012,7 @@ overlays:
   TVNZ 1:
     variables: { weight: 10}
     template: [name: standard, name: networks]
-
+    
   TVNZ 2:
     variables: { weight: 10}
     template: [name: standard, name: networks]

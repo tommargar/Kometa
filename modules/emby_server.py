@@ -1124,106 +1124,18 @@ class EmbyServer:
         # else:
         #     search_tag = f"&Tags=Kometa"
 
-        # if library_id:
-
         if not library_id:
             library_id = self.library_id
 
         my_search = f"{self.emby_server_url}/Users/{self.user_id}/Items?Recursive=true{search_title}{search_tag}{get_fields}&ParentId={library_id}&IncludeItemTypes=BoxSet&api_key={self.api_key}"
-        # my_search = f"{self.emby_server_url}/Items?Recursive=true&SearchTerm={title}&IncludeItemTypes=BoxSets&api_key={self.api_key}"
 
-        title_response = self.session.get(
-            my_search
-        ).json().get("Items", [])
+        response = self.session.get(my_search)
+        response.raise_for_status()
+        title_response = response.json().get("Items", [])
+        
         my_return = list(title_response)
-        # if len(title_response) > 0:
-        #     for title in title_response:
-        #         if title.get("Type")!= "Boxset":
-        #             my_return.remove(title)
-        #             continue
-        #         my_items= self.get_items_in_boxset(title.get("Id"))
-        #         if len(my_items) == 0:
-        #             self.delete_collection(title.get("Id"),is_id=True)
-        #             my_return.remove(title)
 
         plex_collections = self.convert_emby_to_plex(my_return, native)
-        return plex_collections
-
-                # print(f"Title not found in collections: {title}")
-            # print(title_response)
-
-            # 'https://piratensenderpowerplay.myqnapcloud.com:18096/emby/Items?Recursive=true&SearchTerm=IMDb%20Lowest%20Rated&api_key=1a0798043dc549a5ace4f9a216980308' \
-
-
-        # todo: nur die collections der library finden
-        # 1. alle collections abfragen
-        response = self.session.get(
-            f"{self.url}/Items?IncludeItemTypes=BoxSet&ParentId={library_id}&api_key={self.api_key}"
-        )
-        collections_with_items = []
-        collection_items = response.json().get("Items", [])
-
-        plex_collections = self.convert_emby_to_plex(collection_items)
-
-        logger.info(f"EmbyServer retrieved and converted {len(collection_items)} boxsets from library '{library_id}'.")
-
-        return plex_collections
-
-
-        for collection_item in collection_items:
-            # todo add ParentId as selector?
-            all_items_in_box_set = self.get_items_in_boxset(collection_item.get("Id",""),native=True)
-            for item in all_items_in_box_set:
-                if item.get("ParentId") == library_id:
-                    collections_with_items.append(collection_item)
-                    print(f"{collection_item.get('Name', 'UNKNOWN')} found in Library")
-                    break
-            # if collection_item.get("ParentId") == library_id:
-
-        plex_collections = self.convert_emby_to_plex(collections_with_items)
-
-        logger.info(f"Retrieved and converted {len(plex_collections)} boxsets from library '{library_id}'.")
-
-        return plex_collections
-
-
-        # 2. alle inhalte der collections abfragen
-        # 3. alle medien der lib_id abfragen
-        # 4. abgleich mit den inhalten der collection
-        # 5. => boxsets from library
-
-        # Schritt 3: Alle Items in der Bibliothek abrufen
-        response = self.session.get(
-            f"{self.url}/Items?ParentId={library_id}&IncludeItemTypes=BoxSet&Recursive=True&s&api_key={self.api_key}"
-        )
-
-        if response.status_code != 200:
-            raise Exception(
-                f"Failed to retrieve items from library with ID {library_id}. "
-                f"Response: {response.status_code} - {response.text}"
-            )
-
-        items = response.json().get("Items", [])
-        if not items:
-            return []
-            raise Failed(f"No boxsets found in library '{library_id}'.")
-
-        # print(items)
-        # Schritt 4: Filtere die Items mit Type 'BoxSet'
-        # boxsets = [item for item in items if item.get("Type") == "BoxSet"]
-
-
-        # Schritt 5: Filtere nach Titel, falls angegeben
-
-        # if not boxsets:
-        #     raise Failed(f"No boxsets matching the title '{title}' were found.") if title else print("No boxsets found.")
-
-
-        # Schritt 6: Konvertiere die Boxsets zu Plex-kompatiblen Objekten
-        plex_collections = self.convert_emby_to_plex(items)
-
-        logger.info(f"Retrieved and converted {len(plex_collections)} boxsets from library '{library_id}'.")
-
         return plex_collections
 
     def get_items_in_boxset(self, collection_id: str, include: str = "Movie,Series,Episode,MusicArtist",
@@ -1633,7 +1545,7 @@ class EmbyServer:
                 query_params["StartIndex"] = current_index
                 encoded_query = self.custom_encode(query_params)
                 full_url = f"{url}?{encoded_query}"
-
+                logger.trace(f"Fetching batch #{batches.index(batch) + 1} of {len(batches)} batches)")
                 response = self.session.get(full_url, headers=self.headers)
                 try:
                     response_data = response.json()
@@ -1746,6 +1658,12 @@ class EmbyServer:
                 logger.error(f"Invalid Limit value: {query_params['Limit']}")
                 raise Failed(f"Invalid Limit value: {query_params['Limit']}")
         return filtered_results
+
+    def get_seasons(self, series_id):
+        return self.get_items(params={"ParentId": series_id}, include_item_types=["Season"])
+
+    def get_episodes(self, season_id):
+        return self.get_items(params={"ParentId": season_id}, include_item_types=["Episode"])
 
     def set_item_as_played(self, user_id, item_id):
         """
@@ -2012,7 +1930,12 @@ class EmbyServer:
                     data.update(new_data)
                     pass
                 elif item.get("Type") == "Episode":
-                    pass
+                    new_data={
+                        'index': item.get('IndexNumber'),
+                        'parentIndex': item.get('ParentIndexNumber'),
+                        'parentTitle': item.get('SeasonName')
+                    }
+                    data.update(new_data)
 
             # print(media_type)
                 if media_type == "Movie":
@@ -2172,6 +2095,12 @@ class EmbyServer:
                 self.cached_provider_ids[str(item_id)] = provider_ids
             else:
                 self.cached_provider_ids.pop(str(item_id), None)
+
+        if "CriticRating" in data:
+            try:
+                data["CriticRating"] = int(float(data["CriticRating"]))
+            except (ValueError, TypeError):
+                pass
 
         if "ForcedSortName" in data:
             item["ForcedSortName"] = data["ForcedSortName"]
@@ -4008,7 +3937,6 @@ class EmbyServer:
         Holt Emby-Items in Batches (Ids=...), gibt dict[id] -> item zurück.
         Nutzt einen lokalen Cache, lädt nur fehlende/abgelaufene/unvollständige Einträge nach.
         """
-        import time  # lokal, um keine Modulweite Änderung zu erzwingen
 
         self._ensure_http_session()
 

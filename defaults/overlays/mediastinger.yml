@@ -50,6 +50,6 @@ overlays:
   Mediastinger:
     template:
       name: standard
-    plex_all: true
-    filters:
-      tmdb_keyword: aftercreditsstinger, duringcreditsstinger
+    tmdb_discover:
+      with_keywords: 179430|179431
+      limit: 0

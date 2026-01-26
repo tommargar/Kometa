@@ -128,7 +128,7 @@ class TMDbMovie(TMDBObj):
         self.studio = data["studio"] if isinstance(data, dict) else data.companies[0].name if data.companies else None
         self.collection_id = data["collection_id"] if isinstance(data, dict) else data.collection.id if data.collection else None
         self.collection_name = data["collection_name"] if isinstance(data, dict) else data.collection.name if data.collection else None
-        loop = data.production_countries if not isinstance(data, dict) else data.get("countries", "").split("|") if data.get("countries") else []
+        loop = data.countries if not isinstance(data, dict) else data.get("countries", "").split("|") if data.get("countries") else []
         self.countries = [TMDbCountry(c) for c in loop]
         loop = data.spoken_languages if not isinstance(data, dict) else data.get("languages", "").split("|") if data.get("languages") else []
         self.languages = [TMDbLanguage(l) for l in loop]
@@ -194,7 +194,7 @@ class TMDbShow(TMDBObj):
         try:
             return self._tmdb.TMDb.tv_show(self.tmdb_id, partial="external_ids,keywords,credits")
         except NotFound:
-            raise Failed(f"TMDb Error: No Show found for TMDb ID: {self.tmdb_id}")
+            raise Failed(f"TMDb Error: No Show found for TMDb ID: {self.tmdb_id} - https://themoviedb.org/tv/{self.tmdb_id}")
         except TMDbException as e:
             logger.stacktrace()
             raise TMDbException(f"TMDb Error: Unexpected Error with TMDb ID: {self.tmdb_id}: {e}")
@@ -230,7 +230,7 @@ class TMDbEpisode:
         try:
             return self._tmdb.TMDb.tv_episode(self.tmdb_id, self.season_number, self.episode_number)
         except NotFound as e:
-            raise Failed(f"TMDb Error: No Episode found for TMDb ID {self.tmdb_id} Season {self.season_number} Episode {self.episode_number}: {e}")
+            raise Failed(f"TMDb Error: No Episode found for TMDb ID {self.tmdb_id} - Season {self.season_number} Episode {self.episode_number}: {e}")
         except TMDbException as e:
             logger.stacktrace()
             raise TMDbException(f"TMDb Error: Unexpected Error with TMDb ID: {self.tmdb_id}: {e}")

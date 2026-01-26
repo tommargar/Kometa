@@ -232,7 +232,7 @@ class MDBList:
             params["unified"] = True
 
         items = []
-        total_matched_items = 0
+
         while has_more:
             params["offset"] = offset
 
@@ -241,11 +241,13 @@ class MDBList:
                 params["sortorder"] = direction
 
             items = []
+
             try:
                 page_data, headers = self._request(items_url, params=params)
                 has_more = headers.get("X-Has-More", "false").lower() == "true"
                 total_items = int(headers.get("X-Total-Items", 0))
-                total_matched_items += int(headers.get("X-Matched-Items", total_items))
+                total_matched_items = int(headers.get("X-Matched-Items", total_items))
+                
                 if total_matched_items == 0:
                     total_matched_items = total_items
 
