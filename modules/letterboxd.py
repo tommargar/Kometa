@@ -40,7 +40,7 @@ class Letterboxd:
 
     def _request(self, url, language, xpath=None):
         logger.trace(f"URL: {url}")
-        response = self.requests.get_html(url, language=language)
+        response = self.requests.get_cloudscrape_html(url, language=language)
         return response.xpath(xpath) if xpath else response
 
     def _parse_page(self, list_url, language):
@@ -52,11 +52,11 @@ class Letterboxd:
         for letterboxd_element in letterboxd_elements:
             slug = letterboxd_element.xpath("@data-target-link")[0]
             letterboxd_id = letterboxd_element.xpath("@data-film-id")[0]
-            comments = letterboxd_element.xpath(f"parent::article/div[@class='body']/div/p/text()")
+            comments = letterboxd_element.xpath("parent::article/div[@class='body']/div/p/text()")
             ratings = letterboxd_element.xpath("parent::article/div[@class='body']/div/span/@class")
             if not ratings:
                 ratings = letterboxd_element.xpath("parent::li/p/span[contains(@class, 'rating')]/@class")
-            years = letterboxd_element.xpath(f"parent::article/div[@class='body']/div/header/span/span/a/text()")
+            years = letterboxd_element.xpath("parent::article/div[@class='body']/div/header/span/span/a/text()")
             rating = None
             if ratings:
                 match = re.search("rated-(\\d+)", ratings[0])
@@ -295,8 +295,11 @@ class Letterboxd:
             }
             if not final["url"].startswith(base_url):
                 raise Failed(f"{err_type} Error: {final['url']} must begin with: {base_url}")
-            elif not self._parse_page(final["url"], language)[0]:
-                raise Failed(f"{err_type} Error: {final['url']} failed to parse")
+            try:
+                if not self._parse_page(final["url"], language)[0]:
+                    logger.warning(f"{err_type} Warning: {final['url']} returned no items during validation")
+            except Failed as e:
+                logger.warning(f"{err_type} Warning: Could not validate {final['url']}: {e}")
             valid_lists.append(final)
         return valid_lists
 
