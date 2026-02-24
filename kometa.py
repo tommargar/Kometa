@@ -989,7 +989,10 @@ def run_collection(config, library, metadata, requested_collections):
                 # else:
                 # Emby: not all collections get info on creation, so force it
                 if builder.obj:
-                    details_list = builder.update_details_emby_with_labels_in_json()
+                    if config.server_type == "emby":
+                        details_list = builder.update_details_emby_with_labels_in_json()
+                    else:
+                        details_list = builder.update_details()
                     if details_list:
                         pre = ""
                         if library.status[str(mapping_name)]["status"] != "Unchanged":
@@ -1184,7 +1187,11 @@ def run_playlists(config):
                         logger.info("")
                         logger.separator("No Playlist to Update", space=False, border=False)
                     else:
-                        details_list = builder.update_details_emby_with_labels_in_json()
+
+                        if config.server_type.type == "emby":
+                            details_list = builder.update_details_emby_with_labels_in_json()
+                        else:
+                            details_list = builder.update_details()
                         if details_list:
                             pre = ""
                             if status[mapping_name]["status"] != "Unchanged":

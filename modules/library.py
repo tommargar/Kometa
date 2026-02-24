@@ -395,7 +395,7 @@ class Library(ABC):
     def get_episodes(self, season):
         pass
     @abstractmethod
-    def get_native_emby_item(self, emby_item_id):
+    def get_native_item(self, emby_item_id):
         pass
 
     @abstractmethod

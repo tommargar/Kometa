@@ -100,6 +100,7 @@ class Overlays:
             total_keys = len(key_to_overlays)
             for i, (over_key, (item, over_names)) in enumerate(sorted(key_to_overlays.items(), key=lambda io: self.library.get_item_display_title(io[1][0], sort=True)), 1):
                 emby_server = getattr(self.library, "EmbyServer", None)
+                native_emby_data = None
                 item_id = None
                 if emby_server and getattr(item, "ratingKey", None):
                     item_id = getattr(item, "ratingKey", None)
@@ -114,6 +115,7 @@ class Overlays:
                     if perform_refresh:
                         refreshed_data = emby_server.get_item(item_id, force_refresh=force_refresh or item_id_int in emby_server.dirty_items)
                         if refreshed_data:
+                            native_emby_data = refreshed_data
                             refreshed_items = emby_server.convert_emby_to_plex([refreshed_data])
                             if refreshed_items:
                                 item = refreshed_items[0]
@@ -129,6 +131,7 @@ class Overlays:
                     if self.cache:
                         image, image_compare, overlay_compare = self.cache.query_image_map(item.ratingKey, f"{self.library.image_table_name}_overlays")
                     # self.library.reload(item, force=True)
+                    # not needed here for Emby
 
                     overlay_compare = [] if overlay_compare is None else util.get_list(overlay_compare, split="|")
                     my_overlay_path = ""
@@ -166,7 +169,7 @@ class Overlays:
                         #todo: for Emby transparent PNG, ignore existing poster files
                         poster, background, logo, item_dir, name = self.library.find_item_assets(item)
                         if self.library.EmbyServer:
-                            poster = ImageData("asset_directory", my_overlay_path if has_overlay else "", is_url=False)
+                            poster :ImageData = ImageData("asset_directory", my_overlay_path if has_overlay else "", is_url=False)
                         # poster = ImageData("asset_directory", emby_poster.get("Path"), is_url=False, compare=poster_compare)
                         # background = ImageData("asset_directory", emby_thumb.get("Path"), compare=emby_item.get("ImageTags").get("Thumb"))
                         item_dir = os.path.dirname(poster.location)
@@ -192,7 +195,13 @@ class Overlays:
 
                     changed_image = False
                     poster_compare = None
-                    if poster:
+                    if self.config.server_type == "emby" and has_overlay:
+                        try:
+                            if str(os.stat(my_overlay_path).st_size) != str(image_compare):
+                                changed_image = True
+                        except FileNotFoundError:
+                            changed_image = True
+                    elif poster:
                         poster_compare = poster.compare
                         if poster.compare and str(poster.compare) != str(image_compare):
                             changed_image = True
@@ -200,7 +209,7 @@ class Overlays:
                     if self.library.reapply_overlays or overlay_change or changed_image:
                         try:
                             if not self.library.reapply_overlays and changed_image:
-                                logger.trace("  Overlay Reason: New image detected")
+                                logger.trace(f"  Overlay Reason: New image detected")
                             if overlay_change:
                                 logger.trace(f"  Overlay Reason: Overlay changed {overlay_change}")
 
@@ -231,6 +240,7 @@ class Overlays:
                                     new_poster = new_poster.filter(ImageFilter.GaussianBlur(blur_num))
 
                                 def get_text(text_overlay):
+                                    nonlocal native_emby_data
                                     fresh_emby_item = None
                                     full_text = text_overlay.name[5:-1]
                                     # Detect Provider based on Overlay Image Path
@@ -282,7 +292,11 @@ class Overlays:
                                             actual_value = None
                                             if item_id is not None:
                                                 if fresh_emby_item is None:
-                                                    fresh_emby_item = emby_server.get_item(item_id, force_refresh=True)
+                                                    if native_emby_data:
+                                                        fresh_emby_item = native_emby_data
+                                                    else:
+                                                        fresh_emby_item = emby_server.get_item(item_id, force_refresh=True)
+                                                        native_emby_data = fresh_emby_item
                                                 native_item = fresh_emby_item
                                                 if native_item:
                                                     actual_value = emby_server.get_custom_rating_from_item(native_item, raw=True)
@@ -339,7 +353,7 @@ class Overlays:
                                                         raise Failed("No Trakt Rating Found")
                                                 elif str(format_var).startswith("mdb"):
                                                     mdb_item = None
-                                                    if self.config.MDBList.limit is False:
+                                                    if self.config.MDBList.limit is False and not self.config.MDBList.limit:
                                                         if self.library.is_show and tvdb_id:
                                                             try:
                                                                 use_tvdb_id = tvdb_id
@@ -350,9 +364,9 @@ class Overlays:
                                                                 logger.debug(err)
                                                             except Failed as err:
                                                                 logger.error(str(err))
-                                                            except Exception:
+                                                            except Exception as e:
                                                                 logger.trace(f"TVDb ID: {tvdb_id}")
-                                                                raise
+                                                                logger.debug(f"MDBList Error: {e}")
                                                         if self.library.is_movie and tmdb_id:
                                                             try:
                                                                 mdb_item = self.config.MDBList.get_movie(tmdb_id)
@@ -360,9 +374,9 @@ class Overlays:
                                                                 logger.debug(err)
                                                             except Failed as err:
                                                                 logger.error(str(err))
-                                                            except Exception:
+                                                            except Exception as e:
                                                                 logger.trace(f"TMDb ID: {tmdb_id}")
-                                                                raise
+                                                                logger.debug(f"MDBList Error: {e}")
                                                         if imdb_id and not mdb_item:
                                                             try:
                                                                 mdb_item = self.config.MDBList.get_imdb(imdb_id)
@@ -370,11 +384,14 @@ class Overlays:
                                                                 logger.debug(err)
                                                             except Failed as err:
                                                                 logger.error(str(err))
-                                                            except Exception:
+                                                            except Exception as e:
                                                                 logger.trace(f"IMDb ID: {imdb_id}")
-                                                                raise
-                                                        if not mdb_item:
-                                                            raise Failed(f"No MdbItem for {item.title} (Guid: {item.guid})")
+                                                                logger.debug(f"MDBList Error: {e}")
+                                                        if not mdb_item and self.config.MDBList.limit:
+                                                            logger.warning(f"Overlay Warning: MDBList Limit Reached, skipping {format_var} for {item.title}")
+                                                        elif not mdb_item:
+                                                            # Don't raise Failed, just log warning to allow cache update
+                                                            logger.warning(f"Overlay Warning: No MdbItem for {item.title} (Guid: {item.guid})")
                                                     if format_var == "mdb_average_rating":
                                                         found_rating = mdb_item.average / 10 if mdb_item.average else None
                                                     elif format_var == "mdb_imdb_rating":
@@ -452,8 +469,8 @@ class Overlays:
                                             if found_rating:
                                                 actual_value = found_rating
                                                 logger.trace(f"{format_var}: {actual_value}")
-                                            else:
-                                                raise Failed(f"No {format_var} found for {item_title}")
+                                            elif not self.config.MDBList.limit:
+                                                logger.warning(f"Overlay Warning: No {format_var} found for {item_title}")
                                         elif format_var == "runtime" and text_overlay.level in ["show", "season", "artist", "album"]:
                                             if hasattr(item, "duration") and item.duration:
                                                 actual_value = item.duration
@@ -472,7 +489,11 @@ class Overlays:
                                             actual_value = None
                                             if emby_server and item_id and format_var in ["critic_rating", "audience_rating", "user_rating"]:
                                                 if fresh_emby_item is None:
-                                                    fresh_emby_item = emby_server.get_item(item_id, force_refresh=True)
+                                                    if native_emby_data:
+                                                        fresh_emby_item = native_emby_data
+                                                    else:
+                                                        fresh_emby_item = emby_server.get_item(item_id, force_refresh=True)
+                                                        native_emby_data = fresh_emby_item
                                                 native_item = fresh_emby_item
                                                 if native_item:
                                                     if format_var == "audience_rating":
@@ -496,7 +517,11 @@ class Overlays:
                                                         actual_value = emby_server.get_custom_rating_from_item(native_item,
                                                                                                            raw=True)
                                                 if actual_value is None and fresh_emby_item is None:
-                                                    fresh_emby_item = emby_server.get_item(item_id, force_refresh=True)
+                                                    if native_emby_data:
+                                                        fresh_emby_item = native_emby_data
+                                                    else:
+                                                        fresh_emby_item = emby_server.get_item(item_id, force_refresh=True)
+                                                        native_emby_data = fresh_emby_item
                                                     native_item = fresh_emby_item
                                                     if native_item:
                                                         if format_var == "audience_rating":
@@ -669,7 +694,7 @@ class Overlays:
                                 # self.library.edit_tags("label", item, add_tags=["Overlay"], do_print=False)
                                 # poster_compare =  poster.compare if poster else item.thumb
 
-                                poster_compare = os.stat(temp).st_size  # poster.compare if poster else item.thumb
+                                poster_compare = os.stat(temp).st_size
 
                             logger.info(f"  Overlays Applied {item_id}: {', '.join(over_names)}")
                         except (OSError, BadRequest, SyntaxError) as e:
@@ -679,7 +704,7 @@ class Overlays:
                         logger.info(f"  Overlay Update Not Needed {item_id} (Current Overlays: {', '.join(over_names)})")
 
                     if self.cache and poster_compare:
-                        self.cache.update_image_map(item.ratingKey, f"{self.library.image_table_name}_overlays", item.thumb, poster_compare, overlay='|'.join(compare_names))
+                        self.cache.update_image_map(item.ratingKey, f"{self.library.image_table_name}_overlays", item.thumb, poster_compare, overlay='|'.join(sorted(compare_names)))
                 except Failed as e:
                     logger.error(f"  {e}\n  Overlays Attempted on {item_title}: {', '.join(over_names)}")
                 except Exception as e:
@@ -703,11 +728,50 @@ class Overlays:
 
         for oc in overlay_compare:
             if oc not in compare_names:
-                return f"{oc} not in {compare_names}"
+                # Check for path mismatch (Drive letter vs UNC)
+                match_found = False
+                for cn in compare_names:
+                    if oc == cn:
+                        match_found = True
+                        break
+                    oc_norm = oc.replace("\\", "/")
+                    cn_norm = cn.replace("\\", "/")
+                    prefix_len = 0
+                    for i in range(min(len(oc_norm), len(cn_norm))):
+                        if oc_norm[i] != cn_norm[i]:
+                            break
+                        prefix_len = i
+                    if prefix_len > 10:
+                        oc_rest = oc_norm[prefix_len:]
+                        cn_rest = cn_norm[prefix_len:]
+                        if "/" in oc_rest and "/" in cn_rest and oc_rest.rsplit("/", 1)[-1] == cn_rest.rsplit("/", 1)[-1]:
+                            match_found = True
+                            break
+                if not match_found:
+                    return f"{oc} not in {compare_names}"
 
         for compare_name, original_name in compare_names.items():
             if compare_name not in overlay_compare:
-                return f"{compare_name} not in {overlay_compare}"
+                match_found = False
+                for oc in overlay_compare:
+                    if compare_name == oc:
+                        match_found = True
+                        break
+                    cn_norm = compare_name.replace("\\", "/")
+                    oc_norm = oc.replace("\\", "/")
+                    prefix_len = 0
+                    for i in range(min(len(cn_norm), len(oc_norm))):
+                        if cn_norm[i] != oc_norm[i]:
+                            break
+                        prefix_len = i
+                    if prefix_len > 10:
+                        cn_rest = cn_norm[prefix_len:]
+                        oc_rest = oc_norm[prefix_len:]
+                        if "/" in cn_rest and "/" in oc_rest and cn_rest.rsplit("/", 1)[-1] == oc_rest.rsplit("/", 1)[-1]:
+                            match_found = True
+                            break
+                if not match_found:
+                    return f"{compare_name} not in {overlay_compare}"
             if properties[original_name].updated:
                 return f"{properties[original_name].updated}"
 
@@ -782,6 +846,9 @@ class Overlays:
                         if format_var in overlay.float_vars:
                             real_value = float(real_value)
                             compare_value = float(cached_value)
+                            # Divide by 10 to not trigger false updates. emby 0-100, plex 0-10
+                            if self.config.server_type == "emby" and format_var == "critic_rating":
+                                compare_value /= 10
                         elif format_var in overlay.int_vars:
                             real_value = int(real_value)
                             compare_value = int(cached_value)

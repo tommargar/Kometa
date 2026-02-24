@@ -160,6 +160,7 @@ class MDBList:
             raise Failed("MDBList Error: media_provider, media_type, media_id Required")
 
         expired = None
+        mdb_dict = None
 
         item_url = f"{api_url}{media_provider}/{media_type}/{media_id}/"
 
@@ -167,8 +168,20 @@ class MDBList:
             mdb_dict, expired = self.cache.query_mdb(key, self.expiration)
             if mdb_dict and expired is False:
                 return MDbObj(mdb_dict)
+
+        if self.limit and mdb_dict:
+            # logger.info(f"MDBList Limit reached, using expired cache for {key}")
+            return MDbObj(mdb_dict)
+
         logger.trace(f"ID: {key}")
-        mdb_tuple = self._request(item_url, params={})
+        try:
+            mdb_tuple = self._request(item_url, params={})
+        except LimitReached:
+            if mdb_dict:
+                # logger.info(f"MDBList Limit reached, using expired cache for {key}")
+                return MDbObj(mdb_dict)
+            raise
+
         mdb = MDbObj(mdb_tuple[0])
         if self.cache and not ignore_cache:
             self.cache.update_mdb(expired, key, mdb, self.expiration)

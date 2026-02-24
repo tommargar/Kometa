@@ -106,8 +106,8 @@ filters = {
 }
 tmdb_filters = [
     "original_language", "origin_country", "tmdb_vote_count", "tmdb_vote_average", "tmdb_year", "tmdb_keyword", "tmdb_genre",
-    "first_episode_aired", "last_episode_aired", "last_episode_aired_or_never", "tmdb_status", "tmdb_type", "tmdb_title", "tmdb_rating",
-    "episode_tmdb_vote_count", "episode_tmdb_vote_average", "episode_tmdb_rating"
+    "first_episode_aired", "last_episode_aired", "last_episode_aired_or_never", "tmdb_status", "tmdb_type", "tmdb_title", 
+    "tmdb_rating", "episode_tmdb_vote_count", "episode_tmdb_vote_average", "episode_tmdb_rating"
 ]
 tvdb_filters = ["tvdb_title", "tvdb_status", "tvdb_genre"]
 imdb_filters = ["imdb_keyword"]
@@ -2452,6 +2452,25 @@ class CollectionBuilder:
     def filter_and_save_items(self, ids):
         items = []
         if len(ids) > 0:
+            emby_item_map = {}
+            if hasattr(self.library, "EmbyServer"):
+                rks_to_fetch = list(set([int(i[0]) for i in ids if i[1] == "ratingKey"]))
+                if rks_to_fetch:
+                    try:
+                        fields = [
+                            "Budget", "Chapters", "DateCreated", "Genres", "HomePageUrl", "IndexOptions",
+                            "MediaStreams", "Overview", "ParentId", "Path", "People", "ProductionYear", "PremiereDate", "ProviderIds",
+                            "LockedFields", "PrimaryImageAspectRatio", "Revenue", "SortName", "Studios", "Taglines", "CriticRating",
+                            "CommunityRating", "OfficialRating", "Tags", "TagItems", "RunTimeTicks",
+                            "ProductionLocations", "MediaSources", "OriginalTitle"
+                        ]
+                        results_dict = self.library.EmbyServer.get_items_bulk([str(r) for r in rks_to_fetch], fields=fields)
+                        plex_items = self.library.EmbyServer.convert_emby_to_plex(list(results_dict.values()))
+                        for item in plex_items:
+                            emby_item_map[str(item.ratingKey)] = item
+                    except Exception as e:
+                        logger.error(f"Failed to bulk fetch Emby items: {e}")
+
             total_ids = len(ids)
             logger.debug("")
             logger.debug(f"{total_ids} IDs Found")
@@ -2621,7 +2640,10 @@ class CollectionBuilder:
                         rating_keys = [rating_keys]
                     for rk in rating_keys:
                         try:
-                            item = self.library.fetch_item(rk)
+                            if str(rk) in emby_item_map:
+                                item = emby_item_map[str(rk)]
+                            else:
+                                item = self.library.fetch_item(rk)
                             if self.playlist and isinstance(item, (Show, Season)):
                                 items.extend(item.episodes())
                             elif self.builder_level == "movie" and not isinstance(item, Movie):
@@ -2673,7 +2695,7 @@ class CollectionBuilder:
                         self.found_items.append(item)
                         found_rating_keys.add(item.ratingKey)
                         if self.details["show_unfiltered"] is True:
-                            logger.info(f"{name} {self.Type} | = | {current_title}")
+                            logger.info(f"{name} {self.Type} | * | {current_title}")
                     else:
                         filtered_items.append(item)
                         self.filtered_keys[item.ratingKey] = current_title
@@ -3073,6 +3095,7 @@ class CollectionBuilder:
         amount_unchanged = 0
         items_added = []
         collection_items_keys = [key.ratingKey for key in collection_items]
+        to_be_added = len([x for x in self.found_items if x.ratingKey not in collection_items_keys])
         for i, item in enumerate(self.found_items, 1):
             if self.limit and amount_added + self.beginning_count - len([r for _, r in self.remove_item_map.items() if r is not None]) >= self.limit:
                 logger.info(f"{self.Type} Limit reached")
@@ -3081,7 +3104,9 @@ class CollectionBuilder:
             # Emby
             current_operation = "=" if item.ratingKey in collection_items_keys else "+"
             number_text = f"{i}/{total}"
-            logger.info(f"{number_text:>{spacing}} | {name} {self.Type} | {current_operation} | {util.item_title(item)}")
+            number_text_2 = f"{i}/{to_be_added}"
+            if current_operation == "+":
+                logger.info(f"{number_text_2:>{spacing}} | {name} {self.Type} | {current_operation} | {util.item_title(item)}")
             if item.ratingKey in collection_items_keys:
             # if item in collection_items:
                 self.remove_item_map[item.ratingKey] = None
@@ -3651,8 +3676,7 @@ class CollectionBuilder:
                         logger.error("Metadata: Failed to Update Please delete the collection and run again")
                     logger.info("")
         else:
-            # emby
-            # self.library.item_reload(self.obj)
+            self.library.item_reload(self.obj)
             #self.obj.batchEdits()
             batch_display = "Collection Metadata Edits"
             if summary[1] and str(summary[1]) != str(self.obj.summary):
@@ -3813,6 +3837,16 @@ class CollectionBuilder:
 
         embyserver = self.library.EmbyServer
 
+        # Fetch current item to get LockedFields and ensure we have the latest data
+        try:
+            emby_item = embyserver.get_item(self.obj.ratingKey)
+        except Failed:
+            logger.error(f"Emby Error: Item {self.name} not found")
+            return updated_details
+
+        locked_fields = emby_item.get("LockedFields", [])
+        new_properties = {}
+
         if "summary" in self.summaries:                     summary = ("summary", self.summaries["summary"])
         elif "translation" in self.summaries:               summary = ("translation", self.summaries["translation"])
         elif "tmdb_description" in self.summaries:          summary = ("tmdb_description", self.summaries["tmdb_description"])
@@ -3838,9 +3872,6 @@ class CollectionBuilder:
         elif "tvdb_show_details" in self.summaries:         summary = ("tvdb_show_details", self.summaries["tvdb_show_details"])
         elif "tmdb_show_details" in self.summaries:         summary = ("tmdb_show_details", self.summaries["tmdb_show_details"])
         else:                                               summary = (None, None)
-        # bug: list object coming in from somewhere "sight & sound"
-        # Overview (Summary) aktualisieren
-        # print(self.obj)
 
         if self.playlist:
             if summary[1]:
@@ -3858,30 +3889,19 @@ class CollectionBuilder:
         else:
 
             batch_display = "Collection Metadata Edits"
-            new_properties = {}
             try:
                 if summary[1]:
-                    homepage_url = None
-                    # match = re.search(r"<<homepage_url=(https?://[^\]]+)>>", summary[1])
-                    # if match:
-                    #     homepage_url = match.group(1)
-                        # Entferne die URL aus der Summary
-                        # cleaned_summary = re.sub(r"<<homepage_url=https?://[^\]]+>>\n?", "", summary[1])
-
                     if str(summary[1]) != str(self.obj.summary):
-                    # self.obj.editSummary(summary[1])
-                    # embyserver.set_item_property(self.obj.ratingKey, "Overview", summary[1])
                         new_properties["Overview"] = summary[1]
                         batch_display += f"\nSummary ({summary[0]}) | {summary[1]:<25}"
-                        # if homepage_url:
-                        #     new_properties["ProviderIds"] = {"Website": homepage_url,
-                        #                                      "Homepage": homepage_url,
-                        #                                      "Official Website": homepage_url}
+                        
+                        # Lock Overview to prevent Emby from overwriting it
+                        # if "Overview" not in locked_fields:
+                        #     locked_fields.append("Overview")
             except:
                 raise Warning(f"ERROR: {self.obj} is not a Plex object.")
-            # homepage_url = xxx
-                # SortName (Sortiertitel) aktualisieren
-            # print(self.obj)
+
+            # Sort Title
             if "sort_title" in self.details:
                 new_sort_title = str(self.details["sort_title"])
 
@@ -3907,19 +3927,20 @@ class CollectionBuilder:
                     batch_display += f"\nSort Title | {new_sort_title}"
                     new_properties["ForcedSortName"] = new_sort_title
 
-                    emby_item = embyserver.get_item(self.obj.ratingKey)
-                    locked_fields = emby_item.get("LockedFields", [])
                     if "SortName" not in locked_fields:
                         locked_fields.append("SortName")
-                    new_properties["LockedFields"] = locked_fields
 
-
-            # todo add content rating
-            # if "content_rating" in self.details and str(self.details["content_rating"]) != str(self.obj.contentRating):
-            #     self.obj.editContentRating(self.details["content_rating"])
-            #     batch_display += f"\nContent Rating | {self.details['content_rating']}"
+            # Content Rating (OfficialRating in Emby)
+            if "content_rating" in self.details and str(self.details["content_rating"]) != str(self.obj.contentRating):
+                new_properties["OfficialRating"] = self.details["content_rating"]
+                batch_display += f"\nContent Rating | {self.details['content_rating']}"
+                
+                # if "OfficialRating" not in locked_fields:
+                #     locked_fields.append("OfficialRating")
 
             if len(new_properties.items()) > 0:
+                # Apply locks if we changed anything
+                new_properties["LockedFields"] = locked_fields
                 embyserver.update_item(self.obj.ratingKey, new_properties)
 
             # Tags/Labels in JSON aktualisieren
@@ -3948,73 +3969,25 @@ class CollectionBuilder:
                 logger.info("")
 
 
-            # print(f"EMBY LABELS: {self.obj} - {label_data}")
-
-            # Speichern der Label-Informationen in der JSON-Datei
-            collection_id = self.obj.ratingKey
-            # current_tags = self.details["label"]
-
-            # -----------
-            # todo add / rewrite
-
-            if False:
-                advance_update = False
-                if "collection_mode" in self.details:
-                    if (self.blank_collection and self.created) or int(self.obj.collectionMode) not in plex.collection_mode_keys \
-                            or plex.collection_mode_keys[int(self.obj.collectionMode)] != self.details["collection_mode"]:
-                        if self.blank_collection and self.created:
-                            self.library.collection_mode_query(self.obj, "hide")
-                            logger.info(f"Collection Mode | hide")
-                            self.library.collection_mode_query(self.obj, "default")
-                            logger.info(f"Collection Mode | default")
-                        self.library.collection_mode_query(self.obj, self.details["collection_mode"])
-                        logger.info(f"Collection Mode | {self.details['collection_mode']}")
-                        advance_update = True
-
-                if "collection_filtering" in self.details:
-                    try:
-                        self.library.edit_query(self.obj, {"collectionFilterBasedOnUser": 0 if self.details["collection_filtering"] == "admin" else 1}, advanced=True)
-                        advance_update = True
-                    except NotFound:
-                        logger.error("Collection Error: collection_filtering requires a more recent version of Plex Media Server")
-
-                if "collection_order" in self.details:
-                    if int(self.obj.collectionSort) not in plex.collection_order_keys \
-                            or plex.collection_order_keys[int(self.obj.collectionSort)] != self.details["collection_order"]:
-                        self.library.collection_order_query(self.obj, self.details["collection_order"])
-                        logger.info(f"Collection Order | {self.details['collection_order']}")
-                        advance_update = True
-
-                if "visible_library" in self.details or "visible_home" in self.details or "visible_shared" in self.details:
-                    visibility = self.library.collection_visibility(self.obj)
-                    visible_library = None
-                    visible_home = None
-                    visible_shared = None
-
-                    if "visible_library" in self.details and self.details["visible_library"] != visibility["library"]:
-                        visible_library = self.details["visible_library"]
-
-                    if "visible_home" in self.details and self.details["visible_home"] != visibility["home"]:
-                        visible_home = self.details["visible_home"]
-
-                    if "visible_shared" in self.details and self.details["visible_shared"] != visibility["shared"]:
-                        visible_shared = self.details["visible_shared"]
-
-                    if visible_library is not None or visible_home is not None or visible_shared is not None:
-                        self.library.collection_visibility_update(self.obj, visibility=visibility, library=visible_library, home=visible_home, shared=visible_shared)
-                        advance_update = True
-                        logger.info("Collection Visibility Updated")
-
-                if advance_update and "Metadata" not in updated_details:
-                    updated_details.append("Metadata")
-
-
-            # -------------
-
-
-            # save_labels_to_file(file_path_kometa, kometa_labels)
-            # logger.info(f"Labels updated in JSON for Collection ID {collection_id}")
             updated_details.append("Tag")
+
+            # --- Unsupported / Different in Emby ---
+            # collection_mode: Emby collections are items, "Hide items in library" is a global library setting, not per collection.
+            # collection_filtering: Emby permissions are user-based, not set on the collection item itself.
+            # collection_order: Emby collections usually respect the order added or have client-side sort settings.
+            # visible_...: "Visible on Home" is a user preference in Emby, not a collection property.
+            
+            # if "collection_mode" in self.details:
+            #     logger.warning("Emby Warning: collection_mode is not supported in Emby (Global Library Setting)")
+            
+            # if "collection_filtering" in self.details:
+            #     logger.warning("Emby Warning: collection_filtering is not supported in Emby (User Permissions)")
+
+            # if "collection_order" in self.details:
+            #     logger.warning("Emby Warning: collection_order is not supported via API in the same way as Plex")
+
+            # if "visible_library" in self.details or "visible_home" in self.details or "visible_shared" in self.details:
+            #     logger.warning("Emby Warning: Visibility settings are User Preferences in Emby and cannot be set per collection via API easily")
 
         asset_location = None
         if self.asset_directory:
@@ -4048,45 +4021,28 @@ class CollectionBuilder:
         self.collection_poster = self.library.pick_image(self.original_name, self.posters, self.library.prioritize_assets, self.library.download_url_assets, asset_location)
         self.collection_background = self.library.pick_image(self.original_name, self.backgrounds, self.library.prioritize_assets, self.library.download_url_assets, asset_location, image_type="background")
 
-        # from modules.poster import ImageData
-
-
-        # background = ImageData("asset_directory", os.path.abspath(background_matches[0]), prefix=prefix, image_type="background", is_url=False)
-        #
-        # logo = ImageData("asset_directory", os.path.abspath(logo_matches[0]), prefix=prefix, image_type="logo", is_url=False)
-
-
         # Bilder (Poster/Backdrop) aktualisieren
         if self.collection_poster:
-            # my_emby = self.library.EmbyServer
-            # poster = ImageData("asset_directory", os.path.abspath(poster_matches[0]), prefix=prefix, is_url=False)
-
             uploaded_poster, _, _ = self.library.upload_images(self.obj, poster=self.collection_poster)
-
-
-            # uploaded_poster = my_emby.set_image_smart(self.obj.ratingKey, self.collection_poster.location)
-
-            # if uploaded_poster:
-            #     logger.info(f"Poster updated: {self.collection_poster.location}")
-            #     updated_details.append("Image")
-            # else:
-            #     logger.info(f"Poster update not needed.")
 
 
         if self.collection_background and not "BackdropImageTags" in self.library.EmbyServer.get_item(self.obj.ratingKey):
 
             _, background_uploaded, _ = self.library.upload_images(self.obj, background=self.collection_background)
 
-
-            # uploaded = self.library.EmbyServer.set_image_smart(self.obj.ratingKey,self.collection_background.location, image_type="Backdrop")#.emby_server_url}/Items/{self.obj.ratingKey}/Images/Backdrop"
-            # files = {"image": open(self.collection_background, "rb")}
-            # response = requests.post(url, headers=headers, files=files)
             if background_uploaded:
                 logger.info(f"Backdrop updated: {self.collection_background.location}")
                 updated_details.append("Image")
             else:
                 # pass
                 logger.warning(f"Failed to update Backdrop for {self.name}")
+
+        # Theme Upload
+        # Emby themes are usually file-based (theme.mp3 in folder). API upload for specific theme items is not standard.
+        # if self.url_theme:
+        #     logger.warning("Emby Warning: Theme upload via URL is not supported")
+        # elif self.file_theme:
+        #     logger.warning("Emby Warning: Theme upload via File is not supported (Requires direct file access)")
 
         return updated_details
 

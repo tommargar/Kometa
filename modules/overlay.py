@@ -1,4 +1,4 @@
-import os, re, time, hashlib
+import os, re, time
 from datetime import datetime
 from modules import util
 from modules.util import Failed
@@ -191,11 +191,6 @@ class Overlay:
             raise Failed(f"Overlay Error: horizontal_offset and vertical_offset are required when using a backdrop")
 
         def get_and_save_image(image_url):
-            clean_image_name, _ = util.validate_filename(self.name)
-            url_hash = hashlib.md5(image_url.encode()).hexdigest()
-            image_path = os.path.join(library.overlay_folder, f"{clean_image_name}_{url_hash}.png")
-            if os.path.exists(image_path):
-                return image_path
             response = self.requests.get(image_url)
             if response.status_code == 404:
                 raise Failed(f"Overlay Error: Overlay Image not found at: {image_url}")
@@ -206,6 +201,10 @@ class Overlay:
             if not os.path.exists(library.overlay_folder) or not os.path.isdir(library.overlay_folder):
                 os.makedirs(library.overlay_folder, exist_ok=False)
                 logger.info(f"Creating Overlay Folder found at: {library.overlay_folder}")
+            clean_image_name, _ = util.validate_filename(self.name)
+            image_path = os.path.join(library.overlay_folder, f"{clean_image_name}.png")
+            if os.path.exists(image_path):
+                os.remove(image_path)
             with open(image_path, "wb") as handler:
                 handler.write(response.content)
             while util.is_locked(image_path):
@@ -462,8 +461,6 @@ class Overlay:
                       self.back_line_width, self.stroke_color, self.stroke_width, self.scale_width, self.scale_height]:
             if value is not None:
                 output += f"{value}"
-        if self.path:
-            output += f"{self.path}"
         return output
 
     def has_coordinates(self):

@@ -24,7 +24,7 @@ run_all() {
 # Function to update posters for a specific library
 update_posters() {
     local library="$1"
-    python $BASE_PATH/kometa.py -r -ov -rl "$library"
+    python $BASE_PATH/kometa.py -r -debug -ov -rl "$library"
 }
 
 # Function to update collections for a specific library

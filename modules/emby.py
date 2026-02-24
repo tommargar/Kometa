@@ -785,7 +785,15 @@ class Emby(Library):
             _collect_ids(edits)
         
         if all_ids_to_fetch:
-            self.EmbyServer.get_items_bulk(list(all_ids_to_fetch))
+            # Ensure we fetch all fields needed to preserve item state during update
+            fields = [
+                "Budget", "Chapters", "DateCreated", "Genres", "HomePageUrl", "IndexOptions", "MediaStreams",
+                "Overview", "ParentId", "Path", "People", "ProductionYear", "PremiereDate", "ProviderIds", "LockedFields",
+                "PrimaryImageAspectRatio", "Revenue", "SortName", "Studios", "Taglines", "CriticRating",
+                "CommunityRating", "OfficialRating", "Tags", "TagItems", "RunTimeTicks", "ProductionLocations",
+                "MediaSources", "OriginalTitle"
+            ]
+            self.EmbyServer.get_items_bulk(list(all_ids_to_fetch), fields=fields)
 
         def log_batch(display_attr, total_count, display_value=None, out_type=None, tag_type=None, is_episode=False):
             logger.info(
@@ -1017,7 +1025,8 @@ class Emby(Library):
                 if "ProviderIds" not in entry["update"]:
                     entry["update"]["ProviderIds"] = entry["provider_ids"].copy()
                 entry["update"]["ProviderIds"]["Tmdb"] = str(tmdb_id)
-
+        len_items = len(item_updates)
+        my_index = 1
         # Apply all collected updates to Emby
         for item_id, data in item_updates.items():
             update_payload = dict(data["update"])
@@ -1060,6 +1069,9 @@ class Emby(Library):
             if update_payload:
                 logger.info(f"Updating {item_id}: {update_payload}")
                 self.EmbyServer.update_item(item_id, update_payload)
+            logger.ghost(f"{my_index}/{len_items}")
+            len_items -=1
+            my_index += 1
 
     def needs_collection_mode_update(self, collection, mode):
         return False
@@ -1088,7 +1100,9 @@ class Emby(Library):
                 key = item_to_sort.ratingKey if not (isinstance(item_to_sort, int) or isinstance(item_to_sort, str)) else str(item_to_sort)
                 # must bei str Id
                 item = self.EmbyServer.get_item(key)
-                return item.get("SortName") if sort else item.get("Name")
+                if sort:
+                    return item.get("SortName") or item.get("Name") or ""
+                return item.get("Name") or ""
             except:
                 logger.stacktrace()
                 print(item_to_sort)
@@ -1619,6 +1633,7 @@ class Emby(Library):
             # if len(emby_items) > 0:
             return emby_items
         elif my_search in ['resolution']:
+            # Ensure resolutions are populated
             my_dict = self.EmbyServer.get_resolutions()
             return my_dict
         elif my_search in ['audioLanguage', 'subtitleLanguage']:
@@ -2415,7 +2430,7 @@ class Emby(Library):
                 def sort_value(item):
                     value = item.get(sort_key)
                     if sort_key in ["PremiereDate", "DateCreated"]:
-                        value = self._parse_emby_datetime(value) or datetime.min
+                        value = self._parse_emby_datetime(value) or datetime.min.replace(tzinfo=timezone.utc)
                     elif value is None and sort_key == "Name":
                         value = item.get("SortName") or item.get("Name") or ""
                     elif isinstance(sort_key, str) and "rating" in sort_key.lower():
@@ -2946,6 +2961,7 @@ class Emby(Library):
         self.EmbyServer.cache_filenames(items_data)
         self.EmbyServer.get_resolutions()
 
+        self.EmbyServer.update_cache_with_items(items_data)
         logger.info(f"Loaded {len(items_data)} {builder_level.capitalize()}s from Emby")
         self._emby_all_items_native = items_data
         if native:
@@ -2993,7 +3009,7 @@ class Emby(Library):
     def get_all_native(self, builder_level=None, load = False):
         return self.get_all(builder_level, load, native=True)
 
-    def get_native_emby_item(self, emby_item_id):
+    def get_native_item(self, emby_item_id):
         return self.EmbyServer.get_item(emby_item_id)
         pass
 
@@ -3114,6 +3130,7 @@ class Emby(Library):
 
 
     def reload(self, item, force=False):
+        self.EmbyServer.invalidate_item(item.ratingKey)
         # todo: set dirty
         return item
         pass
@@ -3203,11 +3220,14 @@ class Emby(Library):
 
     def check_filter(self, item, filter_attr, modifier, filter_final, filter_data, current_time):
         filter_actual = attribute_translation[filter_attr] if filter_attr in attribute_translation else filter_attr
+        
+        # Native Emby Item laden für Zugriff auf Rohdaten (Streams, Pfade, etc.)
         if item.ratingKey in self.filter_items_cache:
             emby_item = self.filter_items_cache[item.ratingKey]
         else:
             emby_item = self.EmbyServer.get_item(item.ratingKey)
             self.filter_items_cache[item.ratingKey] = emby_item
+
         if isinstance(item, Movie):
             item_type = "movie"
         elif isinstance(item, Show):
@@ -3224,81 +3244,102 @@ class Emby(Library):
             item_type = "track"
         else:
             return True
-        # item = self.reload(item)
+        
         if filter_attr not in builder.filters[item_type]:
             return True
+        
         elif filter_attr in builder.date_filters:
+            # Emby liefert ISO-Strings, das Plex-Objekt hat diese bereits geparst.
+            # Wir nutzen hier das Plex-Objekt für die Datumslogik.
             if util.is_date_filter(getattr(item, filter_actual), modifier, filter_data, filter_final, current_time):
                 return False
+        
         elif filter_attr in builder.string_filters:
-            #ToDo: most of the stuff for proprietary Emby item not integrated yet
             values = []
+            # Emby nutzt MediaStreams statt item.media.parts.streams
+            media_streams = emby_item.get("MediaStreams", [])
+            
             if filter_attr == "audio_track_title":
-                for media in item.media:
-                    for part in media.parts:
-                        values.extend([a.extendedDisplayTitle for a in part.audioStreams() if a.extendedDisplayTitle])
+                for stream in media_streams:
+                    if stream.get("Type") == "Audio":
+                        title = stream.get("Title") or stream.get("DisplayTitle")
+                        if title:
+                            values.append(title)
             elif filter_attr == "subtitle_track_title":
-                for media in item.media:
-                    for part in media.parts:
-                        values.extend([a.extendedDisplayTitle for a in part.subtitleStreams() if a.extendedDisplayTitle])
+                for stream in media_streams:
+                    if stream.get("Type") == "Subtitle":
+                        title = stream.get("Title") or stream.get("DisplayTitle")
+                        if title:
+                            values.append(title)
             elif filter_attr in ["audio_codec", "audio_profile", "video_codec", "video_profile"]:
-                for media in item.media:
-                    attr = getattr(media, filter_actual)
-                    if attr and attr not in values:
-                        values.append(attr)
-            elif emby_item and filter_attr in ["filepath", "folder"]:
-                values = [emby_item.get("Path")]
-                # values = [loc for loc in item.locations if loc]
+                target_type = "Audio" if "audio" in filter_attr else "Video"
+                key = "Codec" if "codec" in filter_attr else "Profile"
+                for stream in media_streams:
+                    if stream.get("Type") == target_type:
+                        val = stream.get(key)
+                        if val and val not in values:
+                            values.append(val)
+            elif filter_attr in ["filepath", "folder"]:
+                # Emby nutzt 'Path' direkt am Item
+                path = emby_item.get("Path")
+                if path:
+                    values = [path]
             else:
                 test_value = getattr(item, filter_actual)
                 values = [test_value] if test_value else []
+            
             if util.is_string_filter(values, modifier, filter_data):
                 return False
+        
         elif filter_attr in builder.boolean_filters:
             filter_check = False
-            # logger.info(f"filter attribute: {filter_attr}")
             if filter_attr == "has_collection":
-                filter_check = len(item.collections) > 0
-            elif filter_attr == "has_edition": # no edition in Emby, filename regex
-                filter_check = True if item.editionTitle else False
+                # Emby Nativ Check (falls Collections im Item geladen wurden)
+                if "Collections" in emby_item and emby_item["Collections"]:
+                    filter_check = True
+                else:
+                    filter_check = len(item.collections) > 0
+            elif filter_attr == "has_edition":
+                # TODO: Emby native Edition support (waiting for Emby feature)
+                # Check filename via Regex for {edition-Tag}
+                path = emby_item.get("Path")
+                if path and re.search(r"\{edition-[^}]+\}", path, re.IGNORECASE):
+                    filter_check = True
+                # Fallback auf Plex-Objekt
+                elif item.editionTitle:
+                    filter_check = True
             elif filter_attr == "has_stinger":
-                filter_check = False
                 if item.ratingKey in self.movie_rating_key_map and self.movie_rating_key_map[item.ratingKey] in self.config.mediastingers:
                     filter_check = True
             elif filter_attr == "has_overlay":
                 if os.path.exists(os.path.join(self.overlay_destination_folder, item.ratingKey, ".png")):
                     filter_check = True
-                for label in self.item_labels(item):
-                    if label.tag.lower().endswith(" overlay") or label.tag.lower() == "overlay":
+                # Prüfe Emby Tags auf 'Overlay'
+                tags = emby_item.get("Tags", [])
+                for tag in tags:
+                    if tag.lower() == "overlay" or tag.lower().endswith(" overlay"):
                         filter_check = True
                         break
             elif filter_attr == "has_dolby_vision":
-                media_sources = emby_item.get("MediaSources", [])
-                # logger.warning(f"My media: {media_sources}")
-
-                for media in media_sources:
-                    media_streams = media.get("MediaStreams", [])
-                    for stream in media_streams:
-                        if stream.get("VideoRange") == "DolbyVision":
-                            # logger.warning("Found Dolby Vision!")
-                            filter_check = True
-                            break
-
-                # for media in item.media:
-                #     for part in media.parts:
-                #         for stream in part.videoStreams():
-                #             if stream.DOVIPresent:
-                #                 filter_check = True
-                #                 break
+                # Prüfe VideoRange in MediaStreams
+                for stream in emby_item.get("MediaStreams", []):
+                    if stream.get("Type") == "Video" and stream.get("VideoRange") == "DolbyVision":
+                        filter_check = True
+                        break
+            
             if util.is_boolean_filter(filter_data, filter_check):
                 return False
+        
         elif filter_attr == "history":
-            my_date = emby_item.get("PremiereDate")
-            item_date = datetime.fromisoformat(my_date.replace("Z", "+00:00"))
-            # item_date = item.originallyAvailableAt
+            # Emby PremiereDate nutzen
+            premiere_date = emby_item.get("PremiereDate")
+            if not premiere_date:
+                return False
+            item_date = self._parse_emby_datetime(premiere_date)
             if item_date is None:
                 return False
-            elif filter_data == "day":
+            
+            if filter_data == "day":
                 if item_date.month != current_time.month or item_date.day != current_time.day:
                     return False
             elif filter_data == "month":
@@ -3312,17 +3353,19 @@ class Emby(Library):
                         date_match = True
                 if date_match is False:
                     return False
+        
         elif filter_attr in ["seasons", "episodes", "albums", "tracks"]:
             if filter_attr == "seasons":
-                sub_items = item.seasons()
+                sub_items = self.get_seasons(item)
             elif filter_attr == "albums":
                 sub_items = item.albums()
             elif filter_attr == "tracks":
                 sub_items = item.tracks()
             else:
-                episodes = self.EmbyServer.get_items({"ParentId": item.ratingKey}, include_item_types="Episode")
+                # Episodes via Emby API holen
+                episodes = self.EmbyServer.get_items({"ParentId": item.ratingKey, "Recursive": "true"}, include_item_types="Episode")
                 sub_items = self.EmbyServer.convert_emby_to_plex(episodes)
-                # sub_items = item.episodes()
+            
             filters_in = []
             percentage = 60
             for sub_atr, sub_data in filter_data.items():
@@ -3330,6 +3373,7 @@ class Emby(Library):
                     percentage = sub_data
                 else:
                     filters_in.append((sub_atr, sub_data))
+            
             failure_threshold = len(sub_items) * ((100 - percentage) / 100)
             failures = 0
             for sub_item in sub_items:
@@ -3337,71 +3381,125 @@ class Emby(Library):
                     failures += 1
                 if failures > failure_threshold:
                     return False
+        
         elif (filter_attr != "year" and filter_attr in builder.number_filters) or modifier in [".gt", ".gte", ".lt", ".lte", ".count_gt", ".count_gte", ".count_lt", ".count_lte"]:
             test_number = []
+            media_streams = emby_item.get("MediaStreams", [])
+            
             if filter_attr in ["channels", "height", "width", "aspect"]:
                 test_number = 0
-                for media in emby_item.get("MediaStreams", []):
-                    if media.get("Type") == "Video":
-                        if filter_attr in "aspect":
-                            aspect_ratio : str = media.get("AspectRatio", "0:1")
-                            ar = aspect_ratio.split(":")
-                            actual_ar = int(ar[0])/int(ar[1])
-                            if actual_ar > test_number:
-                                test_number = actual_ar
-                else:
-                    logger.error(f"Filter for Emby not integrated: {filter_attr}")
-
-                # for media in item.media:
-                #     attr = getattr(media, filter_actual)
-                #     if attr and attr > test_number:
-                #         test_number = attr
+                for stream in media_streams:
+                    if filter_attr == "channels" and stream.get("Type") == "Audio":
+                        ch = stream.get("Channels")
+                        if ch and ch > test_number:
+                            test_number = ch
+                    elif stream.get("Type") == "Video":
+                        if filter_attr == "height":
+                            h = stream.get("Height")
+                            if h and h > test_number:
+                                test_number = h
+                        elif filter_attr == "width":
+                            w = stream.get("Width")
+                            if w and w > test_number:
+                                test_number = w
+                        elif filter_attr == "aspect":
+                            ar = stream.get("AspectRatio")
+                            if ar:
+                                try:
+                                    if ":" in str(ar):
+                                        parts = ar.split(":")
+                                        val = float(parts[0]) / float(parts[1])
+                                    else:
+                                        val = float(ar)
+                                    if val > test_number:
+                                        test_number = val
+                                except ValueError:
+                                    pass
+            
             elif filter_attr == "stinger_rating":
                 test_number = None
                 if item.ratingKey in self.movie_rating_key_map and self.movie_rating_key_map[item.ratingKey] in self.config.mediastingers:
                     test_number = self.config.mediastingers[self.movie_rating_key_map[item.ratingKey]]
+            
             elif filter_attr == "versions":
-                test_number = len(item.media)
+                # Emby MediaSources statt Plex Media
+                media_sources = emby_item.get("MediaSources", [])
+                test_number = len(media_sources) if media_sources else 1
+            
             elif filter_attr == "audio_language":
-                for stream in emby_item.get("MediaStreams", []):
-                    if stream.get("Type") == "Audio" and stream.get("Language"):
-                        test_number.append(stream.get("Language"))
+                test_number = []
+                for stream in media_streams:
+                    if stream.get("Type") == "Audio":
+                        lang = stream.get("Language")
+                        if lang:
+                            test_number.append(lang)
+            
             elif filter_attr == "subtitle_language":
-                for stream in emby_item.get("MediaStreams", []):
-                    if stream.get("Type") == "Subtitle" and stream.get("Language"):
-                        test_number.append(stream.get("Language"))
+                test_number = []
+                for stream in media_streams:
+                    if stream.get("Type") == "Subtitle":
+                        lang = stream.get("Language")
+                        if lang:
+                            test_number.append(lang)
+            
             elif filter_attr == "duration":
-                test_number = getattr(item, filter_actual)
-                if test_number:
-                    test_number /= 60000
+                # Emby RunTimeTicks (10k ticks = 1ms) zu Minuten
+                ticks = emby_item.get("RunTimeTicks")
+                if ticks:
+                    test_number = ticks / 600000000
+                else:
+                    test_number = 0
             else:
                 test_number = getattr(item, filter_actual)
+            
             if modifier in [".count_gt", ".count_gte", ".count_lt", ".count_lte"]:
                 test_number = len(test_number) if test_number else 0
                 modifier = f".{modifier[7:]}"
+            
             if test_number is None or util.is_number_filter(test_number, modifier, filter_data):
                 return False
+        
         else:
             attrs = []
+            media_streams = emby_item.get("MediaStreams", [])
+            
             if filter_attr in ["resolution", "audio_language", "subtitle_language"]:
                 if filter_attr == "audio_language":
-                    for stream in emby_item.get("MediaStreams", []):
-                        if stream.get("Type") == "Audio" and stream.get("Language"):
-                            attrs.append(emby_lang_map.get(stream.get("Language"), stream.get("Language")))
+                    for stream in media_streams:
+                        if stream.get("Type") == "Audio":
+                            lang = stream.get("Language")
+                            if lang:
+                                attrs.append(emby_lang_map.get(lang, lang))
                 elif filter_attr == "subtitle_language":
-                    for stream in emby_item.get("MediaStreams", []):
-                        if stream.get("Type") == "Subtitle" and stream.get("Language"):
-                            attrs.append(emby_lang_map.get(stream.get("Language"), stream.get("Language")))
+                    for stream in media_streams:
+                        if stream.get("Type") == "Subtitle":
+                            lang = stream.get("Language")
+                            if lang:
+                                attrs.append(emby_lang_map.get(lang, lang))
                 elif filter_attr == "resolution":
-                    for media in item.media:
-                        attrs.append(media.videoResolution)
+                    # Emby hat keine direkte Resolution String Property. Wir leiten sie von Breite und Höhe ab.
+                    for stream in media_streams:
+                        if stream.get("Type") == "Video":
+                            w = stream.get("Width")
+                            h = stream.get("Height")
+                            if w and h:
+                                if w >= 3800 or h >= 2100: res = "4k"
+                                elif w >= 1900 or h >= 1000: res = "1080p"
+                                elif w >= 1200 or h >= 700: res = "720p"
+                                elif w >= 700 or h >= 480: res = "480p"
+                                else: res = "sd"
+                                attrs.append(res)
+            
             elif filter_attr in ["content_rating", "year", "rating"]:
                 attrs = [getattr(item, filter_actual)]
             elif filter_attr in ["actor", "country", "director", "genre", "label", "producer", "composer", "writer",
                                  "collection", "network"]:
-                attrs = [attr.tag for attr in getattr(item, filter_actual)]
+                val = getattr(item, filter_actual)
+                if val:
+                    attrs = [attr.tag for attr in val]
             else:
                 raise Failed(f"Filter Error: filter: {filter_final} not supported")
+            
             if modifier == ".regex":
                 has_match = False
                 for reg in filter_data:

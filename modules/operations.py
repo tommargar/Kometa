@@ -568,36 +568,44 @@ class Operations:
                     new_genres = []
                     extra_option = None
                     if self.library.mass_genre_update:
+                        merge_genres = "merge" in self.library.mass_genre_update
                         for option in self.library.mass_genre_update:
+                            if option == "merge":
+                                continue
                             if option in ["lock", "unlock", "remove", "reset"]:
                                 extra_option = option
                                 break
                             try:
+                                temp_genres = []
                                 if option == "tmdb":
-                                    new_genres = tmdb_obj().genres  # noqa
+                                    temp_genres = tmdb_obj().genres  # noqa
                                 elif option == "imdb":
-                                    new_genres = self.config.IMDb.get_genres(imdb_id)
+                                    temp_genres = self.config.IMDb.get_genres(imdb_id)
                                 elif option == "omdb":
-                                    new_genres = omdb_obj().genres  # noqa
+                                    temp_genres = omdb_obj().genres  # noqa
                                 elif option == "tvdb":
-                                    new_genres = tvdb_obj().genres  # noqa
+                                    temp_genres = tvdb_obj().genres  # noqa
                                 elif str(option) in anidb.weights:
-                                    new_genres = [str(t).title() for t, w in anidb_obj().tags.items() if
+                                    temp_genres = [str(t).title() for t, w in anidb_obj().tags.items() if
                                                   w >= anidb.weights[str(option)]]  # noqa
                                 elif option == "mal":
-                                    new_genres = mal_obj().genres  # noqa
+                                    temp_genres = mal_obj().genres  # noqa
                                 elif option == "mal_all":
-                                    new_genres = mal_obj().genres + mal_obj().explicit_genres + mal_obj().themes + mal_obj().demographics  # noqa
+                                    temp_genres = mal_obj().genres + mal_obj().explicit_genres + mal_obj().themes + mal_obj().demographics  # noqa
                                 else:
-                                    new_genres = option
-                                if new_genres:
-                                    new_genres = [g for g in new_genres if str(g).strip()]
-                                if not new_genres:
+                                    temp_genres = option
+                                if temp_genres:
+                                    temp_genres = [g for g in temp_genres if str(g).strip()]
+                                if not temp_genres:
                                     logger.info(f"No {option} Genres Found")
                                     raise Failed
-                                break
+                                new_genres.extend(temp_genres)
+                                if not merge_genres:
+                                    break
                             except Failed:
                                 continue
+                        if merge_genres and new_genres:
+                            new_genres = list(dict.fromkeys(new_genres))
 
                     # item_genres = [g.tag for g in item.genres]
                     item_genres = (emby_item.get("Genres", []) if emby_item else [])
@@ -612,6 +620,10 @@ class Operations:
                             else:
                                 mapped_genres.append(genre)
                         new_genres = mapped_genres
+
+                    if new_genres:
+                        new_genres = list(dict.fromkeys(new_genres))
+
                     _add = list(set(new_genres) - set(item_genres))
                     _remove = list(set(item_genres) - set(new_genres))
 

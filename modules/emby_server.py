@@ -29,36 +29,6 @@ import unicodedata
 # https://dev.emby.media/doc/restapi/Browsing-the-Library.html
 # https://docs.mdblist.com/docs/api
 
-# New class (in developent) for replacing fake Palex objects
-class EmbyItem:
-    def __init__(self, base_item):
-        pass
-
-    def update_item_info(self, update_date):
-        pass
-
-
-class PlexMedia:
-    def __init__(self, name, server_id, item_id, runtime_ticks, provider_ids, media_type, image_tags,
-                 backdrop_image_tags):
-        self.name = name
-        self.title = name
-        self.server_id = server_id
-        self.ratingKey = item_id
-        self.runtime_ticks = runtime_ticks
-        self.provider_ids = provider_ids
-        self.media_type = media_type
-        self.image_tags = image_tags
-        self.backdrop_image_tags = backdrop_image_tags
-        # self.guid =
-        # self.smart = True # needed
-
-    def __repr__(self):
-        media_type = getattr(self, "media_type", None) or "unknown"
-        rating_key = getattr(self, "ratingKey", None) or "?"
-        title = getattr(self, "title", None) or getattr(self, "name", None) or "unnamed"
-        return f"<PlexMedia {media_type}:{rating_key} {title}>"
-
 class Movie(Movie):
     def __init__(self, data):
         xml_data = self._dict_to_xml(data)
@@ -199,11 +169,6 @@ class Person(Movie):
             element.set('agent', 'com.plexapp.agents.imdb')  # Oder den entsprechenden Agenten
 
         return element
-
-
-class EmbyConfig:
-    X_EMBY_CONTAINER_SIZE = 50  # Definiere die Standardgröße für die Anzahl der Elemente
-
 
 class EmbyServer:
 
@@ -499,6 +464,7 @@ class EmbyServer:
         return response.json().get("Items", [])
 
 
+    # TODO: Check if we can use MediaStreams from cache instead of filenames for better accuracy
     def get_resolutions(self):
         """
         Fetches years for all items in the database and caches the results.
@@ -513,7 +479,7 @@ class EmbyServer:
             if self.library_id:
                 try:
                     items = self.get_items(
-                        params={"ParentId": self.library_id},
+                        params={"ParentId": self.library_id, "Recursive": "true"},
                         fields="Path",
                     )
                 except Exception as exc:  # pragma: no cover - defensive logging only
@@ -524,24 +490,6 @@ class EmbyServer:
 
             if not self.file_names:
                 return []
-        # MinWidth
-        # MinHeight
-
-        # my_resolutions = {
-        #     "4k": "(?i)2160|4k",
-        #     "1080p": "(?i)1080|2k",
-        #     "720p": "(?i)\\b720\\b|\\bHD(?!R)\\b",
-        #     "576p": "(?i)576",
-        #     "480p": "(?i)480|sd",
-        #     # HDR
-        #     "hdr": r"(?i)\bHDR10\b",  # HDR
-        #
-        #     "plus": r'(?i)\bhdr10(\+|p(lus)?\b)',  # HDR10+
-        #     "dvhdr": r'(?i)\bdv(.hdr10?\b)',  # DV HDR10
-        #     "dvhdrplus": r'(?i)\bdv.HDR10(\+|P(lus)?\b)',  # DV HDR10+
-        # }
-
-
 
         resolution_patterns = {
             "4k": [r"(?i)(?<!\w)(?:4k|2160p|uhd)(?!\w)"],
@@ -576,19 +524,45 @@ class EmbyServer:
         all_choices = []
         found_canonical_keys: set[str] = set()
 
-        for file_key, file_name in self.file_names.items():
-            if not file_name:
-                continue
-            for resolution_key, patterns in resolution_patterns.items():
-                for pattern in patterns:
-                    if _re.search(pattern, file_name):
-                        bucket = self.media_by_resolution.setdefault(resolution_key, [])
-                        if file_key not in bucket:
-                            bucket.append(file_key)
-                        if resolution_key not in found_canonical_keys:
-                            all_choices.append(FilterChoiceEmby(key=resolution_key, title=resolution_key))
-                            found_canonical_keys.add(resolution_key)
-                        break
+        # Use cached items to determine resolution from MediaStreams if available
+        for item_id, item_data in self._items_cache.items():
+            res_found = False
+            # Try to find resolution in MediaStreams (More accurate)
+            media_streams = item_data.get("MediaStreams", [])
+            for stream in media_streams:
+                if stream.get("Type") == "Video":
+                    w = stream.get("Width")
+                    h = stream.get("Height")
+                    if w and h:
+                        res = None
+                        if w >= 3800 or h >= 2100: res = "4k"
+                        elif w >= 1900 or h >= 1000: res = "1080p"
+                        elif w >= 1200 or h >= 700: res = "720p"
+                        elif w >= 700 or h >= 480: res = "480p"
+                        else: res = "sd" # 480p/576p bucket
+                        
+                        if res:
+                            self.media_by_resolution.setdefault(res, []).append(item_id)
+                            if res not in found_canonical_keys:
+                                all_choices.append(FilterChoiceEmby(key=res, title=res))
+                                found_canonical_keys.add(res)
+                            res_found = True
+                    break # Only check first video stream
+            
+            # Fallback to filename regex if no MediaStream info
+            if not res_found and item_id in self.file_names:
+                file_name = self.file_names[item_id]
+                if file_name:
+                    for resolution_key, patterns in resolution_patterns.items():
+                        for pattern in patterns:
+                            if _re.search(pattern, file_name):
+                                bucket = self.media_by_resolution.setdefault(resolution_key, [])
+                                if item_id not in bucket:
+                                    bucket.append(item_id)
+                                if resolution_key not in found_canonical_keys:
+                                    all_choices.append(FilterChoiceEmby(key=resolution_key, title=resolution_key))
+                                    found_canonical_keys.add(resolution_key)
+                                break
 
         return all_choices
 
@@ -1354,6 +1328,32 @@ class EmbyServer:
         if item_id_int is not None:
             self.cached_plex_objects.pop(item_id_int, None)
 
+    def update_cache_with_items(self, items: list[dict]):
+        """
+        Manually pushes a list of items into the cache.
+        Useful when items are fetched via bulk queries (e.g. get_all).
+        """
+        now = time.time()
+        for it in items:
+            it_id = str(it.get("Id") or "")
+            if not it_id:
+                continue
+            
+            keys = set(it.keys())
+            
+            if it_id in self._items_cache:
+                self._items_cache[it_id].update(it)
+                self._items_cache_fields[it_id] |= keys
+            else:
+                self._items_cache[it_id] = it
+                self._items_cache_fields[it_id] = keys
+            
+            self._items_cache_ts[it_id] = now
+            try:
+                self.dirty_items.discard(int(it_id))
+            except (TypeError, ValueError):
+                pass
+
     def invalidate_item(self, item_id: int | str) -> None:
         """Von außen aufrufen, wenn du ein Item (z.B. Genres) geändert hast."""
 
@@ -1385,23 +1385,39 @@ class EmbyServer:
     # ToDo: Merge with fetch_item, also merge item cache
     def get_item(self, item_id: int | str, *, force_refresh: bool = False) -> dict | None:
         try:
-            item_id = int(item_id)
+            item_id_int = int(item_id)
+            item_id_str = str(item_id)
         except: # will be triggered if item doesnt exist yet
             return None
 
-        if not force_refresh and item_id in self.item_cache and item_id not in self.dirty_items:
-            return self.item_cache[item_id]
+        # Check cache freshness
+        is_dirty = item_id_int in self.dirty_items
+        cached_item = self.item_cache.get(item_id_str)
+        
+        if not force_refresh and not is_dirty and cached_item:
+            # Optional: Check TTL here if desired, currently assuming cache is valid unless dirty/forced
+            return cached_item
 
-        endpoint = f"/emby/users/{self.user_id}/Items/{item_id}?api_key={self.api_key}"
+        endpoint = f"/emby/users/{self.user_id}/Items/{item_id_str}?api_key={self.api_key}"
         url = self.emby_server_url + endpoint
+        
+        headers = self.headers.copy()
+        if cached_item and "Etag" in cached_item:
+            headers["If-None-Match"] = cached_item["Etag"]
+
         try:
-            resp = self.session.get(url, headers=self.headers)
+            resp = self.session.get(url, headers=headers)
+            
+            if resp.status_code == 304:
+                self._items_cache_ts[item_id_str] = time.time()
+                self.dirty_items.discard(item_id_int)
+                return cached_item
+
             resp.raise_for_status()
             data = resp.json()
-            self.item_cache[item_id] = data
-            self.cached_plex_objects.pop(str(item_id), None)
-            self.cached_plex_objects.pop(item_id, None)
-            self.dirty_items.discard(item_id)  # wieder „sauber“
+            self.update_cache_with_items([data])
+            self.cached_plex_objects.pop(item_id_str, None)
+            self.cached_plex_objects.pop(item_id_int, None)
             return data
         except Exception as e:
             logger.ghost(f"Error occurred while getting item: {e}. URL: {url}.")
@@ -3966,7 +3982,11 @@ class EmbyServer:
 
         # 1) Aufteilen in bekannte (frisch + Feld-Superset) und nachzuladende IDs
         to_fetch: list[str] = []
+        k = 1
+        id_length = len(fetch_ids_all)
         for id_ in fetch_ids_all:
+            logger.trace(f"Emby bulk cache retrieval {k}/{id_length}")
+            k+=1
             try:
                 id_int = int(id_)
             except (TypeError, ValueError):
