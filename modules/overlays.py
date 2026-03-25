@@ -41,7 +41,7 @@ class Overlays:
             key_to_overlays, properties = self.compile_overlays()
         ignore_list = [rk for rk in key_to_overlays]
 
-        if self.config.server_type == "plex":
+        if self.library.mc_type == "plex":
             # I guess this block contains Plex legacy stuff
             old_overlays = [la for la in self.library.Plex.listFilterChoices("label") if str(la.title).lower().endswith(" overlay")]
             if old_overlays:
@@ -135,7 +135,7 @@ class Overlays:
 
                     overlay_compare = [] if overlay_compare is None else util.get_list(overlay_compare, split="|")
                     my_overlay_path = ""
-                    if self.config.server_type == "emby":
+                    if self.library.mc_type == "emby":
                         my_overlay_path = os.path.join(self.library.overlay_destination_folder, f"{item.ratingKey}.{self.library.overlay_artwork_filetype}")
                         has_overlay = os.path.exists(my_overlay_path)
                     else:
@@ -195,7 +195,7 @@ class Overlays:
 
                     changed_image = False
                     poster_compare = None
-                    if self.config.server_type == "emby" and has_overlay:
+                    if self.library.mc_type == "emby" and has_overlay:
                         try:
                             if str(os.stat(my_overlay_path).st_size) != str(image_compare):
                                 changed_image = True
@@ -216,7 +216,7 @@ class Overlays:
                             # canvas_width = emby_poster.get('Width', 0)
                             # canvas_height = emby_poster.get('Height',0)
                             canvas_width, canvas_height = overlay.get_canvas_size(item)
-                            if self.config.server_type == "emby" and isinstance(item, Episode):
+                            if self.library.mc_type == "emby" and isinstance(item, Episode):
                                 try:
                                     emby_item = emby_server.get_item(item.ratingKey)
                                     if emby_item and "PrimaryImageAspectRatio" in emby_item:
@@ -847,7 +847,7 @@ class Overlays:
                             real_value = float(real_value)
                             compare_value = float(cached_value)
                             # Divide by 10 to not trigger false updates. emby 0-100, plex 0-10
-                            if self.config.server_type == "emby" and format_var == "critic_rating":
+                            if self.library.mc_type == "emby" and format_var == "critic_rating":
                                 compare_value /= 10
                         elif format_var in overlay.int_vars:
                             real_value = int(real_value)
@@ -979,7 +979,7 @@ class Overlays:
         return key_to_overlays, properties
 
     def get_overlay_items(self, label="Overlay", libtype=None, ignore=None):
-        if self.config.server_type == "plex":
+        if self.library.mc_type == "plex":
             items = self.library.search(label=label, libtype=libtype)
             return items if not ignore else [o for o in items if o.ratingKey not in ignore]
 

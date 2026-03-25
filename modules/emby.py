@@ -1259,8 +1259,6 @@ class Emby(Library):
         return [(item.ratingKey, "ratingKey") for item in items]
 
 
-    def item_has_year(self, item):
-        return hasattr(item, "year") and item.year is not None
 # ToDo - Untested, develop; use this with db cache instead of set_image_smart
     def _upload_image(self, item, image):
         """Uploads an image (poster, background, or logo) to Emby."""
@@ -3009,9 +3007,8 @@ class Emby(Library):
     def get_all_native(self, builder_level=None, load = False):
         return self.get_all(builder_level, load, native=True)
 
-    def get_native_item(self, emby_item_id):
-        return self.EmbyServer.get_item(emby_item_id)
-        pass
+    def get_native_item(self, item_id):
+        return self.EmbyServer.get_item(item_id)
 
     def smart_filter(self, collection):
         smart_filter = self.get_collection(collection).content

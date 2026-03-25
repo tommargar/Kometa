@@ -160,11 +160,11 @@ class Jellyfin(Library):
         """
         return []
 
-    def get_native_item(self, emby_item_id):
+    def get_native_item(self, item_id):
         """
         Get the raw JSON response for an item from Jellyfin.
-        
-        :param emby_item_id: The Jellyfin Item ID.
+
+        :param item_id: The Jellyfin Item ID.
         :return: JSON dict.
         """
         return None
@@ -201,12 +201,6 @@ class Jellyfin(Library):
         Check if a collection needs its display mode updated.
         """
         return False
-
-    def item_has_year(self, item):
-        """
-        Check if an item has a year set.
-        """
-        return hasattr(item, "year") and item.year is not None
 
     def get_provider_ids(self, item):
         """

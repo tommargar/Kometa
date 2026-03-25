@@ -70,6 +70,11 @@ libraries:
       ...
 ```
 
+!!! important "One Server per Library"
+    Each library is bound to exactly **one** media server instance. A single library definition cannot span multiple Emby (or Plex) servers simultaneously.
+
+    Mixed configurations are supported at the **config level** — you can have some libraries pointing to a Plex server and others pointing to an Emby server within the same `config.yml`. However, you cannot configure a single library to be backed by more than one server at once.
+
 ### Authentication
 Emby authentication requires both an `api_key` and a `user_id`. This differs from Plex which uses a token.
 

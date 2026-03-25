@@ -395,7 +395,7 @@ class Library(ABC):
     def get_episodes(self, season):
         pass
     @abstractmethod
-    def get_native_item(self, emby_item_id):
+    def get_native_item(self, item_id):
         pass
 
     @abstractmethod
@@ -418,9 +418,8 @@ class Library(ABC):
     def needs_collection_mode_update(self, collection, mode):
         pass
 
-    @abstractmethod
     def item_has_year(self, item):
-        pass
+        return hasattr(item, "year") and item.year is not None
 
     def add_additions(self, collection, items, is_movie):
         self._add_to_file("Added", collection, items, is_movie)
@@ -502,11 +501,16 @@ class Library(ABC):
                 guid = item.guid
             if key not in self.movie_rating_key_map and key not in self.show_rating_key_map:
                 if isinstance(item, tuple):
+                    # Legacy (key, guid) tuple format — cache-only lookup
                     item_type, check_id = self.config.Convert.scan_guid(guid)
                     id_type, main_id, imdb_id, _ = self.config.Convert.ids_from_cache(key, guid, item_type, check_id, self)
-                else: # Emby
-                    mydata = self.get_provider_ids(item)
-                    id_type, main_id, imdb_id = self.config.Convert.get_id(item, self, mydata)
+                else:
+                    # PlexAPI item objects or Emby items.
+                    # get_provider_ids() returns [imdb, tvdb, tmdb] for Emby and None for Plex.
+                    # Convert.get_id() uses the Emby path when provider_ids is truthy,
+                    # and falls back to Plex GUID scanning when it is None.
+                    provider_ids = self.get_provider_ids(item)
+                    id_type, main_id, imdb_id = self.config.Convert.get_id(item, self, provider_ids)
                 if main_id:
                     if id_type == "movie":
                         if len(main_id) > 1:

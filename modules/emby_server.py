@@ -74,12 +74,21 @@ class Show(Show):
 
 class Season(Season):
     def __init__(self, data):
+        self._series_id = data.get('seriesId')
+        self._series_name = data.get('parentTitle', '')
         xml_data = self._dict_to_xml(data)
         super().__init__(None, xml_data)
         self._loadData(xml_data)
 
     def show(self):
-        pass
+        show_data = {
+            'ratingKey': self._series_id or self.ratingKey,
+            'title': self._series_name,
+            'titleSort': self._series_name,
+            'guid': self._series_id or self.ratingKey,
+            'type': 'series',
+        }
+        return Show(show_data)
 
     @staticmethod
     def _dict_to_xml(data_dict):
@@ -88,16 +97,27 @@ class Season(Season):
             if value is not None:
                 element.set(key, str(value))
         if 'agent' not in data_dict or not data_dict['agent']:
-            element.set('agent', 'com.plexapp.agents.thetvdb')  # Oder den entsprechenden Agenten
-
+            element.set('agent', 'com.plexapp.agents.thetvdb')
         return element
 
 
 class Episode(Episode):
     def __init__(self, data):
+        self._series_id = data.get('seriesId')
+        self._series_name = data.get('seriesName') or data.get('grandparentTitle', '')
         xml_data = self._dict_to_xml(data)
         super().__init__(None, xml_data)
         self._loadData(xml_data)
+
+    def show(self):
+        show_data = {
+            'ratingKey': self._series_id or self.ratingKey,
+            'title': self._series_name,
+            'titleSort': self._series_name,
+            'guid': self._series_id or self.ratingKey,
+            'type': 'series',
+        }
+        return Show(show_data)
 
     @staticmethod
     def _dict_to_xml(data_dict):
@@ -132,10 +152,6 @@ class Collection(Collection):
                 element.set(key, str(value))
         return element
 
-    def items(self):
-        """ Returns a list of all items in the collection. """
-        return self._items
-
 
 
 class Audio:
@@ -153,22 +169,21 @@ class Audio:
                 element.set(key, str(value))
         return element
 
-class Person(Movie):
+
+class Person:
+    """Minimal wrapper for Emby Person items.
+
+    Does NOT inherit from PlexAPI Movie to avoid isinstance(person, Movie) being True,
+    which would cause person objects to be processed as movies throughout builder/operations.
+    """
     def __init__(self, data):
-        xml_data = self._dict_to_xml(data)
-        super().__init__(xml_data)
-        self._loadData(xml_data)
-
-    @staticmethod
-    def _dict_to_xml(data_dict):
-        element = Element('Person')
-        for key, value in data_dict.items():
-            if value is not None:
-                element.set(key, str(value))
-        if 'agent' not in data_dict or not data_dict['agent']:
-            element.set('agent', 'com.plexapp.agents.imdb')  # Oder den entsprechenden Agenten
-
-        return element
+        self.ratingKey = data.get('ratingKey')
+        self.title = data.get('title', '')
+        self.titleSort = data.get('titleSort') or self.title
+        self.guid = data.get('guid', self.ratingKey)
+        self.year = data.get('year')
+        self.type = 'person'
+        self.thumb = data.get('posterUrl', '')
 
 class EmbyServer:
 
@@ -1939,17 +1954,19 @@ class EmbyServer:
 
                     pass
                 elif item.get("Type") == "Season":
-                    new_data={
+                    new_data = {
                         'index': item.get('IndexNumber'),
-                        'parentTitle': item.get('SeriesName')
+                        'parentTitle': item.get('SeriesName'),
+                        'seriesId': item.get('SeriesId'),
                     }
                     data.update(new_data)
-                    pass
                 elif item.get("Type") == "Episode":
-                    new_data={
+                    new_data = {
                         'index': item.get('IndexNumber'),
                         'parentIndex': item.get('ParentIndexNumber'),
-                        'parentTitle': item.get('SeasonName')
+                        'parentTitle': item.get('SeasonName'),
+                        'seriesId': item.get('SeriesId'),
+                        'seriesName': item.get('SeriesName'),
                     }
                     data.update(new_data)
 

@@ -863,6 +863,22 @@ class Plex(Library):
         else:
             item.uploadLogo(filepath=image)
 
+    def upload_poster_overlay(self, item, image, url=False):
+        return self.upload_poster(item, image, url=url)
+
+    def get_all_native(self, builder_level=None, load=False):
+        return self.get_all(builder_level, load)
+
+    def get_native_item(self, item_id):
+        return self.fetchItem(item_id)
+
+    def get_provider_ids(self, item):
+        return None
+
+    def needs_collection_mode_update(self, collection, mode):
+        return int(collection.collectionMode) not in collection_mode_keys \
+            or collection_mode_keys[int(collection.collectionMode)] != mode
+
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type(Failed))
     def get_actor_id(self, name):
         results = self.Plex.hubSearch(name)
