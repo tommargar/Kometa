@@ -250,6 +250,26 @@ class EmbyServer:
         self.year_cache = {}
         self.library_id = None
 
+        # Validate user_id: if a username was entered instead of a numeric/GUID ID,
+        # auto-resolve it to the actual ID so API calls don't fail with HTTP 500.
+        users = self.get_users()
+        if users:
+            known_ids = {u["Id"] for u in users}
+            if user_id not in known_ids:
+                match = next((u for u in users if u.get("Name") == user_id), None)
+                if match:
+                    logger.warning(
+                        f"Emby user_id '{user_id}' is a username, not a User ID. "
+                        f"Automatically resolved to ID '{match['Id']}'. "
+                        f"Please update your config.yml to use the ID directly."
+                    )
+                    self.user_id = match["Id"]
+                else:
+                    logger.warning(
+                        f"Emby user_id '{user_id}' was not found in the list of Emby users. "
+                        f"Available users: {[u.get('Name') for u in users]}"
+                    )
+
         if library_name:
             for s in self.get_libraries():
                 if s["Name"] == library_name:
