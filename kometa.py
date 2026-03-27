@@ -811,58 +811,7 @@ def run_libraries(config):
 def run_collection(config, library, metadata, requested_collections):
     logger.info("")
 
-    all_items = requested_collections.items()
-    new_collections = {}
-
-    for key, value in requested_collections.items():
-        try:
-            templates = value['template']
-        except:
-            raise Failed(f"Error getting template from {value}")
-        has_allowed_libraries = any('allowed_libraries' in template for template in templates)
-
-        # import copy
-        # new_key = f"{library.name} {key}"
-        # new_value = copy.deepcopy(value)
-        # for template in new_value['template']:
-        # # Update 'translation_key'
-        #     if 'translation_key' in template:
-        #         template['translation_key'] = f"{library.name} {template['translation_key']}"
-
-        new_collections[key] = value
-
-
-        # if has_allowed_libraries:
-            # Keep the item as is
-            # new_collections[new_key] = value
-        # For entries without 'allowed_libraries', create new entries
-        # new_key = f"{key} {library.name}"
-        # new_value = copy.deepcopy(value)
-        # for lib_type in [library.name]:
-            # Deep copy the value to modify
-            # Update 'variables' key
-            # new_value['variables']['key'] = f"{value['variables']['key']}_{lib_type}s"
-            # Update 'allowed_libraries' in 'shared' template
-            # Find the 'shared' template dict
-            # new_value['postfix'] = f" {'Movies' if lib_type == 'movie' else 'Shows'}"
-            # for template in new_value['template']:
-            #     if template['name'] == 'shared':
-            #         template['allowed_libraries'] = lib_type
-                    # Update 'translation_key'
-                    # if 'translation_key' in template:
-                    #     template['translation_key'] = f"{template['translation_key']}_{lib_type}s"
-            # Add the new item to new_collections
-
-    # Now, when iterating over new_collections, use .items()
-    # for mapping_name, collection_attrs in new_collections.items():
-    #     print(f"Mapping Name: {mapping_name}")
-    #     print(f"Collection Attributes: {collection_attrs}")
-    #     print("-" * 40)
-    # print(all_items)
-
-    # print(new_collections)
-
-    for mapping_name, collection_attrs in new_collections.items():
+    for mapping_name, collection_attrs in requested_collections.items():
         collection_start = datetime.now()
         if run_args["tests"] and ("test" not in collection_attrs or collection_attrs["test"] is not True):
             no_template_test = True
