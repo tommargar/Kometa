@@ -222,7 +222,7 @@ class EmbyServer:
         self.cached_locations = {}
         self.cached_people = {}
         self.cached_studios = {}
-        self.cached_provider_ids={}
+
         self.file_names = {}
         self._file_names_fetch_attempted = False
         self._false_friend_names: set[str] | None = None
@@ -614,8 +614,6 @@ class EmbyServer:
             self.cached_people[item.get('Id')] = item.get('People')
             self.cached_locations[item.get('Id')] = item.get('ProductionLocations')  # Meet english
             self.cached_runtime[item.get('Id')] = item.get('RunTimeTicks')
-            self.cached_provider_ids[item.get('Id')] = item.get('ProviderIds')
-
         return
         if not self.library_id:
             return
@@ -1023,14 +1021,8 @@ class EmbyServer:
 
     def get_provider_ids(self, item):
 
-        if str(item.ratingKey) in self.cached_provider_ids:
-            current_provider_ids = self.cached_provider_ids[str(item.ratingKey)]
-        else:
-            emby_item = self.get_item(item.ratingKey)
-
-            # item_type = ""
-            # Hole die existierenden ProviderIds
-            current_provider_ids = emby_item.get("ProviderIds", {})
+        emby_item = self.get_item(item.ratingKey)
+        current_provider_ids = emby_item.get("ProviderIds", {}) if emby_item else {}
 
         normalized_prov_ids = {key.lower(): value for key, value in current_provider_ids.items()}
 
@@ -1194,11 +1186,9 @@ class EmbyServer:
                 # Increment the start index for the next batch
                 start_index += batch_size
 
-            except:# requests.exceptions.RequestException as e:
-                logger.error(f"Error occurred while getting items in collection ID {collection_id}.")
-                # print(f"Error occurred while getting items in collection ID {collection_id}: {e}")
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Error occurred while getting items in collection ID {collection_id}: {e}")
                 return []
-                break
 
         if native:
             return items
@@ -1422,7 +1412,7 @@ class EmbyServer:
         try:
             item_id_int = int(item_id)
             item_id_str = str(item_id)
-        except: # will be triggered if item doesnt exist yet
+        except (ValueError, TypeError):
             return None
 
         # Check cache freshness
@@ -2144,10 +2134,6 @@ class EmbyServer:
 
         if provider_ids != provider_ids_original:
             data["ProviderIds"] = provider_ids
-            if provider_ids:
-                self.cached_provider_ids[str(item_id)] = provider_ids
-            else:
-                self.cached_provider_ids.pop(str(item_id), None)
 
         if "CriticRating" in data:
             try:
@@ -3547,8 +3533,6 @@ class EmbyServer:
             response.raise_for_status()
         except Exception as err:
             raise Failed(f"Failed to demote Emby person {emby_person_id}: {err}") from err
-
-        self.cached_provider_ids.pop(str(emby_person_id), None)
 
         try:
             logger.info(

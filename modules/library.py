@@ -1,8 +1,6 @@
 import os, time
 from abc import ABC, abstractmethod
 
-import requests
-
 from modules import util
 from modules.meta import MetadataFile, OverlayFile
 from modules.operations import Operations
@@ -336,7 +334,6 @@ class Library(ABC):
                         continue
 
                     if attr in ["style_data", f"url_{image_type}"] and download_url_assets and item_dir:
-                        requests.delete()
                         if "asset_directory" in images:
                             return images["asset_directory"]
                         else:

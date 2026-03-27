@@ -1103,9 +1103,9 @@ class Emby(Library):
                 if sort:
                     return item.get("SortName") or item.get("Name") or ""
                 return item.get("Name") or ""
-            except:
+            except Exception:
                 logger.stacktrace()
-                print(item_to_sort)
+                logger.error(f"Error sorting item: {item_to_sort}")
             return item_to_sort.titleSort if sort else item_to_sort.title
 
 
@@ -1829,24 +1829,22 @@ class Emby(Library):
                         for item in _items:
                             # Füge ein Label hinzu
                             self.EmbyServer.add_tags(item.ratingKey,[collection])
-                            self._invalidate_metadata_caches(item.ratingKey)
-
                                 # add_label(kometa_labels, item.ratingKey, collection)
                                 # save_labels_to_file(file_path_kometa, kometa_labels)
                         rating_keys = [item.ratingKey for item in _items]
                         added = self.EmbyServer.add_to_collection(collection, rating_keys)
                         if not added:
                             self.EmbyServer.create_collection(collection, rating_keys, locked=locked, parent_id=self.Emby.get("Id"))
-
+                        self._invalidate_metadata_caches()
 
                     else:
                         for item in _items:
                             # Entferne ein Label (JSON-basiert)
                             self.EmbyServer.remove_tags(item.ratingKey, [collection])
-                            self._invalidate_metadata_caches(item.ratingKey)
                             # remove_label(kometa_labels, item.ratingKey, collection)
                             # save_labels_to_file(file_path_kometa, kometa_labels)
                         self.EmbyServer.add_remove_plex_object_from_collection(collection, _items, 'delete')
+                        self._invalidate_metadata_caches()
 
                 # Traditionelle Sammlungen (BoxSets in Emby)
                 elif add:
@@ -1855,15 +1853,14 @@ class Emby(Library):
                     # Sammlung erstellen oder Medien hinzufügen
                     if not added:
                         self.EmbyServer.create_collection(collection, rating_keys, locked=locked, parent_id= self.Emby.get("Id"))
-                    for rating_key in rating_keys:
-                        self._invalidate_metadata_caches(rating_key)
+                    self._invalidate_metadata_caches()
                 else:
                     # Tags entfernen und Sammlung löschen
                     for item in _items:
                         self.EmbyServer.remove_tags(item.ratingKey, [collection])
-                        self._invalidate_metadata_caches(item.ratingKey)
                     # self.EmbyServer.remove_boxset(collection, collection_id)
                     self.EmbyServer.add_remove_plex_object_from_collection(collection, items, 'delete')
+                    self._invalidate_metadata_caches()
 
         # for _items, locked in [(locked_items, True), (unlocked_items, False)]:
         #     if _items:
@@ -2824,13 +2821,9 @@ class Emby(Library):
 
         all_shows = None
         if is_show:
-            all_shows= []
-            # only the show is requestes
-            series_ids = {item.get("SeriesId") for item in items if item.get("SeriesId")}
-            for my_id in series_ids:
-                my_series = self.EmbyServer.get_item(my_id)
-                if my_series:
-                    all_shows.append(my_series)
+            series_ids = list({item.get("SeriesId") for item in items if item.get("SeriesId")})
+            if series_ids:
+                all_shows = list(self.EmbyServer.get_items_bulk(series_ids).values())
 
         if all_shows:
             my_output= self.EmbyServer.convert_emby_to_plex(all_shows)
@@ -2839,16 +2832,8 @@ class Emby(Library):
         # Convert Emby items to Plex format
         # Used for Emby to retrieve the person and add to collection
         if additional_person_search:
-            people = []
             valid_ids = [pid for pid in additional_person_search if pid.isdigit()]
-            if valid_ids:
-                # Warm up cache with bulk fetch if available
-                if hasattr(self.EmbyServer, "get_items_bulk"):
-                    self.EmbyServer.get_items_bulk(valid_ids)
-                for add_p in valid_ids:
-                    person = self.EmbyServer.get_item(add_p)
-                    if person:
-                        people.append(person)
+            people = list(self.EmbyServer.get_items_bulk(valid_ids).values()) if valid_ids else []
             plex_person = self.EmbyServer.convert_emby_to_plex(people, False)
             if plex_person:
                 my_output.extend(plex_person)
