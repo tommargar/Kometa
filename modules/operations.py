@@ -149,9 +149,11 @@ class Operations:
             ep_lock_edits = {}
             ep_unlock_edits = {}
 
-            # Emby cast and crew update list; in dev as too slow and unreliable
             people_alias_revert = []
-            emby_payload = {}
+            emby_payload = {}  # populated but not yet consumed; kept for future use
+
+            if self.library.mc_type == "emby" and self.library.mass_cast_and_crew_update:
+                self.library.EmbyServer.cleanup_stuck_aliases()
 
             trakt_user_ratings = None
 
@@ -913,8 +915,7 @@ class Operations:
                                     break
                                 except Failed:
                                     continue
-                # Cast and crew stuff. in dev, working poorly
-                if False:  # do_cast_update and self.library.is_movie and tmdb_id:  # mass_cast_and_crew_update
+                if self.library.mc_type == "emby" and self.library.mass_cast_and_crew_update and tmdb_id:
                     try:
                         tmdb_item = tmdb_obj()
                     except Failed:
@@ -1300,7 +1301,7 @@ class Operations:
                         self.library.EmbyServer.dirty_items = set()
                     self.library.EmbyServer.dirty_items.update(modified_ids)
 
-            # Emby cast + crew, might be removed
+            # Revert any pre-existing aliases detected by sync_people Phase E
             if people_alias_revert and len(people_alias_revert) > 1:
                 dedup = []
                 seen = set()  # Key pro Aktion

@@ -126,6 +126,7 @@ class Library(ABC):
         self.content_rating_mapper = params["content_rating_mapper"]
         self.changes_webhooks = params["changes_webhooks"]
         self.split_duplicates = params["split_duplicates"] # TODO: Here or just in Plex?
+        self.mass_cast_and_crew_update = params.get("mass_cast_and_crew_update", False)
         self.stats = {"created": 0, "modified": 0, "deleted": 0, "added": 0, "unchanged": 0, "removed": 0, "radarr": 0, "sonarr": 0, "names": []}
         self.status = {}
         self.plex_bulk_edit_batch_size = params["plex_bulk_edit_batch_size"]
@@ -137,7 +138,8 @@ class Library(ABC):
                                                or self.mass_episode_audience_rating_update or self.mass_episode_critic_rating_update or self.mass_episode_user_rating_update \
                                                or self.mass_content_rating_update or self.mass_originally_available_update or self.mass_added_at_update or self.mass_original_title_update\
                                                or self.mass_imdb_parental_labels or self.genre_mapper or self.content_rating_mapper or self.mass_studio_update\
-                                               or self.radarr_add_all_existing or self.sonarr_add_all_existing or self.mass_poster_update or self.mass_background_update else False
+                                               or self.radarr_add_all_existing or self.sonarr_add_all_existing or self.mass_poster_update or self.mass_background_update \
+                                               or self.mass_cast_and_crew_update else False
         self.library_operation = True if self.items_library_operation or self.delete_collections or self.mass_collection_mode \
                                          or self.radarr_remove_by_tag or self.sonarr_remove_by_tag or self.show_unmanaged or self.show_unconfigured \
                                          or self.metadata_backup or self.update_blank_track_titles else False

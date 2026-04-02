@@ -883,7 +883,6 @@ def run_collection(config, library, metadata, requested_collections):
                 beginning_count = builder.beginning_count if builder.beginning_count is not None else 0
                 if len(builder.found_items) > 0 and len(
                         builder.found_items) + beginning_count >= builder.minimum and builder.build_collection:
-                    xtest= 1
                     items_added, items_unchanged = builder.add_to_collection()
                     library.stats["added"] += items_added
                     library.status[str(mapping_name)]["added"] = items_added

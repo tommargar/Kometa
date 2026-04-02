@@ -153,6 +153,7 @@ library_operations = {
     "mass_collection_mode": "mass_collection_mode", "mass_poster_update": "dict", "mass_background_update": "dict",
     "metadata_backup": "dict", "delete_collections": "dict", "genre_mapper": "dict", "content_rating_mapper": "dict",
     "plex_bulk_edit_batch_size": "int",
+    "mass_cast_and_crew_update": "bool",
 }
 
 class ConfigFile:

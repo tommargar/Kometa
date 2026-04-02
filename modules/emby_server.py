@@ -3541,6 +3541,59 @@ class EmbyServer:
         except Exception:
             pass
 
+    def cleanup_stuck_aliases(self) -> int:
+        """
+        Bereinigt Personen, deren Name durch einen abgebrochenen sync_people-Lauf
+        einen temporären Alias-Suffix trägt (z.B. 'Tom Holland-1136406' → 'Tom Holland').
+
+        Bedingung: Name endet auf '-<digits>' UND ProviderIds['Tmdb'] == jene Digits.
+        Gibt die Anzahl bereinigter Einträge zurück.
+        """
+        import re as _re_alias
+        self._ensure_http_session()
+        params = {"Fields": "ProviderIds", "api_key": self.api_key}
+        try:
+            r = self.session.get(
+                f"{self.emby_server_url}/emby/Persons",
+                headers=self.headers, params=params, timeout=60,
+            )
+            r.raise_for_status()
+            items = r.json().get("Items", [])
+        except Exception as e:
+            logger.warning(f"[cleanup_stuck_aliases] Fehler beim Abrufen der Personen: {e}")
+            return 0
+
+        pattern = _re_alias.compile(r"^(?P<clean>.+)-(?P<tid>\d+)$")
+        fixed = 0
+        for person in items:
+            name = (person.get("Name") or "").strip()
+            m = pattern.match(name)
+            if not m:
+                continue
+            clean_name = m.group("clean").strip()
+            tid_from_name = m.group("tid")
+            if not clean_name:
+                continue
+            provider_ids = person.get("ProviderIds") or {}
+            tmdb_in_emby = str(provider_ids.get("Tmdb") or provider_ids.get("tmdb") or "").strip()
+            if tmdb_in_emby != tid_from_name:
+                continue
+            pid = str(person.get("Id") or "")
+            if not pid:
+                continue
+            try:
+                self.update_item(pid, {"Name": clean_name})
+                logger.info(f"[cleanup_stuck_aliases] '{name}' → '{clean_name}' (pid={pid})")
+                fixed += 1
+            except Exception as e:
+                logger.warning(f"[cleanup_stuck_aliases] Fehler bei pid={pid} '{name}': {e}")
+
+        if fixed:
+            logger.info(f"[cleanup_stuck_aliases] {fixed} stuck alias(es) bereinigt.")
+        else:
+            logger.debug("[cleanup_stuck_aliases] Keine stuck aliases gefunden.")
+        return fixed
+
     # ==== build_emby_people_from_tmdb: unverändert in Logik, aber ohne unnötige Requests ====
     def build_emby_people_from_tmdb(self, my_cast, my_crew, provider: str = "tmdb"):
         """
@@ -4548,28 +4601,40 @@ class EmbyServer:
                 changed = True
 
         if need_item_update:
-            # 1) Aliase setzen (nur wenn nötig; idempotent)
-            for emby_pid, (alias_name, clean_name, tid) in temp_renames.items():
-                # idempotent: nur schreiben, wenn Name != alias_name
-                cur_info = self._bulk_person_cache.get(str(emby_pid)) or {}
-                cur_name_now = (cur_info.get("Name") or "").strip()
-                if cur_name_now != alias_name:
-                    if not self.update_item(emby_pid, {"Id": emby_pid, "Name": alias_name, "ProviderIds": {"Tmdb": tid}}):
-                        continue
-                    # Cache aktualisieren, um Folge-Calls zu sparen
-                    cur_info = dict(cur_info)
-                    cur_info["Name"] = alias_name
-                    cur_info["ProviderIds"] = {"Tmdb": tid}
-                    self._bulk_person_cache[str(emby_pid)] = cur_info
-                    log["aliases_prepared"].append((emby_pid, alias_name))
-                    changed = True
+            aliases_applied = []  # (emby_pid, clean_name, tid) – nur tatsächlich umbenannte
+            try:
+                # 1) Aliase setzen (nur wenn nötig; idempotent)
+                for emby_pid, (alias_name, clean_name, tid) in temp_renames.items():
+                    cur_info = self._bulk_person_cache.get(str(emby_pid)) or {}
+                    cur_name_now = (cur_info.get("Name") or "").strip()
+                    if cur_name_now != alias_name:
+                        if not self.update_item(emby_pid, {"Id": emby_pid, "Name": alias_name, "ProviderIds": {"Tmdb": tid}}):
+                            continue
+                        cur_info = dict(cur_info)
+                        cur_info["Name"] = alias_name
+                        cur_info["ProviderIds"] = {"Tmdb": tid}
+                        self._bulk_person_cache[str(emby_pid)] = cur_info
+                        log["aliases_prepared"].append((emby_pid, alias_name))
+                        changed = True
+                        aliases_applied.append((emby_pid, clean_name, tid))
 
-                _add_alias_revert(str(emby_pid), alias_name, clean_name, str(tid) if tid is not None else None)
-
-            # 2) Film-Update EXAKT (kein Merge), aber nur wenn wirklich unterschiedlich
-            _hard_replace_people(emby_item["Id"], people_payload)
-            log["item_updated"] = True
-            changed = True
+                # 2) Film-Update EXAKT (kein Merge)
+                _hard_replace_people(emby_item["Id"], people_payload)
+                log["item_updated"] = True
+                changed = True
+            finally:
+                # Aliase immer sofort zurücksetzen – auch bei Fehler kein stuck alias
+                for emby_pid, clean_name, tid in aliases_applied:
+                    try:
+                        provider_ids = {"Tmdb": str(tid)} if tid else {}
+                        self.update_item(emby_pid, {"Id": emby_pid, "Name": clean_name, "ProviderIds": provider_ids})
+                        cached = dict(self._bulk_person_cache.get(str(emby_pid)) or {})
+                        cached["Name"] = clean_name
+                        if provider_ids:
+                            cached["ProviderIds"] = provider_ids
+                        self._bulk_person_cache[str(emby_pid)] = cached
+                    except Exception as _e_revert:
+                        logger.warning(f"[sync_people] Alias-Revert fehlgeschlagen pid={emby_pid}: {_e_revert}")
 
 
         # ---------- PHASE E: Name-Fixes (nur sammeln; keine Sofort-Updates) ----------

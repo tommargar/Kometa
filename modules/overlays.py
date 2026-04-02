@@ -28,9 +28,11 @@ class Overlays:
 
         key_to_overlays = {}
         properties = {}
+        pre_warmed_ids: set = set()
         if not self.library.remove_overlays:
             emby_server = getattr(self.library, "EmbyServer", None)
             if emby_server and emby_server.dirty_items:
+                pre_warmed_ids = set(emby_server.dirty_items)
                 logger.info("")
                 logger.separator(f"Refreshing {len(emby_server.dirty_items)} Dirty Items for the {self.library.name} Library")
                 logger.info("")
@@ -110,7 +112,7 @@ class Overlays:
                         item_id_int = None
 
                     force_refresh = bool(self.library.overlay_refresh_emby_items)
-                    perform_refresh = force_refresh or (item_id_int is not None and item_id_int in emby_server.dirty_items)
+                    perform_refresh = force_refresh or (item_id_int is not None and (item_id_int in emby_server.dirty_items or item_id_int in pre_warmed_ids))
 
                     if perform_refresh:
                         refreshed_data = emby_server.get_item(item_id, force_refresh=force_refresh or item_id_int in emby_server.dirty_items)
@@ -295,7 +297,7 @@ class Overlays:
                                                     if native_emby_data:
                                                         fresh_emby_item = native_emby_data
                                                     else:
-                                                        fresh_emby_item = emby_server.get_item(item_id, force_refresh=True)
+                                                        fresh_emby_item = emby_server.get_item(item_id)
                                                         native_emby_data = fresh_emby_item
                                                 native_item = fresh_emby_item
                                                 if native_item:
@@ -492,7 +494,7 @@ class Overlays:
                                                     if native_emby_data:
                                                         fresh_emby_item = native_emby_data
                                                     else:
-                                                        fresh_emby_item = emby_server.get_item(item_id, force_refresh=True)
+                                                        fresh_emby_item = emby_server.get_item(item_id)
                                                         native_emby_data = fresh_emby_item
                                                 native_item = fresh_emby_item
                                                 if native_item:
@@ -520,7 +522,7 @@ class Overlays:
                                                     if native_emby_data:
                                                         fresh_emby_item = native_emby_data
                                                     else:
-                                                        fresh_emby_item = emby_server.get_item(item_id, force_refresh=True)
+                                                        fresh_emby_item = emby_server.get_item(item_id)
                                                         native_emby_data = fresh_emby_item
                                                     native_item = fresh_emby_item
                                                     if native_item:
