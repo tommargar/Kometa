@@ -297,7 +297,7 @@ class Overlays:
                                                     if native_emby_data:
                                                         fresh_emby_item = native_emby_data
                                                     else:
-                                                        fresh_emby_item = emby_server.get_item(item_id)
+                                                        fresh_emby_item = emby_server.get_item(item_id, force_refresh=True)
                                                         native_emby_data = fresh_emby_item
                                                 native_item = fresh_emby_item
                                                 if native_item:
@@ -494,7 +494,7 @@ class Overlays:
                                                     if native_emby_data:
                                                         fresh_emby_item = native_emby_data
                                                     else:
-                                                        fresh_emby_item = emby_server.get_item(item_id)
+                                                        fresh_emby_item = emby_server.get_item(item_id, force_refresh=True)
                                                         native_emby_data = fresh_emby_item
                                                 native_item = fresh_emby_item
                                                 if native_item:
@@ -509,7 +509,7 @@ class Overlays:
                                                 actual_value = getattr(item, actual_attr, None)
 
                                             if actual_value is None and emby_server and item_id:
-                                                native_item = emby_server.get_item(item_id)
+                                                native_item = emby_server.get_item(item_id, force_refresh=True)
                                                 if native_item:
                                                     if format_var == "audience_rating":
                                                         actual_value = native_item.get("CommunityRating")
@@ -522,7 +522,7 @@ class Overlays:
                                                     if native_emby_data:
                                                         fresh_emby_item = native_emby_data
                                                     else:
-                                                        fresh_emby_item = emby_server.get_item(item_id)
+                                                        fresh_emby_item = emby_server.get_item(item_id, force_refresh=True)
                                                         native_emby_data = fresh_emby_item
                                                     native_item = fresh_emby_item
                                                     if native_item:

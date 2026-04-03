@@ -1427,7 +1427,8 @@ class EmbyServer:
         url = self.emby_server_url + endpoint
         
         headers = self.headers.copy()
-        if cached_item and "Etag" in cached_item:
+        # Don't use Etag if force_refresh or item is dirty - we need actual fresh data
+        if cached_item and "Etag" in cached_item and not force_refresh and not is_dirty:
             headers["If-None-Match"] = cached_item["Etag"]
 
         try:
@@ -3696,7 +3697,7 @@ class EmbyServer:
         ]
 
         # --- IDs sammeln (aus bereits gecachten Listen) ---
-        tmdb_ids = [c.get("person_id") for c in (cast_filtered + crew_filtered) if c.get("person_id")]
+        tmdb_ids = [c.get("id") for c in (cast_filtered + crew_filtered) if c.get("id")]
         tmdb_ids = [int(t) for t in tmdb_ids if str(t).isdigit()]
 
         # --- 1) DB-Cache vorwärmen: emby_id + alias ---
@@ -3825,8 +3826,11 @@ class EmbyServer:
         # =================
         # ----- CAST ------
         # =================
+
+
+
         for c in (cast_filtered or []):
-            tmdb_id = c.get("person_id")
+            tmdb_id = c.get("id")
             name = c.get("name")
             role = c.get("character") or None
             if not tmdb_id or not name:
@@ -3896,7 +3900,7 @@ class EmbyServer:
         # ----- CREW ------
         # =================
         for m in (crew_filtered or []):
-            tmdb_id = m.get("person_id")
+            tmdb_id = m.get("id")
             name = m.get("name")
             mapped = map_job(m.get("job"))
             if not (tmdb_id and name and mapped):
@@ -3947,7 +3951,8 @@ class EmbyServer:
 
         desired = []
         desired.extend(ordered_cast)
-        for t in ("Director", "Writer", "Producer", "Composer", "Conductor", "Lyricist"):
+
+        for t in crew_buckets.keys(): # ("Director", "Writer", "Producer", "Composer", "Conductor", "Lyricist"):
             bucket = crew_buckets[t]
             if bucket:
                 bucket.sort(key=crew_bucket_sort_key)
@@ -4931,9 +4936,9 @@ class EmbyServer:
         if not name:
             # 2) Alias
             name = self._tmdb_person_alias_latin(tmdb_person_id)
-        if not name:
-            # 3) Lokale Transliteration (optional)
-            name = self._romanize_local(original_name or "")
+        # if not name:
+        #     # 3) Lokale Transliteration (optional)
+        #     name = self._romanize_local(original_name or "")
 
         # Validieren: wirklich latinisch?
         if name and self._is_latin_string(name):
