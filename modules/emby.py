@@ -483,6 +483,7 @@ class Emby(Library):
         self.clean_bundles = params["emby"].get("clean_bundles", False)
         self.empty_trash = params["emby"].get("empty_trash", False)
         self.optimize = params["emby"].get("optimize", False)
+        self.library_tags = params.get("library_tags", True)  # Default True for backward compatibility
         self._search_choices_cache = {}
         # unused end
         # Setup Requests session
@@ -639,6 +640,7 @@ class Emby(Library):
         """
         Updates a smart collection based on the provided URI arguments (filters).
         Calculates which items to add or remove to match the filter criteria.
+        Skips update if collection membership unchanged (cache-aware).
         """
         logger.debug(f"Smart Collection Test: {uri_args}")
         new_items = self.fetchItems(uri_args)
@@ -647,15 +649,17 @@ class Emby(Library):
         current_items = collection.items()
         add_items, remove_items, keep_items = self.calculate_add_remove_items(new_items, current_items)
 
+        total = len(add_items) + len(remove_items)
 
-        # return
+        # Cache check: if no changes, skip update
+        if total == 0:
+            logger.info(f"Smart Collection {collection.title}: No changes (all {len(keep_items)} items match filter)")
+            return
 
         logger.info("")
         logger.separator(f"Syncing SmartEmby Collection {collection.title} {self.type}", space=False, border=False)
         logger.info("")
 
-
-        total = len(add_items) + len(remove_items)
         spacing = len(str(total)) * 2 + 1
 
         # Log added items
@@ -672,13 +676,11 @@ class Emby(Library):
             logger.info(
                 f"{number_text:>{spacing}} | {collection.title} {self.type} | {current_operation} | {util.item_title(item)}")
 
-        if len(remove_items) >0:
+        if len(remove_items) > 0:
             # Remove items from Emby collection
             self.EmbyServer.add_remove_plex_object_from_collection(collection.title, remove_items, 'delete', collection_id = collection.ratingKey)
-            # print(f"Removed {len(remove_items)} from Emby {collection.title} ")
-        if len(add_items) >0:
+        if len(add_items) > 0:
             self.EmbyServer.add_remove_plex_object_from_collection(collection.title, add_items, 'add', collection_id = collection.ratingKey)
-            # print(f"Added {len(add_items)} to Emby {collection.title} ")
 
         logger.exorcise()
         logger.info("")
@@ -1822,15 +1824,12 @@ class Emby(Library):
             if _items:
                 # Smart Label Collection (verwende JSON-basierte Labels)
                 if smart_label_collection:
+                    use_tags = self.library_tags if hasattr(self, 'library_tags') else True  # Default to tagging if not specified
                     if add:
-                        # add / remove collection tag/label
-                        # ToDo: Remove the tags for smart label collections
-                        # if False:
-                        for item in _items:
-                            # Füge ein Label hinzu
-                            self.EmbyServer.add_tags(item.ratingKey,[collection])
-                                # add_label(kometa_labels, item.ratingKey, collection)
-                                # save_labels_to_file(file_path_kometa, kometa_labels)
+                        # Add items to collection with optional tagging
+                        if use_tags:
+                            for item in _items:
+                                self.EmbyServer.add_tags(item.ratingKey, [collection])
                         rating_keys = [item.ratingKey for item in _items]
                         added = self.EmbyServer.add_to_collection(collection, rating_keys)
                         if not added:
@@ -1838,11 +1837,10 @@ class Emby(Library):
                         self._invalidate_metadata_caches()
 
                     else:
-                        for item in _items:
-                            # Entferne ein Label (JSON-basiert)
-                            self.EmbyServer.remove_tags(item.ratingKey, [collection])
-                            # remove_label(kometa_labels, item.ratingKey, collection)
-                            # save_labels_to_file(file_path_kometa, kometa_labels)
+                        # Remove items from collection with optional tag cleanup
+                        if use_tags:
+                            for item in _items:
+                                self.EmbyServer.remove_tags(item.ratingKey, [collection])
                         self.EmbyServer.add_remove_plex_object_from_collection(collection, _items, 'delete')
                         self._invalidate_metadata_caches()
 

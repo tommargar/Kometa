@@ -1285,6 +1285,7 @@ class ConfigFile:
                         "verify_ssl": check_for_attribute(lib, "verify_ssl", parent="emby", var_type="bool", default=self.general["emby"]["verify_ssl"], default_is_none=True, save=False),
                         "db_cache": check_for_attribute(lib, "db_cache", parent="emby", var_type="int", default=self.general["emby"]["db_cache"], default_is_none=True, save=False)
                     }
+                    params["library_tags"] = check_for_attribute(lib, "library_tags", parent="settings", var_type="bool", default=True, save=False)
 
                     for attr in ["clean_bundles", "empty_trash", "optimize"]:
                         try:

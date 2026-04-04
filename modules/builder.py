@@ -318,15 +318,15 @@ class CollectionBuilder:
             logger.debug(f"Value: {self.data[methods['translation_key']]}")
             translation_key = str(self.data[methods["translation_key"]])
             if translation_key not in english["collections"]:
-                raise Failed(f"{self.Type} Error: translation_key: {translation_key} is invalid")
-
-            en_name = english["collections"][translation_key]["name"]
-            en_summary = english["collections"][translation_key]["summary"]
-            if translation_key in translations["collections"]:
-                if "name" in translations["collections"][translation_key]:
-                    trans_name = translations["collections"][translation_key]["name"]
-                if "summary" in translations["collections"][translation_key]:
-                    trans_summary = translations["collections"][translation_key]["summary"]
+                logger.warning(f"Config Warning: translation_key: {translation_key} not found in translations. Collection will proceed without automatic translations.")
+            else:
+                en_name = english["collections"][translation_key]["name"]
+                en_summary = english["collections"][translation_key]["summary"]
+                if translation_key in translations["collections"]:
+                    if "name" in translations["collections"][translation_key]:
+                        trans_name = translations["collections"][translation_key]["name"]
+                    if "summary" in translations["collections"][translation_key]:
+                        trans_summary = translations["collections"][translation_key]["summary"]
             if "translation_prefix" in methods and self.data[methods["translation_prefix"]]:
                 logger.debug("")
                 logger.debug("Validating Method: translation_prefix")
