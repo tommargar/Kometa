@@ -6,7 +6,7 @@ hide:
 ---
 # Library Attributes
 
-Within the [Configuration File](overview.md), the `libraries` attribute specifies the media server libraries (Plex or Emby) that the user wants Kometa to act on.
+Within the [Configuration File](overview.md), the `libraries` attribute specifies the Plex libraries that the user wants Kometa to act on.
 
 Attributes are used to instruct Kometa what actions to take, such as "load the following libraries" or "execute the following Collection Definition files".
 These attributes can be specified individually per library, or can be inherited from the global value if it has been set.
@@ -491,53 +491,6 @@ The available attributes for each library are as follows:
           optimize: false
         ...
         ```
-
-??? blank "`emby` - Used to override global [`emby` attributes](emby.md) for this library only.<a class="headerlink" href="#emby" title="Permanent link">¶</a>"
-
-    <div id="emby" />Used to override global [`emby` attributes](emby.md) for this library only.
-
-    **`emby` Attribute is required either here or globally when using Emby as your media server.**
-
-    !!! important "One Server per Library"
-        Each library is bound to exactly **one** media server — either Plex or Emby. A single library cannot span multiple server instances simultaneously.
-
-        Mixed configurations are supported at the config level: some libraries can point to a Plex server while others point to an Emby server. However, within a single library definition you may only specify one `plex` **or** one `emby` block, not both.
-
-    <hr style="margin: 0px;">
-
-    **Attribute:** `emby`
-
-    **Accepted Values:** Any [`emby`](emby.md) attribute that overrides a global value.
-
-    **Default Value:** Global Value
-
-    ???+ example "Example"
-
-        ```yaml
-        libraries:
-          Movies_Plex:
-            library_name: Movies
-            collection_files:
-              - file: config/Movies.yml
-            plex:
-              url: http://192.168.1.12:32400
-              token: PLEX_TOKEN
-          Movies_Emby:
-            library_name: Movies
-            collection_files:
-              - file: config/Movies.yml
-            emby:
-              url: http://192.168.1.10:8096
-              api_key: EMBY_API_KEY
-              user_id: EMBY_USER_ID
-        ...
-        emby:
-          url: http://192.168.1.10:8096
-          api_key: EMBY_API_KEY
-          user_id: EMBY_USER_ID
-        ```
-
-        * In this example, `"Movies_Plex"` uses its library-level `plex` block, while `"Movies_Emby"` overrides the global `emby` block. Each library is backed by exactly one server.
 
 ??? blank "`radarr` - Used to override global [`radarr` attributes](radarr.md) for this library only.<a class="headerlink" href="#radarr" title="Permanent link">¶</a>"
 

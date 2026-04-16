@@ -1,8 +1,12 @@
-import os, re, time
+import os
+import re
+import time
+from datetime import datetime, timedelta
+
 from arrapi import ArrException
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
-from modules import anidb, anilist, icheckmovies, imdb, letterboxd, mal, mojo, plex, radarr, reciperr, sonarr, tautulli, tmdb, trakt, tvdb, mdblist, util
+from modules import anidb, anilist, icheckmovies, imdb, letterboxd, mal, mojo, plex, radarr, sonarr, tautulli, tmdb, trakt, tvdb, mdblist, util
 from modules.util import Failed, FilterFailed, NonExisting, NotScheduled, NotScheduledRange, Deleted
 from modules.overlay import Overlay
 from modules.poster import KometaImage
@@ -17,7 +21,7 @@ logger = util.logger
 advance_new_agent = ["item_metadata_language", "item_use_original_title"]
 advance_show = ["item_episode_sorting", "item_keep_episodes", "item_delete_episodes", "item_season_display", "item_episode_sorting"]
 all_builders = anidb.builders + anilist.builders + icheckmovies.builders + imdb.builders + \
-               letterboxd.builders + mal.builders + mojo.builders + plex.builders + reciperr.builders + tautulli.builders + \
+               letterboxd.builders + mal.builders + mojo.builders + plex.builders + tautulli.builders + \
                tmdb.builders + trakt.builders + tvdb.builders + mdblist.builders + radarr.builders + sonarr.builders
 show_only_builders = [
     "tmdb_network", "tmdb_show", "tmdb_show_details", "tvdb_show", "tvdb_show_details", "tmdb_airing_today",
@@ -1137,8 +1141,6 @@ class CollectionBuilder:
                     self._mojo(method_name, method_data)
                 elif method_name in plex.builders or method_final in plex.searches:
                     self._plex(method_name, method_data)
-                elif method_name in reciperr.builders:
-                    self._reciperr(method_name, method_data)
                 elif method_name in tautulli.builders:
                     self._tautulli(method_name, method_data)
                 elif method_name in tmdb.builders:

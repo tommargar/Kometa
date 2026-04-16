@@ -1,21 +1,24 @@
-import os, re
+import os
+import re
 from datetime import datetime
-from modules import util, radarr, sonarr, operations
+
+from modules import operations, radarr, sonarr, util
 from modules.anidb import AniDB
 from modules.anilist import AniList
 from modules.cache import Cache
 from modules.convert import Convert
 from modules.emby import Emby
 from modules.ergast import Ergast
+from modules.github import GitHub
+from modules.gotify import Gotify
 from modules.icheckmovies import ICheckMovies
 from modules.imdb import IMDb
-from modules.github import GitHub
 from modules.letterboxd import Letterboxd
 from modules.mal import MyAnimeList
+from modules.mdblist import MDBList
 from modules.meta import PlaylistFile
 from modules.mojo import BoxOfficeMojo
 from modules.notifiarr import Notifiarr
-from modules.gotify import Gotify
 from modules.ntfy import Ntfy
 from modules.omdb import OMDb
 from modules.overlays import Overlays
@@ -23,9 +26,9 @@ from modules.jellyfin import Jellyfin
 from modules.plex import Plex
 from modules.radarr import Radarr
 from modules.sonarr import Sonarr
-from modules.reciperr import Reciperr
-from modules.mdblist import MDBList
+from modules.stevenlu import StevenLu
 from modules.tautulli import Tautulli
+from modules.textfile import TextFile
 from modules.tmdb import TMDb
 from modules.trakt import Trakt
 from modules.tvdb import TVDb
@@ -39,73 +42,116 @@ run_order_options = {
     "collections": "Represents Collection Updates",
     "metadata": "Represents Metadata Updates",
     "overlays": "Represents Overlay Updates",
-    "operations": "Represents Operations Updates"
+    "operations": "Represents Operations Updates",
 }
-sync_modes = {"append": "Only Add Items to the Collection or Playlist", "sync": "Add & Remove Items from the Collection or Playlist"}
+sync_modes = {
+    "append": "Only Add Items to the Collection or Playlist",
+    "sync": "Add & Remove Items from the Collection or Playlist",
+}
 filetype_list = {
     "jpg": "Use JPG files for saving Overlays",
     "png": "Use PNG files for saving Overlays",
     "webp_lossy": "Use Lossy WEBP files for saving Overlays",
-    "webp_lossless": "Use Lossless WEBP files for saving Overlays"
+    "webp_lossless": "Use Lossless WEBP files for saving Overlays",
 }
 imdb_label_options = {
     "remove": "Remove All IMDb Parental Labels",
     "none": "Add IMDb Parental Labels for None, Mild, Moderate, or Severe",
     "mild": "Add IMDb Parental Labels for Mild, Moderate, or Severe",
     "moderate": "Add IMDb Parental Labels for Moderate or Severe",
-    "severe": "Add IMDb Parental Labels for Severe"
+    "severe": "Add IMDb Parental Labels for Severe",
 }
 mass_genre_options = {
-    "lock": "Lock Genre", "unlock": "Unlock Genre", "remove": "Remove and Lock Genre", "reset": "Remove and Unlock Genre",
-    "tmdb": "Use TMDb Genres", "imdb": "Use IMDb Genres", "omdb": "Use IMDb Genres through OMDb", "tvdb": "Use TVDb Genres",
-    "mal": "Use MyAnimeList Genres", "anidb": "Use AniDB Main Tags",
-    "anidb_3_0": "Use AniDB Main Tags and All 3 Star Tags and above", "anidb_2_5": "Use AniDB Main Tags and All 2.5 Star Tags and above",
-    "anidb_2_0": "Use AniDB Main Tags and All 2 Star Tags and above", "anidb_1_5": "Use AniDB Main Tags and All 1.5 Star Tags and above",
-    "anidb_1_0": "Use AniDB Main Tags and All 1 Star Tags and above", "anidb_0_5": "Use AniDB Main Tags and All 0.5 Star Tags and above"
-    , "merge": "Merge Genres from all sources"
+    "lock": "Lock Genre",
+    "unlock": "Unlock Genre",
+    "remove": "Remove and Lock Genre",
+    "reset": "Remove and Unlock Genre",
+    "tmdb": "Use TMDb Genres",
+    "imdb": "Use IMDb Genres",
+    "omdb": "Use IMDb Genres through OMDb",
+    "tvdb": "Use TVDb Genres",
+    "mal": "Use MyAnimeList Genres",
+    "mal_all": "Use MyAnimeList Genres including Explicit Genres, Themes and Demographics",
+    "anidb": "Use AniDB Main Tags",
+    "anidb_3_0": "Use AniDB Main Tags and All 3 Star Tags and above",
+    "anidb_2_5": "Use AniDB Main Tags and All 2.5 Star Tags and above",
+    "anidb_2_0": "Use AniDB Main Tags and All 2 Star Tags and above",
+    "anidb_1_5": "Use AniDB Main Tags and All 1.5 Star Tags and above",
+    "anidb_1_0": "Use AniDB Main Tags and All 1 Star Tags and above",
+    "anidb_0_5": "Use AniDB Main Tags and All 0.5 Star Tags and above",
 }
 mass_content_options = {
-    "lock": "Lock Rating", "unlock": "Unlock Rating", "remove": "Remove and Lock Rating", "reset": "Remove and Unlock Rating",
-    "omdb": "Use IMDb Rating through OMDb", "mdb": "Use MDBList Rating",
-    "mdb_commonsense": "Use Commonsense Rating through MDBList", "mdb_commonsense0": "Use Commonsense Rating with Zero Padding through MDBList",
-    "mdb_age_rating": "Use MDBList Age Rating", "mdb_age_rating0": "Use MDBList Age Rating with Zero Padding",
-    "mal": "Use MyAnimeList Rating"
+    "lock": "Lock Rating",
+    "unlock": "Unlock Rating",
+    "remove": "Remove and Lock Rating",
+    "reset": "Remove and Unlock Rating",
+    "omdb": "Use IMDb Rating through OMDb",
+    "mdb": "Use MDBList Rating",
+    "mdb_commonsense": "Use Commonsense Rating through MDBList",
+    "mdb_commonsense0": "Use Commonsense Rating with Zero Padding through MDBList",
+    "mdb_age_rating": "Use MDBList Age Rating",
+    "mdb_age_rating0": "Use MDBList Age Rating with Zero Padding",
+    "mal": "Use MyAnimeList Rating",
 }
 mass_collection_content_options = {
-    "lock": "Lock Rating", "unlock": "Unlock Rating", "remove": "Remove and Lock Rating", "reset": "Remove and Unlock Rating",
-    "highest": "Highest Rating in the collection", "lowest": "Lowest Rating in the collection",
-    "average": "Highest Rating in the collection"
+    "lock": "Lock Rating",
+    "unlock": "Unlock Rating",
+    "remove": "Remove and Lock Rating",
+    "reset": "Remove and Unlock Rating",
+    "highest": "Highest Rating in the collection",
+    "lowest": "Lowest Rating in the collection",
+    "average": "Highest Rating in the collection",
 }
-content_rating_default = {
-    1: [
-
-    ]
-
-}
+content_rating_default = {1: []}
 mass_studio_options = {
-    "lock": "Lock Rating", "unlock": "Unlock Rating", "remove": "Remove and Lock Rating", "reset": "Remove and Unlock Rating",
-    "tmdb": "Use TMDb Studio", "anidb": "Use AniDB Animation Work", "mal": "Use MyAnimeList Studio"
+    "lock": "Lock Rating",
+    "unlock": "Unlock Rating",
+    "remove": "Remove and Lock Rating",
+    "reset": "Remove and Unlock Rating",
+    "tmdb": "Use TMDb Studio",
+    "anidb": "Use AniDB Animation Work",
+    "mal": "Use MyAnimeList Studio",
 }
 mass_original_title_options = {
-    "lock": "Lock Original Title", "unlock": "Unlock Original Title", "remove": "Remove and Lock Original Title", "reset": "Remove and Unlock Original Title",
-    "anidb": "Use AniDB Main Title", "anidb_official": "Use AniDB Official Title based on the language attribute in the config file",
-    "mal": "Use MyAnimeList Main Title", "mal_english": "Use MyAnimeList English Title", "mal_japanese": "Use MyAnimeList Japanese Title",
+    "lock": "Lock Original Title",
+    "unlock": "Unlock Original Title",
+    "remove": "Remove and Lock Original Title",
+    "reset": "Remove and Unlock Original Title",
+    "anidb": "Use AniDB Main Title",
+    "anidb_official": "Use AniDB Official Title based on the language attribute in the config file",
+    "mal": "Use MyAnimeList Main Title",
+    "mal_english": "Use MyAnimeList English Title",
+    "mal_japanese": "Use MyAnimeList Japanese Title",
 }
 mass_available_options = {
-    "lock": "Lock Originally Available", "unlock": "Unlock Originally Available", "remove": "Remove and Lock Originally Available", "reset": "Remove and Unlock Originally Available",
-    "tmdb": "Use TMDb Release", "omdb": "Use IMDb Release through OMDb", "mdb": "Use MDBList Release", "mdb_digital": "Use MDBList Digital Release", "tvdb": "Use TVDb Release",
-    "anidb": "Use AniDB Release", "mal": "Use MyAnimeList Release"
+    "lock": "Lock Originally Available",
+    "unlock": "Unlock Originally Available",
+    "remove": "Remove and Lock Originally Available",
+    "reset": "Remove and Unlock Originally Available",
+    "tmdb": "Use TMDb Release",
+    "omdb": "Use IMDb Release through OMDb",
+    "mdb": "Use MDBList Release",
+    "mdb_digital": "Use MDBList Digital Release",
+    "tvdb": "Use TVDb Release",
+    "anidb": "Use AniDB Release",
+    "mal": "Use MyAnimeList Release",
 }
 mass_image_options = {
-    "lock": "Lock Image", "unlock": "Unlock Image", "plex": "Use Plex Images", "tmdb": "Use TMDb Images"
+    "lock": "Lock Image",
+    "unlock": "Unlock Image",
+    "plex": "Use Plex Images",
+    "tmdb": "Use TMDb Images",
 }
 mass_episode_rating_options = {
-    "lock": "Lock Rating", "unlock": "Unlock Rating", "remove": "Remove and Lock Rating", "reset": "Remove and Unlock Rating",
+    "lock": "Lock Rating",
+    "unlock": "Unlock Rating",
+    "remove": "Remove and Lock Rating",
+    "reset": "Remove and Unlock Rating",
     "plex_tmdb": "Use TMDB Rating through Plex",
     "plex_imdb": "Use IMDB Rating through Plex",
     "tmdb": "Use TMDb Rating",
     "imdb": "Use IMDb Rating",
-    "trakt": "Use Trakt Rating"
+    "trakt": "Use Trakt Rating",
 }
 mass_rating_options = {
     "lock": "Lock Rating",
@@ -137,21 +183,40 @@ mass_rating_options = {
     "anidb_rating": "Use AniDB Rating",
     "anidb_average": "Use AniDB Average",
     "anidb_score": "Use AniDB Review Dcore",
-    "mal": "Use MyAnimeList Rating"
+    "mal": "Use MyAnimeList Rating",
 }
 reset_overlay_options = {"tmdb": "Reset to TMDb poster", "plex": "Reset to Plex Poster"}
 library_operations = {
-    "assets_for_all": "bool", "assets_for_all_collections": "bool", "split_duplicates": "bool", "update_blank_track_titles": "bool", "remove_title_parentheses": "bool",
-    "radarr_add_all_existing": "bool", "radarr_remove_by_tag": "str", "sonarr_add_all_existing": "bool", "sonarr_remove_by_tag": "str",
-    "mass_content_rating_update": mass_content_options, "mass_collection_content_rating_update": "dict",
-    "mass_genre_update": mass_genre_options, "mass_studio_update": mass_studio_options,
-    "mass_audience_rating_update": mass_rating_options, "mass_episode_audience_rating_update": mass_episode_rating_options,
-    "mass_critic_rating_update": mass_rating_options, "mass_episode_critic_rating_update": mass_episode_rating_options,
-    "mass_user_rating_update": mass_rating_options, "mass_episode_user_rating_update": mass_episode_rating_options,
-    "mass_original_title_update": mass_original_title_options, "mass_imdb_parental_labels": imdb_label_options,
-    "mass_originally_available_update": mass_available_options, "mass_added_at_update": mass_available_options,
-    "mass_collection_mode": "mass_collection_mode", "mass_poster_update": "dict", "mass_background_update": "dict",
-    "metadata_backup": "dict", "delete_collections": "dict", "genre_mapper": "dict", "content_rating_mapper": "dict",
+    "assets_for_all": "bool",
+    "assets_for_all_collections": "bool",
+    "split_duplicates": "bool",
+    "update_blank_track_titles": "bool",
+    "remove_title_parentheses": "bool",
+    "radarr_add_all_existing": "bool",
+    "radarr_remove_by_tag": "str",
+    "sonarr_add_all_existing": "bool",
+    "sonarr_remove_by_tag": "str",
+    "mass_content_rating_update": mass_content_options,
+    "mass_collection_content_rating_update": "dict",
+    "mass_genre_update": mass_genre_options,
+    "mass_studio_update": mass_studio_options,
+    "mass_audience_rating_update": mass_rating_options,
+    "mass_episode_audience_rating_update": mass_episode_rating_options,
+    "mass_critic_rating_update": mass_rating_options,
+    "mass_episode_critic_rating_update": mass_episode_rating_options,
+    "mass_user_rating_update": mass_rating_options,
+    "mass_episode_user_rating_update": mass_episode_rating_options,
+    "mass_original_title_update": mass_original_title_options,
+    "mass_imdb_parental_labels": imdb_label_options,
+    "mass_originally_available_update": mass_available_options,
+    "mass_added_at_update": mass_available_options,
+    "mass_collection_mode": "mass_collection_mode",
+    "mass_poster_update": "dict",
+    "mass_background_update": "dict",
+    "metadata_backup": "dict",
+    "delete_collections": "dict",
+    "genre_mapper": "dict",
+    "content_rating_mapper": "dict",
     "plex_bulk_edit_batch_size": "int",
     "mass_cast_and_crew_update": "bool",
 }
@@ -160,10 +225,14 @@ class ConfigFile:
     def __init__(self, in_request, default_dir, attrs, secrets):
         logger.info("Locating config...")
         config_file = attrs["config_file"]
-        if config_file and os.path.exists(config_file):                     self.config_path = os.path.abspath(config_file)
-        elif config_file and not os.path.exists(config_file):               raise Failed(f"Config Error: config not found at {os.path.abspath(config_file)}")
-        elif os.path.exists(os.path.join(default_dir, "config.yml")):       self.config_path = os.path.abspath(os.path.join(default_dir, "config.yml"))
-        else:                                                               raise Failed(f"Config Error: config not found at {os.path.abspath(default_dir)}")
+        if config_file and os.path.exists(config_file):
+            self.config_path = os.path.abspath(config_file)
+        elif config_file and not os.path.exists(config_file):
+            raise Failed(f"Config Error: config not found at {os.path.abspath(config_file)}")
+        elif os.path.exists(os.path.join(default_dir, "config.yml")):
+            self.config_path = os.path.abspath(os.path.join(default_dir, "config.yml"))
+        else:
+            raise Failed(f"Config Error: config not found at {os.path.abspath(default_dir)}")
         logger.info(f"Using {self.config_path} as config")
         logger.clear_errors()
 
@@ -207,7 +276,13 @@ class ConfigFile:
         with open(self.config_path, encoding="utf-8") as fp:
             logger.separator("Redacted Config", space=False, border=False, debug=True)
             for line in fp.readlines():
-                logger.debug(re.sub(r"(token|client.*|url|api_*key|secret|error|delete|run_start|run_end|version|changes|username|password|user_id): .+", r"\\1: (redacted)", line.strip("\\r\\n")))
+                logger.debug(
+                    re.sub(
+                        r"(token|client.*|url|api_*key|secret|error|delete|run_start|run_end|version|changes|username|password): .+",
+                        r"\1: (redacted)",
+                        line.strip("\r\n"),
+                    )
+                )
             logger.debug("")
 
         self.data = self.Requests.file_yaml(self.config_path).data
@@ -218,6 +293,7 @@ class ConfigFile:
             if par in all_data and all_data[par] and in_attr in all_data[par] and in_attr not in all_data["settings"]:
                 all_data["settings"][in_attr] = all_data[par][in_attr]
                 del all_data[par][in_attr]
+
         if "libraries" not in self.data:
             self.data["libraries"] = {}
         if "settings" not in self.data:
@@ -243,6 +319,7 @@ class ConfigFile:
 
                 def fail_on_definition(found_this):
                     raise Failed(f"The '{library}' library config contains {found_this} definitions. These belong in external YAML files, not in the config.yml.")
+
                 if "collections" in self.data["libraries"][library]:
                     fail_on_definition("collections")
                 if "dynamic_collections" in self.data["libraries"][library]:
@@ -303,16 +380,20 @@ class ConfigFile:
                             self.data["libraries"][library]["operations"]["mass_imdb_parental_labels"] = "mild"
                 if "webhooks" in self.data["libraries"][library] and self.data["libraries"][library]["webhooks"] and "collection_changes" not in self.data["libraries"][library]["webhooks"]:
                     changes = []
+
                     def hooks(hook_attr):
                         if hook_attr in self.data["libraries"][library]["webhooks"]:
                             changes.extend([w for w in util.get_list(self.data["libraries"][library]["webhooks"].pop(hook_attr), split=False) if w not in changes])
+
                     hooks("collection_creation")
                     hooks("collection_addition")
                     hooks("collection_removal")
                     hooks("collection_changes")
                     self.data["libraries"][library]["webhooks"]["changes"] = None if not changes else changes if len(changes) > 1 else changes[0]
-        if "libraries" in self.data:                   self.data["libraries"] = self.data.pop("libraries")
-        if "playlist_files" in self.data:              self.data["playlist_files"] = self.data.pop("playlist_files")
+        if "libraries" in self.data:
+            self.data["libraries"] = self.data.pop("libraries")
+        if "playlist_files" in self.data:
+            self.data["playlist_files"] = self.data.pop("playlist_files")
         if "settings" in self.data:
             temp = self.data.pop("settings")
             if "collection_minimum" in temp:
@@ -326,27 +407,39 @@ class ConfigFile:
             temp = self.data.pop("webhooks")
             if "changes" not in temp:
                 changes = []
+
                 def hooks(hook_attr):
                     if hook_attr in temp:
                         items = util.get_list(temp.pop(hook_attr), split=False)
                         if items:
                             changes.extend([w for w in items if w not in changes])
+
                 hooks("collection_creation")
                 hooks("collection_addition")
                 hooks("collection_removal")
                 hooks("collection_changes")
                 temp["changes"] = None if not changes else changes if len(changes) > 1 else changes[0]
             self.data["webhooks"] = temp
-        if "github" in self.data:                      self.data["github"] = self.data.pop("github")
-        if "plex" in self.data:                        self.data["plex"] = self.data.pop("plex")
-        if "tmdb" in self.data:                        self.data["tmdb"] = self.data.pop("tmdb")
-        if "tautulli" in self.data:                    self.data["tautulli"] = self.data.pop("tautulli")
-        if "omdb" in self.data:                        self.data["omdb"] = self.data.pop("omdb")
-        if "mdblist" in self.data:                     self.data["mdblist"] = self.data.pop("mdblist")
-        if "notifiarr" in self.data:                   self.data["notifiarr"] = self.data.pop("notifiarr")
-        if "gotify" in self.data:                      self.data["gotify"] = self.data.pop("gotify")
-        if "ntfy" in self.data:                        self.data["ntfy"] = self.data.pop("ntfy")
-        if "anidb" in self.data:                       self.data["anidb"] = self.data.pop("anidb")
+        if "github" in self.data:
+            self.data["github"] = self.data.pop("github")
+        if "plex" in self.data:
+            self.data["plex"] = self.data.pop("plex")
+        if "tmdb" in self.data:
+            self.data["tmdb"] = self.data.pop("tmdb")
+        if "tautulli" in self.data:
+            self.data["tautulli"] = self.data.pop("tautulli")
+        if "omdb" in self.data:
+            self.data["omdb"] = self.data.pop("omdb")
+        if "mdblist" in self.data:
+            self.data["mdblist"] = self.data.pop("mdblist")
+        if "notifiarr" in self.data:
+            self.data["notifiarr"] = self.data.pop("notifiarr")
+        if "gotify" in self.data:
+            self.data["gotify"] = self.data.pop("gotify")
+        if "ntfy" in self.data:
+            self.data["ntfy"] = self.data.pop("ntfy")
+        if "anidb" in self.data:
+            self.data["anidb"] = self.data.pop("anidb")
         if "radarr" in self.data:
             if "monitor" in self.data["radarr"] and isinstance(self.data["radarr"]["monitor"], bool):
                 self.data["radarr"]["monitor"] = True if self.data["radarr"]["monitor"] else False
@@ -359,8 +452,10 @@ class ConfigFile:
             if temp and "add" in temp:
                 temp["add_missing"] = temp.pop("add")
             self.data["sonarr"] = temp
-        if "trakt" in self.data:                       self.data["trakt"] = self.data.pop("trakt")
-        if "mal" in self.data:                         self.data["mal"] = self.data.pop("mal")
+        if "trakt" in self.data:
+            self.data["trakt"] = self.data.pop("trakt")
+        if "mal" in self.data:
+            self.data["mal"] = self.data.pop("mal")
 
         def check_next(next_data):
             if isinstance(next_data, dict):
@@ -377,9 +472,22 @@ class ConfigFile:
                 return next_data
         self.data = check_next(self.data)
 
-        def check_for_attribute(data, attribute, parent=None, test_list=None, translations=None, default=None,
-                                do_print=True, default_is_none=False, req_default=False, var_type="str", throw=False,
-                                save=True, int_min=0, int_max=None):
+        def check_for_attribute(
+            data,
+            attribute,
+            parent=None,
+            test_list=None,
+            translations=None,
+            default=None,
+            do_print=True,
+            default_is_none=False,
+            req_default=False,
+            var_type="str",
+            throw=False,
+            save=True,
+            int_min=0,
+            int_max=None,
+        ):
             endline = ""
             if parent is not None:
                 if data and parent in data:
@@ -398,7 +506,7 @@ class ConfigFile:
                 message = f"{text} not found"
                 if parent and save is True:
                     yaml = self.Requests.file_yaml(self.config_path)
-                    endline = f"\\n{parent} sub-attribute {attribute} added to config"
+                    endline = f"\n{parent} sub-attribute {attribute} added to config"
                     if parent not in yaml.data or not yaml.data[parent]:
                         yaml.data[parent] = {attribute: default}
                     elif attribute not in yaml.data[parent]:
@@ -406,8 +514,7 @@ class ConfigFile:
                     else:
                         endline = ""
                     yaml.save()
-                if default_is_none and var_type in ["list", "int_list", "lower_list",
-                                                    "list_path"]:
+                if default_is_none and var_type in ["list", "int_list", "lower_list", "list_path"]:
                     return default if default else []
             elif final_value is None:
                 if default_is_none and var_type in ["list", "int_list", "lower_list", "list_path"]:
@@ -438,8 +545,12 @@ class ConfigFile:
                     message = f"Path {os.path.abspath(final_value)} does not exist"
             elif var_type in ["list", "lower_list", "int_list"]:
                 output_list = []
-                for output_item in util.get_list(final_value, lower=var_type == "lower_list", split=var_type != "list",
-                                                 int_list=var_type == "int_list"):
+                for output_item in util.get_list(
+                    final_value,
+                    lower=var_type == "lower_list",
+                    split=var_type != "list",
+                    int_list=var_type == "int_list",
+                ):
                     if output_item not in output_list:
                         output_list.append(output_item)
                 failed_items = [o for o in output_list if o not in test_list] if test_list else []
@@ -455,7 +566,7 @@ class ConfigFile:
                         temp_list.append(p)
                     else:
                         if len(warning_message) > 0:
-                            warning_message += "\\n"
+                            warning_message += "\n"
                         warning_message += f"Config Warning: Path does not exist: {os.path.abspath(p)}"
                 if do_print and warning_message:
                     logger.warning(warning_message)
@@ -497,7 +608,14 @@ class ConfigFile:
             return default
 
         self.general = {
-            "run_order": check_for_attribute(self.data, "run_order", parent="settings", var_type="lower_list", test_list=run_order_options, default=["operations", "metadata", "collections", "overlays"]),
+            "run_order": check_for_attribute(
+                self.data,
+                "run_order",
+                parent="settings",
+                var_type="lower_list",
+                test_list=run_order_options,
+                default=["operations", "metadata", "collections", "overlays"],
+            ),
             "cache": check_for_attribute(self.data, "cache", parent="settings", var_type="bool", default=True),
             "cache_expiration": check_for_attribute(self.data, "cache_expiration", parent="settings", var_type="int", default=60, int_min=1),
             "asset_directory": check_for_attribute(self.data, "asset_directory", parent="settings", var_type="list_path", default_is_none=True),
@@ -588,9 +706,7 @@ class ConfigFile:
         else:
             self.Cache = None
 
-        self.GitHub = GitHub(self.Requests, {
-            "token": check_for_attribute(self.data, "token", parent="github", default_is_none=True)
-        })
+        self.GitHub = GitHub(self.Requests, {"token": check_for_attribute(self.data, "token", parent="github", default_is_none=True)})
 
         logger.separator()
 
@@ -598,9 +714,7 @@ class ConfigFile:
         if "notifiarr" in self.data:
             logger.info("Connecting to Notifiarr...")
             try:
-                self.NotifiarrFactory = Notifiarr(self.Requests, {
-                    "apikey": check_for_attribute(self.data, "apikey", parent="notifiarr", throw=True)
-                })
+                self.NotifiarrFactory = Notifiarr(self.Requests, {"apikey": check_for_attribute(self.data, "apikey", parent="notifiarr", throw=True)})
             except Failed as e:
                 if str(e).endswith("is blank"):
                     logger.warning(e)
@@ -615,10 +729,13 @@ class ConfigFile:
         if "gotify" in self.data:
             logger.info("Connecting to Gotify...")
             try:
-                self.GotifyFactory = Gotify(self.Requests, {
-                    "url": check_for_attribute(self.data, "url", parent="gotify", throw=True),
-                    "token": check_for_attribute(self.data, "token", parent="gotify", throw=True)
-                })
+                self.GotifyFactory = Gotify(
+                    self.Requests,
+                    {
+                        "url": check_for_attribute(self.data, "url", parent="gotify", throw=True),
+                        "token": check_for_attribute(self.data, "token", parent="gotify", throw=True),
+                    },
+                )
             except Failed as e:
                 if str(e).endswith("is blank"):
                     logger.warning(e)
@@ -633,11 +750,14 @@ class ConfigFile:
         if "ntfy" in self.data:
             logger.info("Connecting to ntfy...")
             try:
-                self.NtfyFactory = Ntfy(self.Requests, {
-                    "url": check_for_attribute(self.data, "url", parent="ntfy", throw=True),
-                    "token": check_for_attribute(self.data, "token", parent="ntfy", throw=True),
-                    "topic": check_for_attribute(self.data, "topic", parent="ntfy", throw=True)
-                })
+                self.NtfyFactory = Ntfy(
+                    self.Requests,
+                    {
+                        "url": check_for_attribute(self.data, "url", parent="ntfy", throw=True),
+                        "token": check_for_attribute(self.data, "token", parent="ntfy", throw=True),
+                        "topic": check_for_attribute(self.data, "topic", parent="ntfy", throw=True),
+                    },
+                )
             except Failed as e:
                 if str(e).endswith("is blank"):
                     logger.warning(e)
@@ -654,7 +774,7 @@ class ConfigFile:
             "run_start": check_for_attribute(self.data, "run_start", parent="webhooks", var_type="list", default_is_none=True),
             "run_end": check_for_attribute(self.data, "run_end", parent="webhooks", var_type="list", default_is_none=True),
             "changes": check_for_attribute(self.data, "changes", parent="webhooks", var_type="list", default_is_none=True),
-            "delete": check_for_attribute(self.data, "delete", parent="webhooks", var_type="list", default_is_none=True)
+            "delete": check_for_attribute(self.data, "delete", parent="webhooks", var_type="list", default_is_none=True),
         }
         self.Webhooks = Webhooks(self, self.webhooks, notifiarr=self.NotifiarrFactory, gotify=self.GotifyFactory, ntfy=self.NtfyFactory)
         try:
@@ -672,11 +792,14 @@ class ConfigFile:
             self.TMDb = None
             if "tmdb" in self.data:
                 logger.info("Connecting to TMDb...")
-                self.TMDb = TMDb(self, {
-                    "apikey": check_for_attribute(self.data, "apikey", parent="tmdb", throw=True),
-                    "language": check_for_attribute(self.data, "language", parent="tmdb", default="en"),
-                    "expiration": check_for_attribute(self.data, "cache_expiration", parent="tmdb", var_type="int", default=60, int_min=1)
-                })
+                self.TMDb = TMDb(
+                    self,
+                    {
+                        "apikey": check_for_attribute(self.data, "apikey", parent="tmdb", throw=True),
+                        "language": check_for_attribute(self.data, "language", parent="tmdb", default="en"),
+                        "expiration": check_for_attribute(self.data, "cache_expiration", parent="tmdb", var_type="int", default=60, int_min=1),
+                    },
+                )
                 regions = {k.upper(): v for k, v in self.TMDb.iso_3166_1.items()}
                 region = check_for_attribute(self.data, "region", parent="tmdb", test_list=regions, default_is_none=True)
                 self.TMDb.region = str(region).upper() if region else region
@@ -690,10 +813,14 @@ class ConfigFile:
             if "omdb" in self.data:
                 logger.info("Connecting to OMDb...")
                 try:
-                    self.OMDb = OMDb(self.Requests, self.Cache, {
-                        "apikey": check_for_attribute(self.data, "apikey", parent="omdb", throw=True),
-                        "expiration": check_for_attribute(self.data, "cache_expiration", parent="omdb", var_type="int", default=60, int_min=1)
-                    })
+                    self.OMDb = OMDb(
+                        self.Requests,
+                        self.Cache,
+                        {
+                            "apikey": check_for_attribute(self.data, "apikey", parent="omdb", throw=True),
+                            "expiration": check_for_attribute(self.data, "cache_expiration", parent="omdb", var_type="int", default=60, int_min=1),
+                        },
+                    )
                 except Failed as e:
                     if str(e).endswith("is blank"):
                         logger.warning(e)
@@ -711,7 +838,7 @@ class ConfigFile:
                 try:
                     self.MDBList.add_key(
                         check_for_attribute(self.data, "apikey", parent="mdblist", throw=True),
-                        check_for_attribute(self.data, "cache_expiration", parent="mdblist", var_type="int", default=60, int_min=1)
+                        check_for_attribute(self.data, "cache_expiration", parent="mdblist", var_type="int", default=60, int_min=1),
                     )
                     logger.info("MDBList Connection Successful")
                 except Failed as e:
@@ -729,14 +856,18 @@ class ConfigFile:
             if "trakt" in self.data:
                 logger.info("Connecting to Trakt...")
                 try:
-                    self.Trakt = Trakt(self.Requests, self.read_only, {
-                        "client_id": check_for_attribute(self.data, "client_id", parent="trakt", throw=True),
-                        "client_secret": check_for_attribute(self.data, "client_secret", parent="trakt", throw=True),
-                        "pin":  check_for_attribute(self.data, "pin", parent="trakt", default_is_none=True),
-                        "force_refresh":  check_for_attribute(self.data, "force_refresh", parent="trakt", default_is_none=True),
-                        "config_path": self.config_path,
-                        "authorization": self.data["trakt"]["authorization"] if "authorization" in self.data["trakt"] else None
-                    })
+                    self.Trakt = Trakt(
+                        self.Requests,
+                        self.read_only,
+                        {
+                            "client_id": check_for_attribute(self.data, "client_id", parent="trakt", throw=True),
+                            "client_secret": check_for_attribute(self.data, "client_secret", parent="trakt", throw=True),
+                            "pin": check_for_attribute(self.data, "pin", parent="trakt", default_is_none=True),
+                            "force_refresh": check_for_attribute(self.data, "force_refresh", parent="trakt", default_is_none=True),
+                            "config_path": self.config_path,
+                            "authorization": (self.data["trakt"]["authorization"] if "authorization" in self.data["trakt"] else None),
+                        },
+                    )
                 except Failed as e:
                     if str(e).endswith("is blank"):
                         logger.warning(e)
@@ -752,14 +883,19 @@ class ConfigFile:
             if "mal" in self.data:
                 logger.info("Connecting to My Anime List...")
                 try:
-                    self.MyAnimeList = MyAnimeList(self.Requests, self.Cache, self.read_only, {
-                        "client_id": check_for_attribute(self.data, "client_id", parent="mal", throw=True),
-                        "client_secret": check_for_attribute(self.data, "client_secret", parent="mal", throw=True),
-                        "localhost_url": check_for_attribute(self.data, "localhost_url", parent="mal", default_is_none=True),
-                        "cache_expiration": check_for_attribute(self.data, "cache_expiration", parent="mal", var_type="int", default=60, int_min=1),
-                        "config_path": self.config_path,
-                        "authorization": self.data["mal"]["authorization"] if "authorization" in self.data["mal"] else None
-                    })
+                    self.MyAnimeList = MyAnimeList(
+                        self.Requests,
+                        self.Cache,
+                        self.read_only,
+                        {
+                            "client_id": check_for_attribute(self.data, "client_id", parent="mal", throw=True),
+                            "client_secret": check_for_attribute(self.data, "client_secret", parent="mal", throw=True),
+                            "localhost_url": check_for_attribute(self.data, "localhost_url", parent="mal", default_is_none=True),
+                            "cache_expiration": check_for_attribute(self.data, "cache_expiration", parent="mal", var_type="int", default=60, int_min=1),
+                            "config_path": self.config_path,
+                            "authorization": (self.data["mal"]["authorization"] if "authorization" in self.data["mal"] else None),
+                        },
+                    )
                 except Failed as e:
                     if str(e).endswith("is blank"):
                         logger.warning(e)
@@ -769,35 +905,27 @@ class ConfigFile:
             else:
                 logger.info("mal attribute not found")
 
-            self.AniDB = AniDB(self.Requests, self.Cache, {
-                "language": check_for_attribute(self.data, "language", parent="anidb", default="en")
-            })
             if "anidb" in self.data:
                 logger.separator()
                 logger.info("Connecting to AniDB...")
+
+                self.AniDB = AniDB(
+                    self.Requests,
+                    self.Cache,
+                    {
+                        "language": check_for_attribute(self.data, "language", parent="anidb", default="en"),
+                        "enable_mature": check_for_attribute(self.data, "enable_mature", parent="anidb", default=False),
+                    },
+                )
+
                 try:
-                    self.AniDB.authorize(
-                        check_for_attribute(self.data, "client", parent="anidb", throw=True),
-                        check_for_attribute(self.data, "version", parent="anidb", var_type="int", throw=True),
-                        check_for_attribute(self.data, "cache_expiration", parent="anidb", var_type="int", default=60, int_min=1)
-                    )
+                    self.AniDB.authorize(check_for_attribute(self.data, "cache_expiration", parent="anidb", var_type="int", default=60, int_min=1))
                 except Failed as e:
                     if str(e).endswith("is blank"):
                         logger.warning(e)
                     else:
                         logger.error(e)
                 logger.info(f"AniDB API Connection {'Successful' if self.AniDB.is_authorized else 'Failed'}")
-                try:
-                    self.AniDB.login(
-                        check_for_attribute(self.data, "username", parent="anidb", throw=True),
-                        check_for_attribute(self.data, "password", parent="anidb", throw=True)
-                    )
-                except Failed as e:
-                    if str(e).endswith("is blank"):
-                        logger.warning(e)
-                    else:
-                        logger.error(e)
-                logger.info(f"AniDB Login {'Successful' if self.AniDB.username else 'Failed Continuing as Guest'}")
 
             logger.separator()
 
@@ -810,7 +938,11 @@ class ConfigFile:
             else:
                 logger.info("")
                 logger.info("Reading in Playlist Files")
-                files, had_scheduled = util.load_files(self.data["playlist_files"], "playlist_files", schedule=(current_time, self.run_hour, self.ignore_schedules))
+                files, had_scheduled = util.load_files(
+                    self.data["playlist_files"],
+                    "playlist_files",
+                    schedule=(current_time, self.run_hour, self.ignore_schedules),
+                )
                 if not files and not had_scheduled:
                     raise Failed("Config Error: No Paths Found for playlist_files")
                 for file_type, playlist_file, temp_vars, asset_directory in files:
@@ -851,7 +983,8 @@ class ConfigFile:
             self.ICheckMovies = ICheckMovies(self.Requests)
             self.Letterboxd = Letterboxd(self.Requests, self.Cache)
             self.BoxOfficeMojo = BoxOfficeMojo(self.Requests, self.Cache)
-            self.Reciperr = Reciperr(self.Requests)
+            self.StevenLu = StevenLu(self.Requests)
+            self.TextFile = TextFile(self.Requests)
             self.Ergast = Ergast(self.Requests, self.Cache)
 
             logger.separator()
@@ -893,12 +1026,18 @@ class ConfigFile:
                 "ignore_cache": check_for_attribute(self.data, "ignore_cache", parent="radarr", var_type="bool", default=False),
                 "root_folder_path": check_for_attribute(self.data, "root_folder_path", parent="radarr", default_is_none=True),
                 "monitor": check_for_attribute(self.data, "monitor", parent="radarr", var_type="bool", default=True),
-                "availability": check_for_attribute(self.data, "availability", parent="radarr", test_list=radarr.availability_descriptions, default="announced"),
+                "availability": check_for_attribute(
+                    self.data,
+                    "availability",
+                    parent="radarr",
+                    test_list=radarr.availability_descriptions,
+                    default="announced",
+                ),
                 "quality_profile": check_for_attribute(self.data, "quality_profile", parent="radarr", default_is_none=True),
                 "tag": check_for_attribute(self.data, "tag", parent="radarr", var_type="lower_list", default_is_none=True),
                 "search": check_for_attribute(self.data, "search", parent="radarr", var_type="bool", default=False),
                 "radarr_path": check_for_attribute(self.data, "radarr_path", parent="radarr", default_is_none=True),
-                "plex_path": check_for_attribute(self.data, "plex_path", parent="radarr", default_is_none=True)
+                "plex_path": check_for_attribute(self.data, "plex_path", parent="radarr", default_is_none=True),
             }
             self.general["sonarr"] = {
                 "url": check_for_attribute(self.data, "url", parent="sonarr", var_type="url", default_is_none=True),
@@ -912,17 +1051,23 @@ class ConfigFile:
                 "monitor": check_for_attribute(self.data, "monitor", parent="sonarr", test_list=sonarr.monitor_descriptions, default="all"),
                 "quality_profile": check_for_attribute(self.data, "quality_profile", parent="sonarr", default_is_none=True),
                 "language_profile": check_for_attribute(self.data, "language_profile", parent="sonarr", default_is_none=True),
-                "series_type": check_for_attribute(self.data, "series_type", parent="sonarr", test_list=sonarr.series_type_descriptions, default="standard"),
+                "series_type": check_for_attribute(
+                    self.data,
+                    "series_type",
+                    parent="sonarr",
+                    test_list=sonarr.series_type_descriptions,
+                    default="standard",
+                ),
                 "season_folder": check_for_attribute(self.data, "season_folder", parent="sonarr", var_type="bool", default=True),
                 "tag": check_for_attribute(self.data, "tag", parent="sonarr", var_type="lower_list", default_is_none=True),
                 "search": check_for_attribute(self.data, "search", parent="sonarr", var_type="bool", default=False),
                 "cutoff_search": check_for_attribute(self.data, "cutoff_search", parent="sonarr", var_type="bool", default=False),
                 "sonarr_path": check_for_attribute(self.data, "sonarr_path", parent="sonarr", default_is_none=True),
-                "plex_path": check_for_attribute(self.data, "plex_path", parent="sonarr", default_is_none=True)
+                "plex_path": check_for_attribute(self.data, "plex_path", parent="sonarr", default_is_none=True),
             }
             self.general["tautulli"] = {
                 "url": check_for_attribute(self.data, "url", parent="tautulli", var_type="url", default_is_none=True),
-                "apikey": check_for_attribute(self.data, "apikey", parent="tautulli", default_is_none=True)
+                "apikey": check_for_attribute(self.data, "apikey", parent="tautulli", default_is_none=True),
             }
 
             self.libraries = []
@@ -1021,10 +1166,14 @@ class ConfigFile:
                                     final_list = []
                                     for list_attr in input_list:
                                         if not list_attr:
-                                            raise Failed(f"has a blank value")
+                                            raise Failed("has a blank value")
                                         if str(list_attr).lower() in data_type:
                                             final_list.append(str(list_attr).lower())
-                                        elif op in ["mass_content_rating_update", "mass_studio_update", "mass_original_title_update"]:
+                                        elif op in [
+                                            "mass_content_rating_update",
+                                            "mass_studio_update",
+                                            "mass_original_title_update",
+                                        ]:
                                             final_list.append(str(list_attr))
                                         elif op == "mass_genre_update":
                                             final_list.append(list_attr if isinstance(list_attr, list) else [list_attr])
@@ -1041,7 +1190,16 @@ class ConfigFile:
                                 section_final[op] = util.check_collection_mode(config_op[op])
                             elif data_type == "dict":
                                 input_dict = config_op[op]
-                                if op in ["mass_poster_update", "mass_background_update", "mass_collection_content_rating_update"] and input_dict and not isinstance(input_dict, dict):
+                                if (
+                                    op
+                                    in [
+                                        "mass_poster_update",
+                                        "mass_background_update",
+                                        "mass_collection_content_rating_update",
+                                    ]
+                                    and input_dict
+                                    and not isinstance(input_dict, dict)
+                                ):
                                     input_dict = {"source": input_dict}
 
                                 if not input_dict or not isinstance(input_dict, dict):
@@ -1052,7 +1210,7 @@ class ConfigFile:
                                         "seasons": check_for_attribute(input_dict, "seasons", var_type="bool", default=True, save=False),
                                         "episodes": check_for_attribute(input_dict, "episodes", var_type="bool", default=True, save=False),
                                         "ignore_locked": check_for_attribute(input_dict, "ignore_locked", var_type="bool", default=False, save=False),
-                                        "ignore_overlays": check_for_attribute(input_dict, "ignore_overlays", var_type="bool", default=False, save=False)
+                                        "ignore_overlays": check_for_attribute(input_dict, "ignore_overlays", var_type="bool", default=False, save=False),
                                     }
                                 elif op == "metadata_backup":
                                     default_path = os.path.join(default_dir, f"{str(library_name)}_Metadata_Backup.yml")

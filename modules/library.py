@@ -1,16 +1,17 @@
-import os, time
+import os
+import time
 from abc import ABC, abstractmethod
+
+from PIL import Image
 
 from modules import util
 from modules.meta import MetadataFile, OverlayFile
 from modules.operations import Operations
 from modules.poster import ImageData
 from modules.util import Failed, NotScheduled
-from PIL import Image
 
 logger = util.logger
 
-MAX_IMAGE_SIZE = 10480000  # a little less than 10MB
 
 class Library(ABC):
     def __init__(self, config, params):
