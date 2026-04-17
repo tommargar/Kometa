@@ -198,8 +198,11 @@ class TVDb:
         endpoint = f"/movies/{tvdb_id}/extended" if is_movie else f"/series/{tvdb_id}/extended"
         try:
             response = self._request(endpoint)
-        except Failed:
-            raise Failed(f"TVDb Error: Item {tvdb_id} not found")
+        except Failed as e:
+            msg = str(e)
+            if "404" in msg:
+                raise Failed(f"TVDb Error: Item {tvdb_id} not found")
+            raise Failed(f"TVDb Error: Item {tvdb_id} request failed: {msg}")
 
         if "data" not in response:
             raise Failed(f"TVDb Error: Item {tvdb_id} data not found")

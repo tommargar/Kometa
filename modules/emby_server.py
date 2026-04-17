@@ -1030,11 +1030,34 @@ class EmbyServer:
         tvdb = normalized_prov_ids.get("tvdb",None)
         tmdb = normalized_prov_ids.get("tmdb",None)
 
+        item_title = getattr(item, 'title', item)
+        item_id = item.ratingKey
+        is_show = emby_item.get("Type") == "Series" if emby_item else False
+
         if tmdb is not None and not str(tmdb).lstrip("-").isdigit():
-            logger.warning(f"Emby ProviderIds: invalid TMDb ID '{tmdb}' for item {getattr(item, 'title', item)} — ignoring")
+            logger.warning(f"Emby ProviderIds: invalid TMDb ID '{tmdb}' for item {item_title} — attempting auto-fix")
             tmdb = None
+            if tvdb and str(tvdb).isdigit():
+                try:
+                    fixed_tmdb = self.config.Convert.tvdb_to_tmdb(tvdb)
+                    if fixed_tmdb:
+                        logger.info(f"Emby ProviderIds: fixed TMDb ID for {item_title}: {tvdb} (TVDb) → {fixed_tmdb}")
+                        self.update_item(item_id, {"ProviderIds": {**current_provider_ids, "Tmdb": str(fixed_tmdb)}})
+                        tmdb = fixed_tmdb
+                except Exception as e:
+                    logger.trace(f"Could not auto-fix TMDb from TVDb: {e}")
+            if not tmdb and imdb:
+                try:
+                    fixed_tmdb, _type = self.config.Convert.imdb_to_tmdb(imdb)
+                    if fixed_tmdb and ((_type == "show" and is_show) or (_type == "movie" and not is_show)):
+                        logger.info(f"Emby ProviderIds: fixed TMDb ID for {item_title}: {imdb} (IMDb) → {fixed_tmdb}")
+                        self.update_item(item_id, {"ProviderIds": {**current_provider_ids, "Tmdb": str(fixed_tmdb)}})
+                        tmdb = fixed_tmdb
+                except Exception as e:
+                    logger.trace(f"Could not auto-fix TMDb from IMDb: {e}")
+
         if tvdb is not None and not str(tvdb).lstrip("-").isdigit():
-            logger.warning(f"Emby ProviderIds: invalid TVDb ID '{tvdb}' for item {getattr(item, 'title', item)} — ignoring")
+            logger.warning(f"Emby ProviderIds: invalid TVDb ID '{tvdb}' for item {item_title} — ignoring")
             tvdb = None
 
         # item_type = "show" if emby_item.get('Type')=="Series" else "movie"

@@ -684,8 +684,10 @@ class Emby(Library):
 
         logger.exorcise()
         logger.info("")
-        item_label = f"{self.type.capitalize()}{'s' if total > 1 else ''}"
-        logger.info(f"{total} {item_label} Processed - Added {len(add_items)} {item_label} labels, Removed {len(remove_items)} {item_label} labels")
+        if len(add_items) > 0:
+            logger.info(f"Adding {len(add_items)} Item{'s' if len(add_items) > 1 else ''}: {', '.join([util.item_title(i) for i in add_items])}")
+        if len(remove_items) > 0:
+            logger.info(f"Removing {len(remove_items)} Item{'s' if len(remove_items) > 1 else ''}: {', '.join([util.item_title(i) for i in remove_items])}")
 
         # self._query(f"/library/collections/{collection.ratingKey}/items{utils.joinArgs({'uri': self.build_smart_filter(uri_args)})}", put=True)
 
@@ -1069,7 +1071,45 @@ class Emby(Library):
                         provider_ids_payload[self.EmbyServer.CUSTOM_RATING_PROVIDER] = normalized_rating
                 update_payload["ProviderIds"] = provider_ids_payload
             if update_payload:
-                logger.info(f"Updating {item_id}: {update_payload}")
+                current = item_cache.get(str(item_id)) or item_cache.get(item_id) or {}
+                diff = {}
+                for key, new_val in update_payload.items():
+                    old_val = current.get(key)
+                    if key == "ProviderIds":
+                        old_prov_raw = dict(old_val or {})
+                        new_prov_raw = dict(new_val or {})
+                        old_prov = {k.lower(): (k, v) for k, v in old_prov_raw.items()}
+                        new_prov = {k.lower(): (k, v) for k, v in new_prov_raw.items()}
+                        prov_diff = {}
+                        for kl, (k, v) in new_prov.items():
+                            if kl in old_prov:
+                                old_v = old_prov[kl][1]
+                                if old_v != v:
+                                    prov_diff[k] = f"{old_v!r} → {v!r}"
+                            else:
+                                prov_diff[k] = f"+{v!r}"
+                        for kl, (k, v) in old_prov.items():
+                            if kl not in new_prov:
+                                prov_diff[k] = f"-{v!r}"
+                        if prov_diff:
+                            diff["ProviderIds"] = prov_diff
+                    elif key in ("Tags", "TagItems", "Genres", "GenreItems", "LockedFields"):
+                        try:
+                            old_set = set(old_val or [])
+                            new_set = set(new_val or [])
+                            added = new_set - old_set
+                            removed = old_set - new_set
+                            if added or removed:
+                                diff[key] = {**({"+" + v: "" for v in added} if added else {}),
+                                             **({"-" + v: "" for v in removed} if removed else {})}
+                        except TypeError:
+                            pass
+                    elif key == "Studios":
+                        diff[key] = new_val
+                    elif old_val != new_val:
+                        diff[key] = f"{old_val!r} → {new_val!r}" if old_val is not None else f"+{new_val!r}"
+                if diff:
+                    logger.info(f"Updating {item_id}: {diff}")
                 self.EmbyServer.update_item(item_id, update_payload)
             logger.ghost(f"{my_index}/{len_items}")
             len_items -=1
