@@ -229,11 +229,17 @@ class CollectionBuilder:
 
     @staticmethod
     def is_cache_valid(cache_entry):
+        import random
         if not cache_entry or "timestamp" not in cache_entry:
             return False
         cache_time = datetime.fromisoformat(cache_entry["timestamp"])
         age_days = (datetime.now() - cache_time).days
-        return age_days < 21
+
+        if "cache_offset_days" not in cache_entry:
+            cache_entry["cache_offset_days"] = random.randint(1, 7)
+
+        max_age = 14 + cache_entry["cache_offset_days"]
+        return age_days < max_age
 
     def __init__(self, config, metadata, name, data, library=None, overlay=None, extra=None):
         self.config = config
