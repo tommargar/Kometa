@@ -189,6 +189,8 @@ music_attributes = [
 ] + details + summary_details + poster_details + background_details
 
 class CollectionBuilder:
+    template_cache = {}
+
     def __init__(self, config, metadata, name, data, library=None, overlay=None, extra=None):
         self.config = config
         self.metadata = metadata
@@ -244,7 +246,13 @@ class CollectionBuilder:
                 logger.trace(self.data[methods["variables"]])
                 new_variables = self.data[methods["variables"]]
             name = self.data[methods["name"]] if "name" in methods else None
-            new_attributes = self.metadata.apply_template(name, self.mapping_name, self.data, self.data[methods["template"]], new_variables)
+            template_key = (name, self.mapping_name, str(self.data[methods["template"]]), str(sorted(new_variables.items()) if new_variables else []))
+            if template_key in CollectionBuilder.template_cache:
+                new_attributes = CollectionBuilder.template_cache[template_key]
+                logger.debug(f"Template cache hit for {self.mapping_name}")
+            else:
+                new_attributes = self.metadata.apply_template(name, self.mapping_name, self.data, self.data[methods["template"]], new_variables)
+                CollectionBuilder.template_cache[template_key] = new_attributes
             for attr in new_attributes:
                 if attr.lower() not in methods:
                     self.data[attr] = new_attributes[attr]
