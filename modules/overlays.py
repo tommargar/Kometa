@@ -895,6 +895,7 @@ class Overlays:
         properties = {}
         overlay_groups = {}
         key_to_overlays = {}
+        gather_ids_cache = {}
 
         for overlay_file in self.library.overlay_files:
             for k, v in overlay_file.overlays.items():
@@ -914,7 +915,14 @@ class Overlays:
                         logger.debug(f"Builder: {method}: {value}")
                         logger.info("")
                         try:
-                            builder.filter_and_save_items(builder.gather_ids(method, value))
+                            cache_key = (method, str(value))
+                            if cache_key in gather_ids_cache:
+                                logger.info(f"Using cached results for {method}")
+                                ids = gather_ids_cache[cache_key]
+                            else:
+                                ids = builder.gather_ids(method, value)
+                                gather_ids_cache[cache_key] = ids
+                            builder.filter_and_save_items(ids)
                         except Failed as e:
                             if builder.ignore_blank_results:
                                 logger.info("")
