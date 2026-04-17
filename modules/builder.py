@@ -515,13 +515,9 @@ class CollectionBuilder:
             self.library = self.libraries[0]
 
         try:
-            logger.debug(f"TRACE: get_collection start for {self.name}")
-            _t_start = time.time()
             self.obj = self.library.get_playlist(self.name) if self.playlist else self.library.get_collection(self.name, force_search=True)
-            logger.debug(f"TRACE: get_collection end for {self.name} ({time.time()-_t_start:.2f}s)")
         except Failed:
             self.obj = None
-            logger.debug(f"TRACE: get_collection NOT FOUND for {self.name} ({time.time()-_t_start:.2f}s)")
 
         self.only_run_on_create = False
         if "only_run_on_create" in methods and not self.playlist:
@@ -3689,14 +3685,9 @@ class CollectionBuilder:
                 logger.error(f"Arr Error: {e}")
 
     def load_collection(self):
-        logger.debug(f"TRACE: load_collection start for {self.name}")
-        _lc_start = time.time()
         emby_id = None
         if self.obj is None and self.smart_url:
-            logger.debug(f"TRACE:   create_smart_collection (obj is None)")
-            _t = time.time()
             emby_id = self.library.create_smart_collection(self.name, self.smart_type_key, self.smart_url, self.ignore_blank_results, self.minimum)
-            logger.debug(f"TRACE:   create_smart_collection done ({time.time()-_t:.2f}s)")
             logger.debug(f"Smart Collection Created: {self.smart_url}")
         elif self.obj is None and self.blank_collection:
             emby_id = self.library.create_blank_collection(self.name)
@@ -3716,19 +3707,12 @@ class CollectionBuilder:
                 raise Failed(f"{self.Type} Error: Label: {self.name} was not added to any items in the Library")
 
         if emby_id is None:
-            logger.debug(f"TRACE:   get_collection_id")
-            _t = time.time()
             emby_id = self.library.EmbyServer.get_collection_id(self.name)
-            logger.debug(f"TRACE:   get_collection_id done ({time.time()-_t:.2f}s)")
 
         if self.obj is None and emby_id is not None:
-            logger.debug(f"TRACE:   get_item + convert_emby_to_plex")
-            _t = time.time()
             new_col = self.library.EmbyServer.get_item(emby_id)
             if new_col is not None:
                 self.obj = self.library.EmbyServer.convert_emby_to_plex([new_col])[0]
-            logger.debug(f"TRACE:   get_item + convert done ({time.time()-_t:.2f}s)")
-        logger.debug(f"TRACE: load_collection end for {self.name} ({time.time()-_lc_start:.2f}s)")
 
 
         # try:

@@ -215,6 +215,7 @@ class EmbyServer:
         self._image_hash_cache = {}
         self.people_lib_cache = {}
         self.dirty_items: set[int] = set()
+        self._collection_id_cache = None
         self.emby_genres = None
         self.cached_plex_objects = {}
         self.all_tags = None
@@ -1283,6 +1284,7 @@ class EmbyServer:
             # Optional: Update the display order
             self.update_collection_display_order(collection_id, "test")
 
+            self.invalidate_collection_cache(collection_name, collection_id)
             time.sleep(1)  # Add a short delay to avoid API rate limits
             return collection_id
         except Exception as e:
@@ -1491,21 +1493,24 @@ class EmbyServer:
     def set_item_property(self, item_id, property_name, property_value):
         return self.__update_item(item_id, {property_name: property_value})
 
-    def get_collection_id(self, collection_name:str):
-        all_collections = self.get_boxsets_from_library(title=collection_name)
-        collection_found = False
-        collection_id = None
-        for collection in all_collections:
-            # print(collection)
-            if collection_name == collection.title:
-                collection_found = True
-                collection_id = collection.ratingKey
-                break
+    def _build_collection_id_cache(self):
+        all_collections = self.get_boxsets_from_library()
+        self._collection_id_cache = {c.title: c.ratingKey for c in all_collections}
 
-        if not collection_found:
-            return None
+    def invalidate_collection_cache(self, name=None, new_id=None):
+        if self._collection_id_cache is None:
+            return
+        if name is None:
+            self._collection_id_cache = None
+        elif new_id is None:
+            self._collection_id_cache.pop(name, None)
+        else:
+            self._collection_id_cache[name] = new_id
 
-        return collection_id
+    def get_collection_id(self, collection_name: str):
+        if self._collection_id_cache is None:
+            self._build_collection_id_cache()
+        return self._collection_id_cache.get(collection_name)
 
     def add_to_collection(self, collection_name, item_ids: list) -> int:
         # Returns the number of items added to the collection
@@ -2316,6 +2321,7 @@ class EmbyServer:
         headers = { 'accept': '*/*'}
         response = self.session.post(delete_url, headers=headers)
         if response.status_code == 204:
+            self.invalidate_collection_cache()
             logger.info(f'Successfully deleted collection with ID "{collection_id}"')
         else:
 
