@@ -656,6 +656,7 @@ class Emby(Library):
             logger.info(f"Smart Collection {collection.title}: No changes (all {len(keep_items)} items match filter)")
             return
 
+        logger.exorcise()
         logger.info("")
         logger.separator(f"Syncing SmartEmby Collection {collection.title} {self.type}", space=False, border=False)
         logger.info("")
@@ -2230,6 +2231,14 @@ class Emby(Library):
                 return str(premiere_date.year)
             return None
 
+        def get_end_year(item):
+            end_date = item.get("EndDate")
+            if end_date:
+                end_date_obj = self._parse_emby_datetime(end_date)
+                if end_date_obj:
+                    return end_date_obj.year
+            return None
+
         def get_tags(item):
             raw_tags = item.get("Tags") or []
             if raw_tags:
@@ -2260,15 +2269,25 @@ class Emby(Library):
 
         years_value = query_params.get("Years")
         if years_value:
-            allowed_years = {y.strip() for y in years_value.split(",") if y.strip()}
+            allowed_years = {int(y.strip()) for y in years_value.split(",") if y.strip().isdigit()}
             if allowed_years:
                 hydrated_items = []
                 for item in filtered:
-                    item_year = get_year(item)
-                    if item_year is None:
+                    start_year_str = get_year(item)
+                    if start_year_str is None:
                         return None
-                    hydrated_items.append((item, item_year))
-                filtered = [item for item, item_year in hydrated_items if item_year in allowed_years]
+                    start_year = int(start_year_str)
+                    end_year = get_end_year(item)
+                    if end_year is None:
+                        end_year = start_year
+                    hydrated_items.append((item, start_year, end_year))
+                filtered = [
+                    item for item, start_year, end_year in hydrated_items
+                    if any(
+                        start_year <= (allowed_year + 9) and end_year >= allowed_year
+                        for allowed_year in allowed_years
+                    )
+                ]
 
         min_premiere = self._parse_emby_datetime(query_params.get("MinPremiereDate"))
         if min_premiere:
@@ -2976,7 +2995,7 @@ class Emby(Library):
 
         items_data = self.EmbyServer.get_items(
             params={"ParentId": self.Emby.get("Id")},
-            fields="Budget,Chapters,DateCreated,Genres,HomePageUrl,IndexOptions,MediaStreams,Overview,ParentId,Path,People,ProductionYear,PremiereDate,ProviderIds,PrimaryImageAspectRatio,Revenue,SortName,Studios,Taglines,CriticRating,CommunityRating,OfficialRating,Tags,TagItems",
+            fields="Budget,Chapters,DateCreated,EndDate,Genres,HomePageUrl,IndexOptions,MediaStreams,Overview,ParentId,Path,People,ProductionYear,PremiereDate,ProviderIds,PrimaryImageAspectRatio,Revenue,SortName,Studios,Taglines,CriticRating,CommunityRating,OfficialRating,Tags,TagItems",
             include_item_types=include_item_types,
             getAll=True
         ) or []
