@@ -843,7 +843,7 @@ class Operations:
                                 if not new_studio:
                                     logger.info(f"No {option} Studio Found")
                                     raise Failed
-                                if str(current_studio) != str(new_studio):
+                                if str(current_studio).strip() != str(new_studio).strip():
                                     if new_studio not in studio_edits:
                                         studio_edits[new_studio] = []
                                     studio_edits[new_studio].append(item.ratingKey)

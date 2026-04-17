@@ -607,8 +607,8 @@ class Emby(Library):
         self._users = []
         self.emby_users = []
         self._all_items = []
-        self._emby_all_items = []
-        self._emby_all_items_native = []
+        self._emby_all_items = None
+        self._emby_all_items_native = None
         self._account = None
 
         # source_setting = next((s for s in self.Plex.settings() if s.id in ["ratingsSource"]), None)
@@ -2838,7 +2838,8 @@ class Emby(Library):
 
         items = None
         if self._can_use_emby_cache(emby_query_params):
-            self.get_all_native(builder_level= ",".join(item_types))
+            if not self._emby_all_items_native:
+                self.get_all_native(builder_level=None)
             native_source = self._emby_all_items_native or []
             filtered_items = self._filter_emby_native_items(list(native_source), emby_query_params)
             if filtered_items is not None:
@@ -2958,7 +2959,8 @@ class Emby(Library):
         if not builder_level:
             builder_level = self.type.lower()
 
-        logger.info(f"Loading All {builder_level.capitalize()}s from Emby Library: {self.Emby.get('Name')}")
+        display_level = "Series" if builder_level == "show" else builder_level.capitalize()
+        logger.info(f"Loading All {display_level}s from Emby Library: {self.Emby.get('Name')}")
 
         include_item_types = ["Movie", "Series", "MusicArtist"]
         if builder_type == "movie":
@@ -2983,7 +2985,7 @@ class Emby(Library):
         self.EmbyServer.get_resolutions()
 
         self.EmbyServer.update_cache_with_items(items_data)
-        logger.info(f"Loaded {len(items_data)} {builder_level.capitalize()}s from Emby")
+        logger.info(f"Loaded {len(items_data)} {display_level}s from Emby")
         self._emby_all_items_native = items_data
         if native:
             return items_data
