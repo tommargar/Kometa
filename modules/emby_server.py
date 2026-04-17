@@ -216,6 +216,7 @@ class EmbyServer:
         self.people_lib_cache = {}
         self.dirty_items: set[int] = set()
         self._collection_id_cache = None
+        self._season_years_cache = None
         self.emby_genres = None
         self.cached_plex_objects = {}
         self.all_tags = None
@@ -1496,6 +1497,42 @@ class EmbyServer:
     def _build_collection_id_cache(self):
         all_collections = self.get_boxsets_from_library()
         self._collection_id_cache = {c.title: c.ratingKey for c in all_collections}
+
+    def get_show_season_years(self, series_id=None):
+        """Returns a set of season production years per SeriesId. Cached per library.
+
+        If series_id is given, returns the set for that show (or empty set).
+        Otherwise returns the full {series_id: {years}} mapping.
+        """
+        if self._season_years_cache is None:
+            cache: dict[str, set[int]] = {}
+            url = (
+                f"{self.emby_server_url}/Users/{self.user_id}/Items"
+                f"?Recursive=true&IncludeItemTypes=Season"
+                f"&Fields=ProductionYear,PremiereDate,SeriesId"
+                f"&ParentId={self.library_id}&api_key={self.api_key}"
+            )
+            try:
+                response = self.session.get(url)
+                response.raise_for_status()
+                items = response.json().get("Items", []) or []
+            except Exception as e:
+                logger.warning(f"Emby: failed to fetch season years: {e}")
+                items = []
+            for s in items:
+                sid = s.get("SeriesId")
+                if sid is None:
+                    continue
+                year = s.get("ProductionYear")
+                if not isinstance(year, int):
+                    pd = self._parse_emby_datetime(s.get("PremiereDate"))
+                    year = pd.year if pd else None
+                if year:
+                    cache.setdefault(str(sid), set()).add(int(year))
+            self._season_years_cache = cache
+        if series_id is not None:
+            return self._season_years_cache.get(str(series_id), set())
+        return self._season_years_cache
 
     def invalidate_collection_cache(self, name=None, new_id=None):
         if self._collection_id_cache is None:

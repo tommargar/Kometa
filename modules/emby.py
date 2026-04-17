@@ -2271,23 +2271,21 @@ class Emby(Library):
         if years_value:
             allowed_years = {int(y.strip()) for y in years_value.split(",") if y.strip().isdigit()}
             if allowed_years:
-                hydrated_items = []
+                season_years_map = self.EmbyServer.get_show_season_years()
+                matched = []
                 for item in filtered:
-                    start_year_str = get_year(item)
-                    if start_year_str is None:
-                        return None
-                    start_year = int(start_year_str)
-                    end_year = get_end_year(item)
-                    if end_year is None:
-                        end_year = start_year
-                    hydrated_items.append((item, start_year, end_year))
-                filtered = [
-                    item for item, start_year, end_year in hydrated_items
-                    if any(
-                        start_year <= (allowed_year + 9) and end_year >= allowed_year
-                        for allowed_year in allowed_years
-                    )
-                ]
+                    item_years: set[int] = set()
+                    if item.get("Type") == "Series":
+                        sid = item.get("Id")
+                        item_years = set(season_years_map.get(str(sid), set()))
+                    if not item_years:
+                        start_year_str = get_year(item)
+                        if start_year_str is None:
+                            return None
+                        item_years = {int(start_year_str)}
+                    if item_years & allowed_years:
+                        matched.append(item)
+                filtered = matched
 
         min_premiere = self._parse_emby_datetime(query_params.get("MinPremiereDate"))
         if min_premiere:
