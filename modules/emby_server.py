@@ -1505,6 +1505,7 @@ class EmbyServer:
         Otherwise returns the full {series_id: {years}} mapping.
         """
         if self._season_years_cache is None:
+            from datetime import datetime
             cache: dict[str, set[int]] = {}
             url = (
                 f"{self.emby_server_url}/Users/{self.user_id}/Items"
@@ -1525,8 +1526,13 @@ class EmbyServer:
                     continue
                 year = s.get("ProductionYear")
                 if not isinstance(year, int):
-                    pd = self._parse_emby_datetime(s.get("PremiereDate"))
-                    year = pd.year if pd else None
+                    pd_str = s.get("PremiereDate")
+                    if pd_str:
+                        try:
+                            pd = datetime.fromisoformat(pd_str.replace("Z", "+00:00"))
+                            year = pd.year
+                        except (ValueError, AttributeError):
+                            year = None
                 if year:
                     cache.setdefault(str(sid), set()).add(int(year))
             self._season_years_cache = cache
