@@ -805,6 +805,7 @@ class Operations:
 
                 if self.library.mass_studio_update:
                     current_studio = item.studio
+                    current_studio_str = str(current_studio).strip() if current_studio else ""
                     for option in self.library.mass_studio_update:
                         if option in ["lock", "remove"]:
                             if option == "remove" and current_studio:
@@ -843,7 +844,8 @@ class Operations:
                                 if not new_studio:
                                     logger.info(f"No {option} Studio Found")
                                     raise Failed
-                                if str(current_studio).strip() != str(new_studio).strip():
+                                new_studio_str = str(new_studio).strip()
+                                if current_studio_str != new_studio_str:
                                     if new_studio not in studio_edits:
                                         studio_edits[new_studio] = []
                                     studio_edits[new_studio].append(item.ratingKey)
@@ -1256,6 +1258,39 @@ class Operations:
                 ep_tmdb_id_edits=ep_tmdb_id_edits,
                 name_display=name_display,
             )
+
+            if hasattr(self.library, "EmbyServer"):
+                def collect_updated_ids(obj):
+                    ids = []
+                    if isinstance(obj, dict):
+                        for v in obj.values():
+                            if isinstance(v, list):
+                                for item in v:
+                                    if hasattr(item, "ratingKey"):
+                                        ids.append(item.ratingKey)
+                                    elif isinstance(item, (int, str)):
+                                        ids.append(item)
+                            elif isinstance(v, dict):
+                                ids.extend(collect_updated_ids(v))
+                    elif isinstance(obj, list):
+                        for item in obj:
+                            ids.extend(collect_updated_ids(item))
+                    return ids
+
+                updated_ids = collect_updated_ids({
+                    "label": label_edits, "genre": genre_edits, "rating": rating_edits,
+                    "content": content_edits, "studio": studio_edits,
+                    "date": date_edits, "remove": remove_edits, "reset": reset_edits,
+                    "lock": lock_edits, "unlock": unlock_edits,
+                    "ep_rating": ep_rating_edits, "ep_remove": ep_remove_edits,
+                    "ep_reset": ep_reset_edits, "ep_lock": ep_lock_edits, "ep_unlock": ep_unlock_edits
+                })
+                for item_id in set(updated_ids):
+                    idx = next((i for i, it in enumerate(items) if str(it.ratingKey) == str(item_id)), None)
+                    if idx is not None:
+                        refreshed = self.library.EmbyServer.get_item(item_id, force_refresh=True)
+                        if refreshed:
+                            items[idx] = self.library.EmbyServer.convert_emby_to_plex([refreshed])[0]
 
             if hasattr(self.library, "EmbyServer"):
                 modified_ids = set()

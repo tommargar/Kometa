@@ -4145,11 +4145,7 @@ class EmbyServer:
 
         # 1) Aufteilen in bekannte (frisch + Feld-Superset) und nachzuladende IDs
         to_fetch: list[str] = []
-        k = 1
-        id_length = len(fetch_ids_all)
         for id_ in fetch_ids_all:
-            logger.trace(f"Emby bulk cache retrieval {k}/{id_length}")
-            k+=1
             try:
                 id_int = int(id_)
             except (TypeError, ValueError):
@@ -4167,9 +4163,10 @@ class EmbyServer:
 
             if needs_refresh:
                 to_fetch.append(id_)
-                self._purge_cached_item(id_)
             else:
                 out[id_] = cached_item
+        if to_fetch:
+            logger.trace(f"Emby bulk cache: {len(fetch_ids_all)} total, {len(to_fetch)} to fetch")
 
         # 2) Fehlende/nicht vollständige Items in Batches nachladen
         if to_fetch:

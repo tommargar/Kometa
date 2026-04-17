@@ -11,6 +11,7 @@ from modules.poster import ImageData
 from modules.util import Failed, NotScheduled
 
 logger = util.logger
+MAX_IMAGE_SIZE = 10480000
 
 
 class Library(ABC):

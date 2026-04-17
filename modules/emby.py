@@ -981,7 +981,7 @@ class Emby(Library):
             for item in self.load_list_from_cache(rating_keys):
                 item_id = item.ratingKey if hasattr(item, "ratingKey") else item
                 entry = get_update_entry(item_id)
-                entry["update"]["Studios"] = {"Name": new_studio}
+                entry["update"]["Studios"] = [{"Name": new_studio}]
 
         # Process Date edits
         for i, (new_date, rating_keys) in enumerate(sorted(date_edits["originallyAvailableAt"].items()), 1):
