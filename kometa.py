@@ -486,6 +486,7 @@ def start(attrs):
         logger.critical(e)
 
 def run_config(config, stats):
+    CollectionBuilder.load_persistent_cache(config.config_path)
     library_status = run_libraries(config)
 
     playlist_status = {}
@@ -628,6 +629,7 @@ def run_config(config, stats):
         stats["radarr"] += playlist_stats["radarr"]
         stats["sonarr"] += playlist_stats["sonarr"]
         stats["names"].extend([{"name": n, "library": "PLAYLIST"} for n in playlist_stats["names"]])
+    CollectionBuilder.save_persistent_cache()
     return stats
 
 def run_libraries(config):

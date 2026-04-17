@@ -190,6 +190,50 @@ music_attributes = [
 
 class CollectionBuilder:
     template_cache = {}
+    persistent_cache_path = None
+    persistent_cache_data = None
+
+    @staticmethod
+    def load_persistent_cache(config_dir):
+        import json
+        import hashlib
+        cache_file = os.path.join(config_dir, ".kometa_template_cache.json")
+        CollectionBuilder.persistent_cache_path = cache_file
+        try:
+            if os.path.exists(cache_file):
+                with open(cache_file, 'r') as f:
+                    CollectionBuilder.persistent_cache_data = json.load(f)
+                logger.debug(f"Loaded persistent template cache from {cache_file}")
+            else:
+                CollectionBuilder.persistent_cache_data = {}
+        except Exception as e:
+            logger.warning(f"Failed to load persistent cache: {e}")
+            CollectionBuilder.persistent_cache_data = {}
+
+    @staticmethod
+    def save_persistent_cache():
+        import json
+        if CollectionBuilder.persistent_cache_path and CollectionBuilder.persistent_cache_data:
+            try:
+                with open(CollectionBuilder.persistent_cache_path, 'w') as f:
+                    json.dump(CollectionBuilder.persistent_cache_data, f, indent=2, default=str)
+            except Exception as e:
+                logger.warning(f"Failed to save persistent cache: {e}")
+
+    @staticmethod
+    def compute_template_hash(template_data, variables):
+        import hashlib
+        import json
+        data_str = json.dumps({"template": template_data, "variables": variables}, sort_keys=True, default=str)
+        return hashlib.md5(data_str.encode()).hexdigest()
+
+    @staticmethod
+    def is_cache_valid(cache_entry):
+        if not cache_entry or "timestamp" not in cache_entry:
+            return False
+        cache_time = datetime.fromisoformat(cache_entry["timestamp"])
+        age_days = (datetime.now() - cache_time).days
+        return age_days < 21
 
     def __init__(self, config, metadata, name, data, library=None, overlay=None, extra=None):
         self.config = config
@@ -247,12 +291,33 @@ class CollectionBuilder:
                 new_variables = self.data[methods["variables"]]
             name = self.data[methods["name"]] if "name" in methods else None
             template_key = (name, self.mapping_name, str(self.data[methods["template"]]), str(sorted(new_variables.items()) if new_variables else []))
+            template_hash = CollectionBuilder.compute_template_hash(self.data[methods["template"]], new_variables)
+
+            new_attributes = None
+            cache_source = None
+
             if template_key in CollectionBuilder.template_cache:
                 new_attributes = CollectionBuilder.template_cache[template_key]
-                logger.debug(f"Template cache hit for {self.mapping_name}")
+                cache_source = "in-memory"
+            elif CollectionBuilder.persistent_cache_data and template_hash in CollectionBuilder.persistent_cache_data:
+                cache_entry = CollectionBuilder.persistent_cache_data[template_hash]
+                if CollectionBuilder.is_cache_valid(cache_entry) and cache_entry.get("config_hash") == template_hash:
+                    new_attributes = cache_entry.get("attributes")
+                    cache_source = "persistent"
+
+            if new_attributes:
+                logger.debug(f"Template cache hit ({cache_source}) for {self.mapping_name}")
+                CollectionBuilder.template_cache[template_key] = new_attributes
             else:
                 new_attributes = self.metadata.apply_template(name, self.mapping_name, self.data, self.data[methods["template"]], new_variables)
                 CollectionBuilder.template_cache[template_key] = new_attributes
+                if CollectionBuilder.persistent_cache_data is not None:
+                    CollectionBuilder.persistent_cache_data[template_hash] = {
+                        "attributes": new_attributes,
+                        "config_hash": template_hash,
+                        "timestamp": datetime.now().isoformat()
+                    }
+
             for attr in new_attributes:
                 if attr.lower() not in methods:
                     self.data[attr] = new_attributes[attr]
