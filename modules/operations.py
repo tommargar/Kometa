@@ -626,8 +626,10 @@ class Operations:
                     if new_genres:
                         new_genres = list(dict.fromkeys(new_genres))
 
-                    _add = list(set(new_genres) - set(item_genres))
-                    _remove = list(set(item_genres) - set(new_genres))
+                    item_genres_lower = {g.lower() for g in item_genres}
+                    new_genres_lower = {g.lower() for g in new_genres}
+                    _add = [g for g in new_genres if g.lower() not in item_genres_lower]
+                    _remove = [g for g in item_genres if g.lower() not in new_genres_lower]
 
                     # Update genres without batch, as not supported in Emby;
                     # ToDo: collect all changes by item id first, buikd payload,
@@ -806,6 +808,14 @@ class Operations:
                 if self.library.mass_studio_update:
                     current_studio = item.studio
                     current_studio_str = str(current_studio).strip() if current_studio else ""
+                    current_studio_names = set()
+                    if hasattr(self.library, "EmbyServer"):
+                        native = self.library.EmbyServer.get_item(item.ratingKey, force_refresh=False)
+                        if native:
+                            for s in (native.get("Studios") or []):
+                                n = s.get("Name") if isinstance(s, dict) else s
+                                if n:
+                                    current_studio_names.add(str(n).strip().lower())
                     for option in self.library.mass_studio_update:
                         if option in ["lock", "remove"]:
                             if option == "remove" and current_studio:
@@ -845,7 +855,12 @@ class Operations:
                                     logger.info(f"No {option} Studio Found")
                                     raise Failed
                                 new_studio_str = str(new_studio).strip()
-                                if current_studio_str != new_studio_str:
+                                new_studio_lower = new_studio_str.lower()
+                                already_set = (
+                                    current_studio_str.lower() == new_studio_lower
+                                    or new_studio_lower in current_studio_names
+                                )
+                                if not already_set:
                                     if new_studio not in studio_edits:
                                         studio_edits[new_studio] = []
                                     studio_edits[new_studio].append(item.ratingKey)
