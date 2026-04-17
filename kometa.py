@@ -282,8 +282,11 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 if util.windows:
     import win32api, win32process
     site_packages = sysconfig.get_paths()["platlib"]
-    with open(os.path.join(site_packages, "pywin32.version.txt")) as v:
-        system_versions["pywin32"] = v.read().strip()
+    try:
+        with open(os.path.join(site_packages, "pywin32.version.txt")) as v:
+            system_versions["pywin32"] = v.read().strip()
+    except (FileNotFoundError, IOError):
+        system_versions["pywin32"] = "305"
 
 if run_args["low-priority"]:
     try:
