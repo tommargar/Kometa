@@ -197,6 +197,8 @@ class CollectionBuilder:
     def load_persistent_cache(config_dir):
         import json
         import hashlib
+        if config_dir.endswith('.yml'):
+            config_dir = os.path.dirname(config_dir)
         cache_file = os.path.join(config_dir, ".kometa_template_cache.json")
         CollectionBuilder.persistent_cache_path = cache_file
         try:
