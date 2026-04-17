@@ -221,10 +221,10 @@ class CollectionBuilder:
                 logger.warning(f"Failed to save persistent cache: {e}")
 
     @staticmethod
-    def compute_template_hash(template_data, variables):
+    def compute_template_hash(template_data, variables, mapping_name=None):
         import hashlib
         import json
-        data_str = json.dumps({"template": template_data, "variables": variables}, sort_keys=True, default=str)
+        data_str = json.dumps({"mapping_name": mapping_name, "template": template_data, "variables": variables}, sort_keys=True, default=str)
         return hashlib.md5(data_str.encode()).hexdigest()
 
     @staticmethod
@@ -297,7 +297,7 @@ class CollectionBuilder:
                 new_variables = self.data[methods["variables"]]
             name = self.data[methods["name"]] if "name" in methods else None
             template_key = (name, self.mapping_name, str(self.data[methods["template"]]), str(sorted(new_variables.items()) if new_variables else []))
-            template_hash = CollectionBuilder.compute_template_hash(self.data[methods["template"]], new_variables)
+            template_hash = CollectionBuilder.compute_template_hash(self.data[methods["template"]], new_variables, self.mapping_name)
 
             new_attributes = None
             cache_source = None
