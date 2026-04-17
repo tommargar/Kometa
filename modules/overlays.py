@@ -37,6 +37,11 @@ class Overlays:
                 logger.separator(f"Refreshing {len(emby_server.dirty_items)} Dirty Items for the {self.library.name} Library")
                 logger.info("")
                 for i, item_id in enumerate(list(emby_server.dirty_items), 1):
+                    emby_server.cached_plex_objects.pop(str(item_id), None)
+                    try:
+                        emby_server.cached_plex_objects.pop(int(item_id), None)
+                    except (TypeError, ValueError):
+                        pass
                     logger.ghost(f"Refreshing {i}/{len(emby_server.dirty_items)} Item ID: {item_id}")
                     emby_server.get_item(item_id, force_refresh=True)
                 logger.info("")
@@ -835,6 +840,26 @@ class Overlays:
                         actual_attr = plex.attribute_translation.get(format_var, format_var)
                         if hasattr(item, actual_attr):
                             real_value = getattr(item, actual_attr)
+
+                        if format_var in ("audience_rating", "critic_rating", "user_rating"):
+                            emby_server = getattr(self.library, "EmbyServer", None)
+                            item_id = getattr(item, "ratingKey", None)
+                            if emby_server and item_id is not None:
+                                native_item = emby_server.get_item(item_id, force_refresh=False)
+                                if native_item:
+                                    if format_var == "audience_rating":
+                                        fresh = native_item.get("CommunityRating")
+                                    elif format_var == "critic_rating":
+                                        fresh = native_item.get("CriticRating")
+                                        if fresh is not None:
+                                            try:
+                                                fresh = float(fresh) / 10
+                                            except (TypeError, ValueError):
+                                                fresh = None
+                                    else:
+                                        fresh = emby_server.get_custom_rating_from_item(native_item, raw=True)
+                                    if fresh is not None:
+                                        real_value = fresh
 
                     if real_value is None:
                         # Warnung: Externe Ratings (TMDB, Trakt, etc.) werden in dieser Prüf-Funktion

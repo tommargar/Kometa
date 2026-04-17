@@ -149,6 +149,8 @@ class TMDbMovie(TMDBObj):
             return self._tmdb.TMDb.movie(self.tmdb_id, partial="external_ids,keywords,credits")
         except NotFound:
             raise Failed(f"TMDb Error: No Movie found for TMDb ID: {self.tmdb_id}")
+        except ValueError as e:
+            raise Failed(f"TMDb Error: Invalid TMDb ID '{self.tmdb_id}': {e}")
         except TMDbException as e:
             logger.stacktrace()
             raise TMDbException(f"TMDb Error: Unexpected Error with TMDb ID: {self.tmdb_id}: {e}")
@@ -195,6 +197,8 @@ class TMDbShow(TMDBObj):
             return self._tmdb.TMDb.tv_show(self.tmdb_id, partial="external_ids,keywords,credits")
         except NotFound:
             raise Failed(f"TMDb Error: No Show found for TMDb ID: {self.tmdb_id} - https://themoviedb.org/tv/{self.tmdb_id}")
+        except ValueError as e:
+            raise Failed(f"TMDb Error: Invalid TMDb ID '{self.tmdb_id}': {e}")
         except TMDbException as e:
             logger.stacktrace()
             raise TMDbException(f"TMDb Error: Unexpected Error with TMDb ID: {self.tmdb_id}: {e}")

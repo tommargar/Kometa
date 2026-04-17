@@ -1030,6 +1030,13 @@ class EmbyServer:
         tvdb = normalized_prov_ids.get("tvdb",None)
         tmdb = normalized_prov_ids.get("tmdb",None)
 
+        if tmdb is not None and not str(tmdb).lstrip("-").isdigit():
+            logger.warning(f"Emby ProviderIds: invalid TMDb ID '{tmdb}' for item {getattr(item, 'title', item)} — ignoring")
+            tmdb = None
+        if tvdb is not None and not str(tvdb).lstrip("-").isdigit():
+            logger.warning(f"Emby ProviderIds: invalid TVDb ID '{tvdb}' for item {getattr(item, 'title', item)} — ignoring")
+            tvdb = None
+
         # item_type = "show" if emby_item.get('Type')=="Series" else "movie"
 
         return [imdb, tvdb, tmdb]
@@ -1890,7 +1897,12 @@ class EmbyServer:
                 self.cached_plex_objects.pop(str(item_id), None)
                 self.cached_plex_objects.pop(item_id_int, None)
 
-            if item_id in self.cached_plex_objects:
+            # Only reuse the cached plex object when the caller passed a bare stub
+            # (e.g. {"Id": ...}); for full payloads always rebuild to reflect the
+            # freshest field values (ratings, genres, etc.) from Emby.
+            is_stub = isinstance(item, dict) and set(item.keys()) <= {"Id", "id"}
+
+            if is_stub and item_id in self.cached_plex_objects:
                 plex_object = self.cached_plex_objects[item_id]
             else:
 
