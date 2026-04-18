@@ -129,6 +129,12 @@ class Operations:
             items = self.library.get_all()
             total_items = len(items)
 
+            # Lookup-Tabelle aus bereits geladenen nativen Emby-Items für Studio-Check (O(1), kein HTTP-Call)
+            _emby_native_by_id = {}
+            if hasattr(self.library, "EmbyServer") and hasattr(self.library, "_emby_all_items_native"):
+                native_list = self.library._emby_all_items_native or []
+                _emby_native_by_id = {str(it.get("Id")): it for it in native_list if isinstance(it, dict) and it.get("Id")}
+
             radarr_adds = []
             sonarr_adds = []
             label_edits = {"add": {}, "remove": {}}
@@ -809,13 +815,12 @@ class Operations:
                     current_studio = item.studio
                     current_studio_str = str(current_studio).strip() if current_studio else ""
                     current_studio_names = set()
-                    if hasattr(self.library, "EmbyServer"):
-                        native = self.library.EmbyServer.get_item(item.ratingKey, force_refresh=False)
-                        if native:
-                            for s in (native.get("Studios") or []):
-                                n = s.get("Name") if isinstance(s, dict) else s
-                                if n:
-                                    current_studio_names.add(str(n).strip().lower())
+                    native = _emby_native_by_id.get(str(item.ratingKey))
+                    if native:
+                        for s in (native.get("Studios") or []):
+                            n = s.get("Name") if isinstance(s, dict) else s
+                            if n:
+                                current_studio_names.add(str(n).strip().lower())
                     for option in self.library.mass_studio_update:
                         if option in ["lock", "remove"]:
                             if option == "remove" and current_studio:

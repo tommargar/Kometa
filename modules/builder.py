@@ -2537,11 +2537,11 @@ class CollectionBuilder:
         if len(ids) > 0:
             emby_item_map = {}
             if hasattr(self.library, "EmbyServer"):
-                rks_to_fetch = list(set([int(i[0]) for i in ids if i[1] == "ratingKey"]))
+                rks_to_fetch = list(set([str(i[0]) for i in ids if i[1] == "ratingKey"]))
                 if rks_to_fetch:
                     try:
                         cached_emby_items = getattr(self.library, "_emby_all_items_native", None) or []
-                        cached_by_id = {item.get("Id"): item for item in cached_emby_items if isinstance(item, dict) and "Id" in item}
+                        cached_by_id = {str(item.get("Id")): item for item in cached_emby_items if isinstance(item, dict) and "Id" in item}
 
                         items_to_fetch = [rk for rk in rks_to_fetch if rk not in cached_by_id]
 
@@ -2554,10 +2554,11 @@ class CollectionBuilder:
                                 "CommunityRating", "OfficialRating", "Tags", "TagItems", "RunTimeTicks",
                                 "ProductionLocations", "MediaSources", "OriginalTitle"
                             ]
-                            results_dict = self.library.EmbyServer.get_items_bulk([str(r) for r in items_to_fetch], fields=fields) or {}
+                            results_dict = self.library.EmbyServer.get_items_bulk(items_to_fetch, fields=fields) or {}
+                            results_dict = {str(k): v for k, v in results_dict.items()}
 
                         all_items = {**cached_by_id, **results_dict}
-                        plex_items = self.library.EmbyServer.convert_emby_to_plex([all_items.get(rk) for rk in rks_to_fetch if rk in all_items])
+                        plex_items = self.library.EmbyServer.convert_emby_to_plex([all_items[rk] for rk in rks_to_fetch if rk in all_items])
                         for item in plex_items:
                             emby_item_map[str(item.ratingKey)] = item
                     except Exception as e:
