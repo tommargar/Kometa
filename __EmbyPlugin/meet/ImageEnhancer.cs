@@ -16,7 +16,7 @@ using MediaBrowser.Controller.Base;
 
 
 //ToDo: Add JPG quality to options
-namespace EmbyPluginUiDemo.meet
+namespace EmbyKometaOverlays.meet
 {
     public sealed class ImageEnhancer : CommonBase, IImageEnhancer
     {

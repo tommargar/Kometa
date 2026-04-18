@@ -2,7 +2,7 @@
 // Copyright © 2022 - Emby LLC. All rights reserved.
 // </copyright>
 
-namespace EmbyPluginUiDemo
+namespace EmbyKometaOverlays
 {
     using System;
     using System.Collections.Generic;
@@ -37,7 +37,7 @@ namespace EmbyPluginUiDemo
 
         /// <summary>Gets the description.</summary>
         /// <value>The description.</value>
-        public override string Description => "This plugin demonstrates the new Emby Plugin UI features";
+        public override string Description => "This plugin provides overlays for Emby created by Kometa.";
 
         /// <summary>Gets the unique id.</summary>
         /// <value>The unique id.</value>
@@ -45,7 +45,7 @@ namespace EmbyPluginUiDemo
 
         /// <summary>Gets the name of the plugin</summary>
         /// <value>The name.</value>
-        public const string PluginName = "meet Moovie manager";
+        public const string PluginName = "Kometa Overlays for Emby";
 
         /// <summary>Gets the name of the plugin</summary>
         /// <value>The name.</value>

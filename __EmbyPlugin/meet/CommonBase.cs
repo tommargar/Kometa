@@ -2,7 +2,7 @@
 {
     using System.Linq;
     using EmbyPluginSimpleUI;
-    using EmbyPluginUiDemo;
+    using EmbyKometaOverlays;
     using MediaBrowser.Common;
     using MediaBrowser.Controller.Base;
     using MediaBrowser.Model.Logging;

@@ -12,13 +12,13 @@
 
     public class MyPluginOptions : EditableOptionsBase
     {
-        public override string EditorTitle => "MyPlugin Options";
+        public override string EditorTitle => "Emby Kometa Overlays - Settings";
 
-        public override string EditorDescription => "This is a description text, shown at the top of the options page.\n"
-                                                    + "The options below are just a few examples for creating UI elements.";
+        public override string EditorDescription => "This is the configuration page for Emby Kometa Overlays.\n"
+                                                    + "Please configure the settings below to customize the plugin behavior.";
 
         [DisplayName("Output Folder")]
-        [Description("Please choose a folder for plugin output")]
+        [Description("Please point to the Kometa output folder with the opaque pngs.")]
         [EditFolderPicker]
         public string TargetFolder { get; set; }
 

@@ -1,10 +1,10 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net6.0</TargetFramework>
     <IsPublishable>True</IsPublishable>
     <ErrorReport>none</ErrorReport>
-    <AssemblyVersion>4.9.0.0</AssemblyVersion>
-    <FileVersion>4.9.0.0</FileVersion>
+    <AssemblyVersion>4.8.0.0</AssemblyVersion>
+    <FileVersion>4.8ta.0.0</FileVersion>
     <AssemblyInformationalVersion>4.8.0.0</AssemblyInformationalVersion>
     <ProductVersion>4.8.0.0</ProductVersion>
   </PropertyGroup>
@@ -23,18 +23,9 @@
     <None Include="meet\RibbonProcessor.cs" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="MediaBrowser.Server.Core" Version="4.9.1.90" />
+    <PackageReference Include="MediaBrowser.Server.Core" Version="4.8.2" />
     <PackageReference Include="System.Memory" Version="4.6.3" />
-  </ItemGroup>
-  <ItemGroup>
-    <Reference Include="Emby.Drawing.Skia">
-      <HintPath>C:\Users\tmgae\AppData\Roaming\Emby-Server\system\Emby.Drawing.Skia.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="SkiaSharp">
-      <HintPath>C:\Users\tmgae\AppData\Roaming\Emby-Server\system\SkiaSharp.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
+	  <PackageReference Include="SkiaSharp" Version="2.88.6" />
   </ItemGroup>
   <ItemGroup>
     <Compile Update="Properties\Resources.Designer.cs">
