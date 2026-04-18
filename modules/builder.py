@@ -298,8 +298,9 @@ class CollectionBuilder:
                 logger.trace(self.data[methods["variables"]])
                 new_variables = self.data[methods["variables"]]
             name = self.data[methods["name"]] if "name" in methods else None
-            template_key = (name, self.mapping_name, str(self.data[methods["template"]]), str(sorted(new_variables.items()) if new_variables else []))
-            template_hash = CollectionBuilder.compute_template_hash(self.data[methods["template"]], new_variables, self.mapping_name)
+            config_temp_vars = getattr(self.metadata, "temp_vars", {}) or {}
+            template_key = (name, self.mapping_name, str(self.data[methods["template"]]), str(sorted(new_variables.items()) if new_variables else []), str(sorted(config_temp_vars.items()) if config_temp_vars else []))
+            template_hash = CollectionBuilder.compute_template_hash(self.data[methods["template"]], {**new_variables, **config_temp_vars}, self.mapping_name)
 
             new_attributes = None
             cache_source = None
@@ -319,7 +320,14 @@ class CollectionBuilder:
             else:
                 new_attributes = self.metadata.apply_template(name, self.mapping_name, self.data, self.data[methods["template"]], new_variables)
                 CollectionBuilder.template_cache[template_key] = new_attributes
-                if CollectionBuilder.persistent_cache_data is not None:
+                template_bodies = []
+                for tv in util.get_list(self.data[methods["template"]], split=False):
+                    tname = tv.get("name") if isinstance(tv, dict) else None
+                    if tname and hasattr(self.metadata, "templates") and tname in self.metadata.templates:
+                        template_bodies.append(str(self.metadata.templates[tname]))
+                template_body_str = " ".join(template_bodies)
+                has_date_var = any(p in template_body_str for p in ("<<current_year>>", "<<current_month>>", "<<current_day>>"))
+                if CollectionBuilder.persistent_cache_data is not None and not has_date_var:
                     CollectionBuilder.persistent_cache_data[template_hash] = {
                         "attributes": new_attributes,
                         "config_hash": template_hash,
