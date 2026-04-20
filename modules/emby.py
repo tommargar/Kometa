@@ -3488,6 +3488,33 @@ class Emby(Library):
                     test_number = ticks / 600000000
                 else:
                     test_number = 0
+            elif filter_attr in ("user_rating", "audience_rating", "critic_rating"):
+                # Frisch aus Emby lesen: das Plex-konvertierte item-Objekt kann stale sein,
+                # wenn Operations im selben Lauf CustomRating/CommunityRating/CriticRating geschrieben hat.
+                # Dadurch wurden Rating-basierte Overlay-Filter zuvor systematisch umgangen.
+                test_number = None
+                native_item = emby_item
+                try:
+                    rk_int = int(item.ratingKey)
+                except (TypeError, ValueError):
+                    rk_int = None
+                if rk_int is not None and rk_int in self.EmbyServer.dirty_items:
+                    native_item = self.EmbyServer.get_item(item.ratingKey, force_refresh=True)
+                    self.filter_items_cache[item.ratingKey] = native_item
+                if native_item:
+                    if filter_attr == "audience_rating":
+                        test_number = native_item.get("CommunityRating")
+                    elif filter_attr == "critic_rating":
+                        cr = native_item.get("CriticRating")
+                        if cr is not None:
+                            try:
+                                test_number = float(cr) / 10
+                            except (TypeError, ValueError):
+                                test_number = None
+                    else:  # user_rating
+                        test_number = self.EmbyServer.get_custom_rating_from_item(native_item, raw=True)
+                if test_number is None:
+                    test_number = getattr(item, filter_actual)
             else:
                 test_number = getattr(item, filter_actual)
             
