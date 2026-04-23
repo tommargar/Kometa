@@ -576,8 +576,10 @@ class Operations:
                     new_genres = []
                     extra_option = None
                     if self.library.mass_genre_update:
-                        merge_genres = "merge" in self.library.mass_genre_update
-                        for option in self.library.mass_genre_update:
+                        # Flatten list of lists from config
+                        options = [item for sublist in self.library.mass_genre_update for item in (sublist if isinstance(sublist, list) else [sublist])]
+                        merge_genres = "merge" in options
+                        for option in options:
                             if option == "merge":
                                 continue
                             if option in ["lock", "unlock", "remove", "reset"]:
@@ -599,9 +601,10 @@ class Operations:
                                 elif option == "mal":
                                     temp_genres = mal_obj().genres  # noqa
                                 elif option == "mal_all":
-                                    temp_genres = mal_obj().genres + mal_obj().explicit_genres + mal_obj().themes + mal_obj().demographics  # noqa
+                                    temp_genres = mal_obj().genres + mal_obj().explicit_genres + mal_obj().themes + mal_obj().demographics
                                 else:
-                                    temp_genres = option
+                                    # BUGFIX: Ensure single string options are treated as a list containing that string
+                                    temp_genres = [option]
                                 if temp_genres:
                                     temp_genres = [g for g in temp_genres if str(g).strip()]
                                 if not temp_genres:
@@ -615,7 +618,6 @@ class Operations:
                         if merge_genres and new_genres:
                             new_genres = list(dict.fromkeys(new_genres))
 
-                    # item_genres = [g.tag for g in item.genres]
                     item_genres = (emby_item.get("Genres", []) if emby_item else [])
                     if not new_genres and extra_option not in ["remove", "reset"]:
                         new_genres = item_genres
@@ -637,10 +639,6 @@ class Operations:
                     _add = [g for g in new_genres if g.lower() not in item_genres_lower]
                     _remove = [g for g in item_genres if g.lower() not in new_genres_lower]
 
-                    # Update genres without batch, as not supported in Emby;
-                    # ToDo: collect all changes by item id first, buikd payload,
-                    # todo: update items only once
-
                     for genre_list, edit_type in [(_add, "add"), (_remove, "remove")]:
                         if genre_list:
                             for g in genre_list:
@@ -653,8 +651,7 @@ class Operations:
                             unlock_edits["genre"] = []
                         unlock_edits["genre"].append(item.ratingKey)
                         item_edits.append("Unlock Genre (Batched)")
-                    elif extra_option in ["lock",
-                                          "remove"] and "genre" not in locked_fields and not _add and not _remove:
+                    elif extra_option in ["lock", "remove"] and "genre" not in locked_fields and not _add and not _remove:
                         if "genre" not in lock_edits:
                             lock_edits["genre"] = []
                         lock_edits["genre"].append(item.ratingKey)
