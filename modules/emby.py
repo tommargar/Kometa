@@ -2318,6 +2318,17 @@ class Emby(Library):
             for item in filtered:
                 keep_item = True
                 custom_rating_value = 0
+                # Stale-Schutz: Falls Operations im selben Lauf CustomRating/CommunityRating/CriticRating
+                # geschrieben hat, ist `item` aus der Cache-Liste veraltet. Dirty-Items frisch nachziehen.
+                iid = item.get("Id")
+                try:
+                    iid_int = int(iid)
+                except (TypeError, ValueError):
+                    iid_int = None
+                if iid_int is not None and iid_int in self.EmbyServer.dirty_items:
+                    fresh = self.EmbyServer.get_item(iid, force_refresh=True)
+                    if fresh is not None:
+                        item = fresh
                 if "MaxCustomRating" in query_params or "MinCustomRating" in query_params:
                     rating = self.EmbyServer.get_custom_rating_from_item(item)
                     if rating is not None:
