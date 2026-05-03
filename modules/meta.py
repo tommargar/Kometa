@@ -1009,8 +1009,9 @@ class MetadataFile(DataFile):
                                         emby_people = item.get("People", [])
                                         if dynamic.get("template") and "tmdb_person" in dynamic["template"]:
                                             emby_ids = [entry.get("Id") for entry in emby_people]
-                                            my_emby_cast = self.library.EmbyServer.get_items_bulk(emby_ids, ["ProviderIds"])
-                                            local_people_cache[item.get("Id")] = (my_emby_cast, emby_people)
+                                            if hasattr(self.library, "EmbyServer") and self.library.EmbyServer:
+                                                my_emby_cast = self.library.EmbyServer.get_items_bulk(emby_ids, ["ProviderIds"])
+                                                local_people_cache[item.get("Id")] = (my_emby_cast, emby_people)
 
                                     # Director, Writer
                                     the_list = []
@@ -1661,7 +1662,7 @@ class MetadataFile(DataFile):
                             raise Failed(f"{self.type_str} Error: {library_type} is invalid. Options: true, false, {', '.join(plex.library_types)}")
                         elif library_type == "false":
                             raise NotScheduled(f"Skipped because run_definition is false")
-                        elif library_type != "true" and self.library and library_type != self.library.Plex.type:
+                        elif library_type != "true" and self.library and hasattr(self.library, "Plex") and self.library.Plex and library_type != self.library.Plex.type:
                             raise NotScheduled(f"Skipped because run_definition library_type: {library_type} doesn't match")
 
                 match_data = None
