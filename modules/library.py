@@ -167,6 +167,11 @@ class Library(ABC):
             logger.info("")
             logger.info(output)
 
+    @property
+    def is_emby(self):
+        """Check if this library is an Emby library."""
+        return self.mc_type == "emby"
+
     def scan_files(self, operations_only, overlays_only, collection_only, metadata_only):
         if not operations_only and not overlays_only and not metadata_only:
             for file_type, metadata_file, temp_vars, asset_directory in self.scanned_collection_files:
