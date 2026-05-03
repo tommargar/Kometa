@@ -3980,11 +3980,8 @@ class CollectionBuilder:
                     names = {s.season_number: s.name for s in self.config.TMDb.get_show(tmdb_id).seasons}
                     for season in self.library.query(item.seasons):
                         if season.index in names and season.title != names[season.index]:
-                            season.editTitle(names[season.index])
-                            if self.library.is_emby:
-                                if not hasattr(self.library.EmbyServer, "dirty_items"):
-                                    self.library.EmbyServer.dirty_items = set()
-                                self.library.EmbyServer.dirty_items.add(season.ratingKey)
+                            # season.editTitle(names[season.index])
+                            self.library.EmbyServer.editItemTitle(season.ratingKey, names[season.index])
 
                 except Failed as e:
                     logger.error(e)

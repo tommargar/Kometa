@@ -1023,14 +1023,17 @@ class Overlays:
         if self.library.mc_type == "plex":
             items = self.library.search(label=label, libtype=libtype)
             return items if not ignore else [o for o in items if o.ratingKey not in ignore]
-
-        if libtype:
-            emby_items = self.library.EmbyServer.get_items(include_item_types=[libtype], params={"ParentId": self.library.EmbyServer.library_id, "Recursive": "True"})
+        elif self.library.is_emby:
+            if libtype:
+                emby_items = self.library.EmbyServer.get_items(include_item_types=[libtype], params={"ParentId": self.library.EmbyServer.library_id, "Recursive": "True"})
+            else:
+                emby_items = self.library.EmbyServer.get_items(params={"ParentId": self.library.EmbyServer.library_id, "Recursive": "True"}, include_item_types=["Series,Movie,Season,Episode"])
+            all_emby_ids = [item.get("Id") for item in emby_items]
+            all_emby_ids = all_emby_ids if not ignore else [o for o in all_emby_ids if o not in ignore]
+            return all_emby_ids
         else:
-            emby_items = self.library.EmbyServer.get_items(params={"ParentId": self.library.EmbyServer.library_id, "Recursive": "True"}, include_item_types=["Series,Movie,Season,Episode"])
-        all_emby_ids = [item.get("Id") for item in emby_items]
-        all_emby_ids = all_emby_ids if not ignore else [o for o in all_emby_ids if o not in ignore]
-        return all_emby_ids
+            logger.error(f"Unknown library type: {self.library.mc_type}")
+            return []
 
     def remove_overlay(self, item, item_title, label, locations):
         # todo: delete overlay png from Emby plugin folder
