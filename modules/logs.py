@@ -31,7 +31,7 @@ def log_namer(default_name):
     log_path = os.path.dirname(default_name)
     log_file = os.path.basename(default_name)
     base, ext, num = log_file.split(".")
-    return f"{log_path}/{base}-{num}.{ext}"
+    return os.path.join(log_path, f"{base}-{num}.{ext}")
 
 
 class MyLogger:
