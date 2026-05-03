@@ -49,6 +49,12 @@ class Overlays:
                         pass
                     logger.ghost(f"Refreshing {i}/{len(emby_server.dirty_items)} Item ID: {item_id}")
                     emby_server.get_item(item_id, force_refresh=True)
+                if self.library.Plex:
+                    logger.info(f"Refreshing library cache after {len(emby_server.dirty_items)} item updates")
+                    try:
+                        self.library.Plex.reload()
+                    except Exception as e:
+                        logger.warning(f"Overlay Warning: Failed to reload Plex library cache: {e}")
                 logger.info("")
             key_to_overlays, properties = self.compile_overlays()
         ignore_list = [rk for rk in key_to_overlays]
@@ -733,6 +739,9 @@ class Overlays:
         overlay_run_time = str(datetime.now() - overlay_start).split(".")[0]
         logger.info("")
         logger.separator(f"Finished {self.library.name} Library Overlays\nOverlays Run Time: {overlay_run_time}")
+        # Clear dirty_items after overlay run so subsequent operations start fresh
+        if hasattr(self.library, "EmbyServer") and hasattr(self.library.EmbyServer, "dirty_items"):
+            self.library.EmbyServer.dirty_items.clear()
         return overlay_run_time
 
     def get_overlay_change_reason(self, item, over_names, properties, overlay_compare, compare_names, has_overlay, special_text_cache):
