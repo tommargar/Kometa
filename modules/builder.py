@@ -4,78 +4,184 @@ import time
 from datetime import datetime, timedelta
 
 from arrapi import ArrException
-from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
-from modules import anidb, anilist, icheckmovies, imdb, letterboxd, mal, mojo, plex, radarr, sonarr, tautulli, tmdb, trakt, tvdb, mdblist, util
-from modules.util import Failed, FilterFailed, NonExisting, NotScheduled, NotScheduledRange, Deleted
+from plexapi.audio import Album, Artist, Track
+from plexapi.exceptions import NotFound
+from plexapi.video import Episode, Movie, Season, Show
+from tmdbapis.tmdb import discover_movie_sort_options, discover_tv_sort_options
+
+from modules import anidb, anilist, icheckmovies, imdb, letterboxd, mal, mdblist, mojo, plex, radarr, sonarr, tautulli, tmdb, trakt, tvdb, util
 from modules.overlay import Overlay
 from modules.poster import KometaImage
 from modules.request import quote
-from plexapi.audio import Artist, Album, Track
-from plexapi.exceptions import NotFound
-from plexapi.video import Movie, Show, Season, Episode
-from tmdbapis.tmdb import discover_movie_sort_options, discover_tv_sort_options
+from modules.util import Deleted, Failed, FilterFailed, NonExisting, NotScheduled, NotScheduledRange
 
 logger = util.logger
 
 advance_new_agent = ["item_metadata_language", "item_use_original_title"]
 advance_show = ["item_episode_sorting", "item_keep_episodes", "item_delete_episodes", "item_season_display", "item_episode_sorting"]
-all_builders = anidb.builders + anilist.builders + icheckmovies.builders + imdb.builders + \
-               letterboxd.builders + mal.builders + mojo.builders + plex.builders + tautulli.builders + \
-               tmdb.builders + trakt.builders + tvdb.builders + mdblist.builders + radarr.builders + sonarr.builders
-show_only_builders = [
-    "tmdb_network", "tmdb_show", "tmdb_show_details", "tvdb_show", "tvdb_show_details", "tmdb_airing_today",
-    "tmdb_on_the_air", "builder_level", "item_tmdb_season_titles", "sonarr_all", "sonarr_taglist"
-]
+all_builders = (
+    anidb.builders
+    + anilist.builders
+    + icheckmovies.builders
+    + imdb.builders
+    + letterboxd.builders
+    + mal.builders
+    + mojo.builders
+    + plex.builders
+    + tautulli.builders
+    + tmdb.builders
+    + trakt.builders
+    + tvdb.builders
+    + mdblist.builders
+    + radarr.builders
+    + sonarr.builders
+)
+show_only_builders = ["tmdb_network", "tmdb_show", "tmdb_show_details", "tvdb_show", "tvdb_show_details", "tmdb_airing_today", "tmdb_on_the_air", "builder_level", "item_tmdb_season_titles", "sonarr_all", "sonarr_taglist"]
 movie_only_builders = [
-    "letterboxd_list", "letterboxd_list_details", "letterboxd_user_films", "letterboxd_user_films_details", "letterboxd_user_reviews", "letterboxd_user_reviews_details", "icheckmovies_list", "icheckmovies_list_details", "stevenlu_popular",
-    "tmdb_collection", "tmdb_collection_details", "tmdb_movie", "tmdb_movie_details", "tmdb_now_playing", "item_edition",
-    "tvdb_movie", "tvdb_movie_details", "tmdb_upcoming", "trakt_boxoffice", "reciperr_list", "radarr_all", "radarr_taglist",
-    "mojo_world", "mojo_domestic", "mojo_international", "mojo_record", "mojo_all_time", "mojo_never"
+    "letterboxd_list",
+    "letterboxd_list_details",
+    "letterboxd_user_films",
+    "letterboxd_user_films_details",
+    "letterboxd_user_reviews",
+    "letterboxd_user_reviews_details",
+    "icheckmovies_list",
+    "icheckmovies_list_details",
+    "stevenlu_popular",
+    "tmdb_collection",
+    "tmdb_collection_details",
+    "tmdb_movie",
+    "tmdb_movie_details",
+    "tmdb_now_playing",
+    "item_edition",
+    "tvdb_movie",
+    "tvdb_movie_details",
+    "tmdb_upcoming",
+    "trakt_boxoffice",
+    "reciperr_list",
+    "radarr_all",
+    "radarr_taglist",
+    "mojo_world",
+    "mojo_domestic",
+    "mojo_international",
+    "mojo_record",
+    "mojo_all_time",
+    "mojo_never",
 ]
 music_only_builders = ["item_album_sorting"]
-summary_details = [
-    "summary", "tmdb_summary", "tmdb_description", "tmdb_biography", "tvdb_summary",
-    "tvdb_description", "trakt_description", "letterboxd_description", "icheckmovies_description"
-]
+summary_details = ["summary", "tmdb_summary", "tmdb_description", "tmdb_biography", "tvdb_summary", "tvdb_description", "trakt_description", "letterboxd_description", "icheckmovies_description"]
 poster_details = ["url_poster", "tmdb_poster", "tmdb_profile", "tvdb_poster", "file_poster"]
 background_details = ["url_background", "tmdb_background", "tvdb_background", "file_background"]
-boolean_details = [
-    "show_filtered", "show_unfiltered", "show_missing", "save_report", "missing_only_released", "only_filter_missing",
-    "delete_below_minimum", "asset_folders", "create_asset_folders"
-]
+boolean_details = ["show_filtered", "show_unfiltered", "show_missing", "save_report", "missing_only_released", "only_filter_missing", "delete_below_minimum", "asset_folders", "create_asset_folders"]
 scheduled_boolean = ["visible_library", "visible_home", "visible_shared"]
 string_details = ["sort_title", "content_rating", "name_mapping"]
 ignored_details = [
-    "smart_filter", "smart_label", "smart_url", "run_again", "schedule", "sync_mode", "template", "variables", "test", "suppress_overlays",
-    "delete_not_scheduled", "tmdb_person", "build_collection", "collection_order", "builder_level", "overlay", "kometa_poster",
-    "validate_builders", "libraries", "sync_to_users", "exclude_users", "collection_name", "playlist_name", "name", "limit",
-    "blank_collection", "allowed_library_types", "run_definition", "delete_playlist", "ignore_blank_results", "only_run_on_create",
-    "delete_collections_named", "tmdb_person_offset", "append_label", "key_name", "translation_key", "translation_prefix", "tmdb_birthday", "tmdb_deathday"
+    "smart_filter",
+    "smart_label",
+    "smart_url",
+    "run_again",
+    "schedule",
+    "sync_mode",
+    "template",
+    "variables",
+    "test",
+    "suppress_overlays",
+    "delete_not_scheduled",
+    "tmdb_person",
+    "build_collection",
+    "collection_order",
+    "builder_level",
+    "overlay",
+    "kometa_poster",
+    "validate_builders",
+    "libraries",
+    "sync_to_users",
+    "exclude_users",
+    "collection_name",
+    "playlist_name",
+    "name",
+    "limit",
+    "blank_collection",
+    "allowed_library_types",
+    "run_definition",
+    "delete_playlist",
+    "ignore_blank_results",
+    "only_run_on_create",
+    "delete_collections_named",
+    "tmdb_person_offset",
+    "append_label",
+    "key_name",
+    "translation_key",
+    "translation_prefix",
+    "tmdb_birthday",
+    "tmdb_deathday",
 ]
-details = [
-    "ignore_ids", "ignore_imdb_ids", "server_preroll", "changes_webhooks", "collection_filtering", "collection_mode", "url_theme",
-    "file_theme", "minimum_items", "label", "album_sorting", "cache_builders", "tmdb_region", "default_percent"
-] + boolean_details + scheduled_boolean + string_details
-collectionless_details = ["collection_order", "plex_collectionless", "label", "label_sync_mode", "test", "item_label"] + \
-                         poster_details + background_details + summary_details + string_details + all_builders
+details = (
+    ["ignore_ids", "ignore_imdb_ids", "server_preroll", "changes_webhooks", "collection_filtering", "collection_mode", "url_theme", "file_theme", "minimum_items", "label", "album_sorting", "cache_builders", "tmdb_region", "default_percent"]
+    + boolean_details
+    + scheduled_boolean
+    + string_details
+)
+collectionless_details = ["collection_order", "plex_collectionless", "label", "label_sync_mode", "test", "item_label"] + poster_details + background_details + summary_details + string_details + all_builders
 item_false_details = ["item_lock_background", "item_lock_poster", "item_lock_title"]
 item_bool_details = ["item_tmdb_season_titles", "revert_overlay", "item_assets", "item_refresh", "item_analyze"] + item_false_details
-item_details = ["item_critic_rating", "item_audience_rating", "item_user_rating", "non_item_remove_label", "item_label", "item_genre", "item_edition", "item_radarr_tag", "item_sonarr_tag", "item_refresh_delay"] + item_bool_details + list(plex.item_advance_keys.keys())
+item_details = (
+    ["item_critic_rating", "item_audience_rating", "item_user_rating", "non_item_remove_label", "item_label", "item_genre", "item_edition", "item_radarr_tag", "item_sonarr_tag", "item_refresh_delay"]
+    + item_bool_details
+    + list(plex.item_advance_keys.keys())
+)
 none_details = ["label.sync", "item_label.sync", "item_genre.sync", "radarr_taglist", "sonarr_taglist", "item_edition", "item_critic_rating", "item_audience_rating", "item_user_rating"]
 none_builders = ["radarr_taglist", "sonarr_taglist"]
 radarr_details = [
-    "radarr_add_missing", "radarr_add_existing", "radarr_upgrade_existing", "radarr_monitor_existing", "radarr_folder", "radarr_monitor",
-    "radarr_search", "radarr_availability", "radarr_quality", "radarr_tag", "item_radarr_tag", "radarr_ignore_cache",
+    "radarr_add_missing",
+    "radarr_add_existing",
+    "radarr_upgrade_existing",
+    "radarr_monitor_existing",
+    "radarr_folder",
+    "radarr_monitor",
+    "radarr_search",
+    "radarr_availability",
+    "radarr_quality",
+    "radarr_tag",
+    "item_radarr_tag",
+    "radarr_ignore_cache",
 ]
 sonarr_details = [
-    "sonarr_add_missing", "sonarr_add_existing", "sonarr_upgrade_existing", "sonarr_monitor_existing", "sonarr_folder", "sonarr_monitor", "sonarr_language",
-    "sonarr_series", "sonarr_quality", "sonarr_season", "sonarr_search", "sonarr_cutoff_search", "sonarr_tag", "item_sonarr_tag", "sonarr_ignore_cache"
+    "sonarr_add_missing",
+    "sonarr_add_existing",
+    "sonarr_upgrade_existing",
+    "sonarr_monitor_existing",
+    "sonarr_folder",
+    "sonarr_monitor",
+    "sonarr_language",
+    "sonarr_series",
+    "sonarr_quality",
+    "sonarr_season",
+    "sonarr_search",
+    "sonarr_cutoff_search",
+    "sonarr_tag",
+    "item_sonarr_tag",
+    "sonarr_ignore_cache",
 ]
 album_details = ["non_item_remove_label", "item_label", "item_album_sorting"]
 sub_filters = [
-    "filepath", "audio_track_title", "subtitle_track_title", "resolution", "audio_language", "subtitle_language", "has_dolby_vision",
-    "has_hdr", "channels", "height", "width", "aspect", "audio_codec", "audio_profile", "video_codec", "video_profile", "versions"
+    "filepath",
+    "audio_track_title",
+    "subtitle_track_title",
+    "resolution",
+    "audio_language",
+    "subtitle_language",
+    "has_dolby_vision",
+    "has_hdr",
+    "channels",
+    "height",
+    "width",
+    "aspect",
+    "audio_codec",
+    "audio_profile",
+    "video_codec",
+    "video_profile",
+    "versions",
 ]
 filters_by_type = {
     "movie_show_season_episode_artist_album_track": ["title", "summary", "collection", "has_collection", "added", "last_played", "user_rating", "plays", "filepath", "label", "audio_track_title", "subtitle_track_title", "versions"],
@@ -97,7 +203,7 @@ filters_by_type = {
     "show": ["seasons", "tmdb_status", "tmdb_type", "origin_country", "network", "first_episode_aired", "last_episode_aired", "last_episode_aired_or_never", "tvdb_title", "tvdb_status", "tvdb_genre"],
     "episode": ["season_title"],
     "artist": ["albums"],
-    "album": ["record_label"]
+    "album": ["record_label"],
 }
 filters = {
     "movie": [item for check, sub in filters_by_type.items() for item in sub if "movie" in check],
@@ -106,41 +212,110 @@ filters = {
     "episode": [item for check, sub in filters_by_type.items() for item in sub if "episode" in check],
     "artist": [item for check, sub in filters_by_type.items() for item in sub if "artist" in check],
     "album": [item for check, sub in filters_by_type.items() for item in sub if "album" in check],
-    "track": [item for check, sub in filters_by_type.items() for item in sub if "track" in check]
+    "track": [item for check, sub in filters_by_type.items() for item in sub if "track" in check],
 }
 tmdb_filters = [
-    "original_language", "origin_country", "tmdb_vote_count", "tmdb_vote_average", "tmdb_year", "tmdb_keyword", "tmdb_genre",
-    "first_episode_aired", "last_episode_aired", "last_episode_aired_or_never", "tmdb_status", "tmdb_type", "tmdb_title", 
-    "tmdb_rating", "episode_tmdb_vote_count", "episode_tmdb_vote_average", "episode_tmdb_rating"
+    "original_language",
+    "origin_country",
+    "tmdb_vote_count",
+    "tmdb_vote_average",
+    "tmdb_year",
+    "tmdb_keyword",
+    "tmdb_genre",
+    "first_episode_aired",
+    "last_episode_aired",
+    "last_episode_aired_or_never",
+    "tmdb_status",
+    "tmdb_type",
+    "tmdb_title",
+    "tmdb_rating",
+    "episode_tmdb_vote_count",
+    "episode_tmdb_vote_average",
+    "episode_tmdb_rating",
 ]
 tvdb_filters = ["tvdb_title", "tvdb_status", "tvdb_genre"]
 imdb_filters = ["imdb_keyword"]
 string_filters = [
-    "title", "season_title", "show_title", "summary", "studio", "edition", "record_label", "folder", "filepath", "audio_track_title", "subtitle_track_title", "tmdb_title",
-    "audio_codec", "audio_profile", "video_codec", "video_profile", "tvdb_title", "tvdb_status"
+    "title",
+    "season_title",
+    "show_title",
+    "summary",
+    "studio",
+    "edition",
+    "record_label",
+    "folder",
+    "filepath",
+    "audio_track_title",
+    "subtitle_track_title",
+    "tmdb_title",
+    "audio_codec",
+    "audio_profile",
+    "video_codec",
+    "video_profile",
+    "tvdb_title",
+    "tvdb_status",
 ]
 string_modifiers = ["", ".not", ".is", ".isnot", ".begins", ".ends", ".regex"]
 tag_filters = [
-    "actor", "collection", "content_rating", "country", "director", "network", "genre", "label", "producer", "composer", "year",
-    "origin_country", "writer", "resolution", "audio_language", "subtitle_language", "tmdb_keyword", "tmdb_genre", "imdb_keyword", "tvdb_genre"
+    "actor",
+    "collection",
+    "content_rating",
+    "country",
+    "director",
+    "network",
+    "genre",
+    "label",
+    "producer",
+    "composer",
+    "year",
+    "origin_country",
+    "writer",
+    "resolution",
+    "audio_language",
+    "subtitle_language",
+    "tmdb_keyword",
+    "tmdb_genre",
+    "imdb_keyword",
+    "tvdb_genre",
 ]
 tag_modifiers = ["", ".not", ".regex", ".count_gt", ".count_gte", ".count_lt", ".count_lte"]
 boolean_filters = ["has_collection", "has_edition", "has_overlay", "has_dolby_vision", "has_hdr", "has_stinger"]
 date_filters = ["release", "added", "last_played", "first_episode_aired", "last_episode_aired", "last_episode_aired_or_never"]
 date_modifiers = ["", ".not", ".before", ".after", ".regex"]
 number_filters = [
-    "year", "tmdb_year", "critic_rating", "audience_rating", "user_rating", "tmdb_vote_count", "tmdb_vote_average", "plays", "duration",
-    "channels", "height", "width", "aspect", "versions", "stinger_rating", "tmdb_rating", "episode_tmdb_vote_count", "episode_tmdb_vote_average", "episode_tmdb_rating", "episode_user_rating", "episode_critic_rating", "episode_audience_rating"]
-number_modifiers = ["", ".not", ".gt", ".gte", ".lt", ".lte"]
-special_filters = [
-    "history", "episodes", "seasons", "albums", "tracks", "original_language", "original_language.not",
-    "tmdb_status", "tmdb_status.not", "tmdb_type", "tmdb_type.not"
+    "year",
+    "tmdb_year",
+    "critic_rating",
+    "audience_rating",
+    "user_rating",
+    "tmdb_vote_count",
+    "tmdb_vote_average",
+    "plays",
+    "duration",
+    "channels",
+    "height",
+    "width",
+    "aspect",
+    "versions",
+    "stinger_rating",
+    "tmdb_rating",
+    "episode_tmdb_vote_count",
+    "episode_tmdb_vote_average",
+    "episode_tmdb_rating",
+    "episode_user_rating",
+    "episode_critic_rating",
+    "episode_audience_rating",
 ]
-all_filters = boolean_filters + special_filters + \
-              [f"{f}{m}" for f in string_filters for m in string_modifiers] + \
-              [f"{f}{m}" for f in tag_filters for m in tag_modifiers] + \
-              [f"{f}{m}" for f in date_filters for m in date_modifiers] + \
-              [f"{f}{m}" for f in number_filters for m in number_modifiers]
+number_modifiers = ["", ".not", ".gt", ".gte", ".lt", ".lte"]
+special_filters = ["history", "episodes", "seasons", "albums", "tracks", "original_language", "original_language.not", "tmdb_status", "tmdb_status.not", "tmdb_type", "tmdb_type.not"]
+all_filters = (
+    boolean_filters
+    + special_filters
+    + [f"{f}{m}" for f in string_filters for m in string_modifiers]
+    + [f"{f}{m}" for f in tag_filters for m in tag_modifiers]
+    + [f"{f}{m}" for f in date_filters for m in date_modifiers]
+    + [f"{f}{m}" for f in number_filters for m in number_modifiers]
+)
 date_attributes = plex.date_attributes + ["first_episode_aired", "last_episode_aired", "last_episode_aired_or_never"]
 year_attributes = plex.year_attributes + ["tmdb_year"]
 number_attributes = plex.number_attributes + ["channels", "height", "width", "tmdb_vote_count", "episode_tmdb_vote_count"]
@@ -152,41 +327,164 @@ smart_invalid = ["collection_order", "builder_level"]
 smart_only = ["collection_filtering"]
 smart_url_invalid = ["filters", "run_again", "sync_mode", "show_filtered", "show_unfiltered", "show_missing", "save_report", "smart_label"] + radarr_details + sonarr_details
 custom_sort_builders = [
-    "plex_search", "plex_watchlist", "plex_pilots", "tmdb_list", "tmdb_popular", "tmdb_now_playing", "tmdb_top_rated",
-    "tmdb_trending_daily", "tmdb_trending_weekly", "tmdb_discover", "reciperr_list", "trakt_chart", "trakt_userlist",
-    "tvdb_list", "imdb_chart", "imdb_list", "imdb_award", "imdb_search", "imdb_watchlist", "stevenlu_popular", "anidb_popular",
-    "tmdb_upcoming", "tmdb_airing_today", "tmdb_on_the_air", "trakt_list", "trakt_watchlist", "trakt_collection",
-    "trakt_trending", "trakt_popular", "trakt_boxoffice", "trakt_collected_daily", "trakt_collected_weekly",
-    "trakt_collected_monthly", "trakt_collected_yearly", "trakt_collected_all", "trakt_recommendations",
-    "trakt_recommended_personal", "trakt_recommended_daily", "trakt_recommended_weekly", "trakt_recommended_monthly",
-    "trakt_recommended_yearly", "trakt_recommended_all", "trakt_watched_daily", "trakt_watched_weekly",
-    "trakt_watched_monthly", "trakt_watched_yearly", "trakt_watched_all",
-    "tautulli_popular", "tautulli_watched", "mdblist_list", "letterboxd_list", "icheckmovies_list",
-    "anilist_top_rated", "anilist_popular", "anilist_trending", "anilist_search", "anilist_userlist",
-    "mal_all", "mal_airing", "mal_upcoming", "mal_tv", "mal_movie", "mal_ova", "mal_special", "mal_search",
-    "mal_popular", "mal_favorite", "mal_suggested", "mal_userlist", "mal_season", "mal_genre", "mal_studio",
-    "mojo_world", "mojo_domestic", "mojo_international", "mojo_record", "mojo_all_time", "mojo_never"
+    "plex_search",
+    "plex_watchlist",
+    "plex_pilots",
+    "tmdb_list",
+    "tmdb_popular",
+    "tmdb_now_playing",
+    "tmdb_top_rated",
+    "tmdb_trending_daily",
+    "tmdb_trending_weekly",
+    "tmdb_discover",
+    "reciperr_list",
+    "trakt_chart",
+    "trakt_userlist",
+    "tvdb_list",
+    "imdb_chart",
+    "imdb_list",
+    "imdb_award",
+    "imdb_search",
+    "imdb_watchlist",
+    "stevenlu_popular",
+    "anidb_popular",
+    "tmdb_upcoming",
+    "tmdb_airing_today",
+    "tmdb_on_the_air",
+    "trakt_list",
+    "trakt_watchlist",
+    "trakt_collection",
+    "trakt_trending",
+    "trakt_popular",
+    "trakt_boxoffice",
+    "trakt_collected_daily",
+    "trakt_collected_weekly",
+    "trakt_collected_monthly",
+    "trakt_collected_yearly",
+    "trakt_collected_all",
+    "trakt_recommendations",
+    "trakt_recommended_personal",
+    "trakt_recommended_daily",
+    "trakt_recommended_weekly",
+    "trakt_recommended_monthly",
+    "trakt_recommended_yearly",
+    "trakt_recommended_all",
+    "trakt_watched_daily",
+    "trakt_watched_weekly",
+    "trakt_watched_monthly",
+    "trakt_watched_yearly",
+    "trakt_watched_all",
+    "tautulli_popular",
+    "tautulli_watched",
+    "mdblist_list",
+    "letterboxd_list",
+    "icheckmovies_list",
+    "anilist_top_rated",
+    "anilist_popular",
+    "anilist_trending",
+    "anilist_search",
+    "anilist_userlist",
+    "mal_all",
+    "mal_airing",
+    "mal_upcoming",
+    "mal_tv",
+    "mal_movie",
+    "mal_ova",
+    "mal_special",
+    "mal_search",
+    "mal_popular",
+    "mal_favorite",
+    "mal_suggested",
+    "mal_userlist",
+    "mal_season",
+    "mal_genre",
+    "mal_studio",
+    "mojo_world",
+    "mojo_domestic",
+    "mojo_international",
+    "mojo_record",
+    "mojo_all_time",
+    "mojo_never",
 ]
 episode_parts_only = ["plex_pilots"]
 overlay_only = ["overlay", "suppress_overlays"]
-overlay_attributes = [
-     "filters", "limit", "show_missing", "save_report", "missing_only_released", "minimum_items", "cache_builders", "tmdb_region", "default_percent"
-] + all_builders + overlay_only
-parts_collection_valid = [
-     "filters", "plex_all", "plex_search", "trakt_list", "trakt_list_details", "collection_filtering", "collection_mode", "label", "visible_library", "limit",
-     "visible_home", "visible_shared", "show_missing", "save_report", "missing_only_released", "server_preroll", "changes_webhooks",
-     "item_lock_background", "item_lock_poster", "item_lock_title", "item_refresh", "item_refresh_delay", "imdb_list", "imdb_search",
-     "cache_builders", "url_theme", "file_theme", "item_label", "default_percent", "non_item_remove_label", "item_analyze", "sync_to_trakt_list"
-] + episode_parts_only + summary_details + poster_details + background_details + string_details
-playlist_attributes = [
-    "filters", "name_mapping", "show_filtered", "show_unfiltered", "show_missing", "save_report", "allowed_library_types", "run_definition",
-    "missing_only_released", "only_filter_missing", "delete_below_minimum", "ignore_ids", "ignore_imdb_ids",
-    "server_preroll", "changes_webhooks", "minimum_items", "cache_builders", "default_percent"
-] + custom_sort_builders + summary_details + poster_details + radarr_details + sonarr_details
-music_attributes = [
-   "non_item_remove_label", "item_label", "collection_filtering", "item_lock_background", "item_lock_poster", "item_lock_title",
-   "item_assets", "item_refresh", "item_refresh_delay", "plex_search", "plex_all", "filters"
-] + details + summary_details + poster_details + background_details
+overlay_attributes = ["filters", "limit", "show_missing", "save_report", "missing_only_released", "minimum_items", "cache_builders", "tmdb_region", "default_percent"] + all_builders + overlay_only
+parts_collection_valid = (
+    [
+        "filters",
+        "plex_all",
+        "plex_search",
+        "trakt_list",
+        "trakt_list_details",
+        "collection_filtering",
+        "collection_mode",
+        "label",
+        "visible_library",
+        "limit",
+        "visible_home",
+        "visible_shared",
+        "show_missing",
+        "save_report",
+        "missing_only_released",
+        "server_preroll",
+        "changes_webhooks",
+        "item_lock_background",
+        "item_lock_poster",
+        "item_lock_title",
+        "item_refresh",
+        "item_refresh_delay",
+        "imdb_list",
+        "imdb_search",
+        "cache_builders",
+        "url_theme",
+        "file_theme",
+        "item_label",
+        "default_percent",
+        "non_item_remove_label",
+        "item_analyze",
+        "sync_to_trakt_list",
+    ]
+    + episode_parts_only
+    + summary_details
+    + poster_details
+    + background_details
+    + string_details
+)
+playlist_attributes = (
+    [
+        "filters",
+        "name_mapping",
+        "show_filtered",
+        "show_unfiltered",
+        "show_missing",
+        "save_report",
+        "allowed_library_types",
+        "run_definition",
+        "missing_only_released",
+        "only_filter_missing",
+        "delete_below_minimum",
+        "ignore_ids",
+        "ignore_imdb_ids",
+        "server_preroll",
+        "changes_webhooks",
+        "minimum_items",
+        "cache_builders",
+        "default_percent",
+    ]
+    + custom_sort_builders
+    + summary_details
+    + poster_details
+    + radarr_details
+    + sonarr_details
+)
+music_attributes = (
+    ["non_item_remove_label", "item_label", "collection_filtering", "item_lock_background", "item_lock_poster", "item_lock_title", "item_assets", "item_refresh", "item_refresh_delay", "plex_search", "plex_all", "filters"]
+    + details
+    + summary_details
+    + poster_details
+    + background_details
+)
+
 
 class CollectionBuilder:
     template_cache = {}
@@ -195,15 +493,16 @@ class CollectionBuilder:
 
     @staticmethod
     def load_persistent_cache(config_dir):
-        import json
         import hashlib
-        if config_dir.endswith('.yml'):
+        import json
+
+        if config_dir.endswith(".yml"):
             config_dir = os.path.dirname(config_dir)
         cache_file = os.path.join(config_dir, ".kometa_template_cache.json")
         CollectionBuilder.persistent_cache_path = cache_file
         try:
             if os.path.exists(cache_file):
-                with open(cache_file, 'r') as f:
+                with open(cache_file, "r") as f:
                     CollectionBuilder.persistent_cache_data = json.load(f)
                 logger.debug(f"Loaded persistent template cache from {cache_file}")
             else:
@@ -215,9 +514,10 @@ class CollectionBuilder:
     @staticmethod
     def save_persistent_cache():
         import json
+
         if CollectionBuilder.persistent_cache_path and CollectionBuilder.persistent_cache_data:
             try:
-                with open(CollectionBuilder.persistent_cache_path, 'w') as f:
+                with open(CollectionBuilder.persistent_cache_path, "w") as f:
                     json.dump(CollectionBuilder.persistent_cache_data, f, indent=2, default=str)
             except Exception as e:
                 logger.warning(f"Failed to save persistent cache: {e}")
@@ -226,12 +526,14 @@ class CollectionBuilder:
     def compute_template_hash(template_data, variables, mapping_name=None):
         import hashlib
         import json
+
         data_str = json.dumps({"mapping_name": mapping_name, "template": template_data, "variables": variables}, sort_keys=True, default=str)
         return hashlib.md5(data_str.encode()).hexdigest()
 
     @staticmethod
     def is_cache_valid(cache_entry):
         import random
+
         if not cache_entry or "timestamp" not in cache_entry:
             return False
         cache_time = datetime.fromisoformat(cache_entry["timestamp"])
@@ -276,7 +578,7 @@ class CollectionBuilder:
             methods["name"] = "name"
 
         if "template" in methods:
-            logger.separator(f"Building Definition From Templates", space=False, border=False)
+            logger.separator("Building Definition From Templates", space=False, border=False)
             logger.debug("")
             named_templates = []
             for original_variables in util.get_list(self.data[methods["template"]], split=False):
@@ -328,11 +630,7 @@ class CollectionBuilder:
                 template_body_str = " ".join(template_bodies)
                 has_date_var = any(p in template_body_str for p in ("<<current_year>>", "<<current_month>>", "<<current_day>>"))
                 if CollectionBuilder.persistent_cache_data is not None and not has_date_var:
-                    CollectionBuilder.persistent_cache_data[template_hash] = {
-                        "attributes": new_attributes,
-                        "config_hash": template_hash,
-                        "timestamp": datetime.now().isoformat()
-                    }
+                    CollectionBuilder.persistent_cache_data[template_hash] = {"attributes": new_attributes, "config_hash": template_hash, "timestamp": datetime.now().isoformat()}
 
             for attr in new_attributes:
                 if attr.lower() not in methods:
@@ -504,7 +802,7 @@ class CollectionBuilder:
             case "Movie":
                 self.icon = "🎥 "
         self.name = f"{self.icon}{self.library.name} {self.name}"
-# ---------
+        # ---------
         if self.library and self.name not in self.library.collections:
             self.library.collections.append(self.name)
 
@@ -533,9 +831,11 @@ class CollectionBuilder:
             logger.debug("Validating Method: only_run_on_create")
             logger.debug(f"Value: {data[methods['only_run_on_create']]}")
             self.only_run_on_create = util.parse(self.Type, "only_run_on_create", self.data, datatype="bool", methods=methods, default=False)
-        # Deactivated for Emby due to lack of auto collection
-        # if self.obj and self.only_run_on_create:
-        #     raise NotScheduled("Skipped because only_run_on_create is True and the collection already exists")
+
+        if not self.library.EmbyServer:
+            # Deactivated for Emby due to lack of auto collection
+            if self.obj and self.only_run_on_create:
+                raise NotScheduled("Skipped because only_run_on_create is True and the collection already exists")
 
         if "allowed_library_types" in methods and "run_definition" not in methods:
             logger.warning(f"{self.Type} Warning: allowed_library_types will run as run_definition")
@@ -553,16 +853,20 @@ class CollectionBuilder:
                     raise Failed(f"{self.Type} Error: {library_type} is invalid. Options: true, false, {', '.join(plex.library_types)}")
                 elif library_type == "false":
                     raise NotScheduled(f"Skipped because run_definition is false")
-                #ToDo:
+                # ToDo:
                 # self.library.lib_type for Emby,
                 # self.library.Plex.type for Plex
                 elif library_type != "true" and self.library and library_type != self.library.lib_type:
                     raise NotScheduled(f"Skipped because run_definition library_type: {library_type} doesn't match")
 
-        if self.playlist:               self.builder_level = "item"
-        elif self.library.is_show:      self.builder_level = "show"
-        elif self.library.is_music:     self.builder_level = "artist"
-        else:                           self.builder_level = "movie"
+        if self.playlist:
+            self.builder_level = "item"
+        elif self.library.is_show:
+            self.builder_level = "show"
+        elif self.library.is_music:
+            self.builder_level = "artist"
+        else:
+            self.builder_level = "movie"
         level = None
         for level_attr in ["builder_level", "collection_level", "overlay_level"]:
             if level_attr in methods:
@@ -680,9 +984,9 @@ class CollectionBuilder:
 
         self.language = None
         try:
-             self.language = self.library.Plex.language
+            self.language = self.library.Plex.language
         except:
-             self.language = "en" # todo emby language
+            self.language = "en"  # todo emby language
 
         self.details = {
             "show_filtered": self.library.show_filtered,
@@ -697,7 +1001,7 @@ class CollectionBuilder:
             "delete_below_minimum": self.library.delete_below_minimum,
             "delete_not_scheduled": self.library.delete_not_scheduled,
             "changes_webhooks": self.library.changes_webhooks,
-            "cache_builders": 0 if self.overlay else self.library.cache_builders
+            "cache_builders": 0 if self.overlay else self.library.cache_builders,
         }
         if self.library.mass_collection_mode:
             self.details["collection_mode"] = self.library.mass_collection_mode
@@ -776,8 +1080,7 @@ class CollectionBuilder:
                     if not replaced:
                         raise Failed("Config Error: <<smart_label>> not found in the smart_label attribute data")
                     self.smart_label = _data
-                elif (self.library.is_movie and str(self.data[methods["smart_label"]]).lower() in plex.movie_sorts) \
-                        or (self.library.is_show and str(self.data[methods["smart_label"]]).lower() in plex.show_sorts):
+                elif (self.library.is_movie and str(self.data[methods["smart_label"]]).lower() in plex.movie_sorts) or (self.library.is_show and str(self.data[methods["smart_label"]]).lower() in plex.show_sorts):
                     self.smart_label["sort_by"] = str(self.data[methods["smart_label"]]).lower()
                 else:
                     logger.warning(f"{self.Type} Error: smart_label attribute: {self.data[methods['smart_label']]} is invalid defaulting to random")
@@ -907,7 +1210,7 @@ class CollectionBuilder:
             self.tmdb_birthday = {
                 "before": util.parse(self.Type, "before", parsed_birthday, datatype="int", methods=parsed_methods, minimum=0, default=0),
                 "after": util.parse(self.Type, "after", parsed_birthday, datatype="int", methods=parsed_methods, minimum=0, default=0),
-                "this_month": util.parse(self.Type, "this_month", parsed_birthday, datatype="bool", methods=parsed_methods, default=False)
+                "this_month": util.parse(self.Type, "this_month", parsed_birthday, datatype="bool", methods=parsed_methods, default=False),
             }
 
         self.tmdb_deathday = None
@@ -922,9 +1225,8 @@ class CollectionBuilder:
             self.tmdb_deathday = {
                 "before": util.parse(self.Type, "before", parsed_deathday, datatype="int", methods=parsed_methods, minimum=0, default=0),
                 "after": util.parse(self.Type, "after", parsed_deathday, datatype="int", methods=parsed_methods, minimum=0, default=0),
-                "this_month": util.parse(self.Type, "this_month", parsed_deathday, datatype="bool", methods=parsed_methods, default=False)
+                "this_month": util.parse(self.Type, "this_month", parsed_deathday, datatype="bool", methods=parsed_methods, default=False),
             }
-
 
         first_person = None
         self.tmdb_person_birthday = None
@@ -961,7 +1263,7 @@ class CollectionBuilder:
                                         pass
                                 if found is not None:
                                     idx = found
-                            self.tmdb_person_offset= idx
+                            self.tmdb_person_offset = idx
                             pass
                         else:
                             results = self.config.TMDb.search_people(tmdb_person)
@@ -1139,7 +1441,9 @@ class CollectionBuilder:
                         raise Failed(f"{self.Type} Error: collection_order: {ts} is invalid. Options: {', '.join(sorts)}")
                     self.custom_sort.append(ts)
             if test_sort not in plex.collection_order_options + ["custom.asc", "custom.desc"] and not self.custom_sort:
-                raise Failed(f"{self.Type} Error: {test_sort} collection_order invalid\n    release (Order Collection by release dates)\n    alpha (Order Collection Alphabetically)\n    custom.asc/custom.desc (Custom Order Collection)\n    Other sorting options can be found at https://github.com/Kometa-Team/Kometa/wiki/Smart-Builders#sort-options")
+                raise Failed(
+                    f"{self.Type} Error: {test_sort} collection_order invalid\n    release (Order Collection by release dates)\n    alpha (Order Collection Alphabetically)\n    custom.asc/custom.desc (Custom Order Collection)\n    Other sorting options can be found at https://github.com/Kometa-Team/Kometa/wiki/Smart-Builders#sort-options"
+                )
 
         if self.smart:
             self.custom_sort = None
@@ -1242,7 +1546,7 @@ class CollectionBuilder:
                     self._mdblist(method_name, method_data)
                 elif method_name == "filters":
                     self._filters(method_name, method_data)
-                elif method_name == "postfix": # emby
+                elif method_name == "postfix":  # emby
                     pass
                 else:
                     raise Failed(f"{self.Type} Error: {method_final} attribute not supported")
@@ -1265,14 +1569,13 @@ class CollectionBuilder:
                 self.details["label"] = append_labels
         # need to check for self.smart <=> Emby
         if not self.server_preroll and not self.smart and not self.blank_collection and len(self.builders) == 0:
-                raise Failed(f"{self.Type} Error: No builders were found")
+            raise Failed(f"{self.Type} Error: No builders were found")
 
         if self.blank_collection and len(self.builders) > 0:
             raise Failed(f"{self.Type} Error: No builders allowed with blank_collection")
 
         if not isinstance(self.custom_sort, list) and self.custom_sort and (len(self.builders) > 1 or self.builders[0][0] not in custom_sort_builders):
-            raise Failed(f"{self.Type} Error: " + ('Playlists' if self.playlist else 'collection_order: custom') +
-                         (f" can only be used with a single builder per {self.type}" if len(self.builders) > 1 else f" cannot be used with {self.builders[0][0]}"))
+            raise Failed(f"{self.Type} Error: " + ("Playlists" if self.playlist else "collection_order: custom") + (f" can only be used with a single builder per {self.type}" if len(self.builders) > 1 else f" cannot be used with {self.builders[0][0]}"))
 
         if "add_missing" not in self.radarr_details:
             self.radarr_details["add_missing"] = self.library.Radarr.add_missing if self.library.Radarr else False
@@ -1301,18 +1604,16 @@ class CollectionBuilder:
             self.sync = False
 
         self.do_report = not self.config.no_report and (self.details["save_report"])
-        self.do_missing = not self.config.no_missing and (self.details["show_missing"] or self.do_report
-                                                          or (self.library.Radarr and self.radarr_details["add_missing"])
-                                                          or (self.library.Sonarr and self.sonarr_details["add_missing"]))
+        self.do_missing = not self.config.no_missing and (self.details["show_missing"] or self.do_report or (self.library.Radarr and self.radarr_details["add_missing"]) or (self.library.Sonarr and self.sonarr_details["add_missing"]))
         if self.build_collection:
             # ignored for Emby, collection will be re-used
             # if self.obj is not None and ((self.smart and not self.obj.smart) or (not self.smart and self.obj.smart)):
             #     logger.info("")
             #     logger.error(f"{self.Type} Error: Converting {self.obj.title} to a {'smart' if self.smart else 'normal'} collection")
-                # self.beginning_count = len(self.obj.childCount)
-                # self.library.delete(self.obj)
-                # self.obj = None
-            if self.smart: # e.g. people
+            # self.beginning_count = len(self.obj.childCount)
+            # self.library.delete(self.obj)
+            # self.obj = None
+            if self.smart:  # e.g. people
                 check_url = self.smart_url if self.smart_url else self.smart_label_url
                 if self.obj and check_url:
                     self.library.update_smart_collection(self.obj, check_url)
@@ -1389,20 +1690,13 @@ class CollectionBuilder:
 
                 # URL-kodiere den Library-Namen mit vorangestelltem Leerzeichen (entspricht '%20')
                 # encoded_library_name = urllib.parse.quote(f"{self.icon}{self.library.name} ")
-                encoded_library_name = urllib.parse.quote(f"{self.library.mapping_name} ") # unicode icon becomes invisible
+                encoded_library_name = urllib.parse.quote(f"{self.library.mapping_name} ")  # unicode icon becomes invisible
 
                 # Entferne '%20{self.library.name}' aus dem Pfad
                 if encoded_library_name in path:
-                    modified_path = path.replace(encoded_library_name, '')
+                    modified_path = path.replace(encoded_library_name, "")
                     # Baue die neue URL mit dem modifizierten Pfad
-                    modified_method_data = urllib.parse.urlunparse((
-                        parsed_url.scheme,
-                        parsed_url.netloc,
-                        modified_path,
-                        parsed_url.params,
-                        parsed_url.query,
-                        parsed_url.fragment
-                    ))
+                    modified_method_data = urllib.parse.urlunparse((parsed_url.scheme, parsed_url.netloc, modified_path, parsed_url.params, parsed_url.query, parsed_url.fragment))
                     try:
                         if not modified_method_data.startswith("https://theposterdb.com/api/assets/"):
                             self.config.Requests.get_image(modified_method_data)
@@ -1421,9 +1715,9 @@ class CollectionBuilder:
             if poster:
                 self.posters[method_name] = poster
         elif method_name == "tmdb_poster":
-            self.posters[method_name] = self.config.TMDb.get_movie_show_or_collection(util.regex_first_int(method_data, 'TMDb ID'), self.library.is_movie).poster_url
+            self.posters[method_name] = self.config.TMDb.get_movie_show_or_collection(util.regex_first_int(method_data, "TMDb ID"), self.library.is_movie).poster_url
         elif method_name == "tmdb_profile":
-            self.posters[method_name] = self.config.TMDb.get_person(util.regex_first_int(method_data, 'TMDb Person ID')).profile_url
+            self.posters[method_name] = self.config.TMDb.get_person(util.regex_first_int(method_data, "TMDb Person ID")).profile_url
         elif method_name == "tvdb_poster":
             self.posters[method_name] = f"{self.config.TVDb.get_tvdb_obj(method_data, is_movie=self.library.is_movie).poster_url}"
         elif method_name == "file_poster":
@@ -1440,7 +1734,7 @@ class CollectionBuilder:
             except Failed:
                 logger.warning(f"{self.Type} Warning: No Background Found at {method_data}")
         elif method_name == "tmdb_background":
-            self.backgrounds[method_name] = self.config.TMDb.get_movie_show_or_collection(util.regex_first_int(method_data, 'TMDb ID'), self.library.is_movie).backdrop_url
+            self.backgrounds[method_name] = self.config.TMDb.get_movie_show_or_collection(util.regex_first_int(method_data, "TMDb ID"), self.library.is_movie).backdrop_url
         elif method_name == "tvdb_background":
             self.posters[method_name] = f"{self.config.TVDb.get_tvdb_obj(method_data, is_movie=self.library.is_movie).background_url}"
         elif method_name == "file_background":
@@ -1530,7 +1824,7 @@ class CollectionBuilder:
                 raise Failed(f"{self.Type} Error: Cannot use item_genre.remove and item_genre.sync together")
             self.item_details[method_final] = util.get_list(method_data) if method_data else []
         elif method_name == "item_edition":
-            self.item_details[method_final] = str(method_data) if method_data else "" # noqa
+            self.item_details[method_final] = str(method_data) if method_data else ""  # noqa
         elif method_name in ["item_critic_rating", "item_audience_rating", "item_user_rating"]:
             self.item_details[method_final] = util.parse(self.Type, method_name, method_data, datatype="float", minimum=0, maximum=10) if method_data is not None else None
         elif method_name == "non_item_remove_label":
@@ -1562,7 +1856,7 @@ class CollectionBuilder:
             elif str(method_data).lower() not in options:
                 logger.error(f"Metadata Error: {method_data} {method_name} attribute invalid")
             else:
-                self.item_details[method_name] = str(method_data).lower() # noqa
+                self.item_details[method_name] = str(method_data).lower()  # noqa
 
     def _radarr(self, method_name, method_data):
         if method_name in ["radarr_add_missing", "radarr_add_existing", "radarr_upgrade_existing", "radarr_monitor_existing", "radarr_search", "radarr_monitor", "radarr_ignore_cache"]:
@@ -1650,10 +1944,14 @@ class CollectionBuilder:
                 new_dictionary["score"] = score_dict
                 self.builders.append((method_name, self.config.AniList.validate_userlist(new_dictionary)))
         elif method_name == "anilist_search":
-            if self.current_time.month in [12, 1, 2]:           current_season = "winter"
-            elif self.current_time.month in [3, 4, 5]:          current_season = "spring"
-            elif self.current_time.month in [6, 7, 8]:          current_season = "summer"
-            else:                                               current_season = "fall"
+            if self.current_time.month in [12, 1, 2]:
+                current_season = "winter"
+            elif self.current_time.month in [3, 4, 5]:
+                current_season = "spring"
+            elif self.current_time.month in [6, 7, 8]:
+                current_season = "summer"
+            else:
+                current_season = "fall"
             default_year = self.current_year + 1 if self.current_time.month == 12 else self.current_year
             for dict_data in util.parse(self.Type, method_name, method_data, datatype="listdict"):
                 dict_methods = {dm.lower(): dm for dm in dict_data}
@@ -1795,15 +2093,20 @@ class CollectionBuilder:
                         if category_filter in category_names or category_filter.replace(", ", " - ") in category_names:
                             final_category.append(category_filter)
                         else:
-                            raise Failed(
-                                f"{self.Type} Error: imdb_award category_filter attribute invalid: "
-                                f"{category_filter} must be in [{', '.join(category_names)}]"
-                            )
+                            raise Failed(f"{self.Type} Error: imdb_award category_filter attribute invalid: " f"{category_filter} must be in [{', '.join(category_names)}]")
                             # raise Failed(f"{self.Type} Error: imdb_award category_filter attribute invalid: {category_filter} must be in in [{', '.join([v for _, v in category_names.items()])}]")
-                self.builders.append((method_name, {
-                    "event_id": event_id, "event_year": event_year, "award_filter": final_awards if final_awards else None, "category_filter": final_category if final_category else None,
-                    "winning": util.parse(self.Type, "winning", dict_data, parent=method_name, methods=dict_methods, datatype="bool", default=False)
-                }))
+                self.builders.append(
+                    (
+                        method_name,
+                        {
+                            "event_id": event_id,
+                            "event_year": event_year,
+                            "award_filter": final_awards if final_awards else None,
+                            "category_filter": final_category if final_category else None,
+                            "winning": util.parse(self.Type, "winning", dict_data, parent=method_name, methods=dict_methods, datatype="bool", default=False),
+                        },
+                    )
+                )
         elif method_name == "imdb_search":
             for dict_data in util.parse(self.Type, method_name, method_data, datatype="listdict"):
                 dict_methods = {dm.lower(): dm for dm in dict_data}
@@ -1837,7 +2140,7 @@ class CollectionBuilder:
                             if event in imdb.event_options:
                                 events.append(event)
                             else:
-                                res = re.search(r'(ev\d+)', event)
+                                res = re.search(r"(ev\d+)", event)
                                 if res:
                                     events.append(res.group(1))
                                 else:
@@ -1850,7 +2153,7 @@ class CollectionBuilder:
                             if interest in imdb.interest_options:
                                 interests.append(interest)
                             else:
-                                res = re.search(r'(in\d+)', interest)
+                                res = re.search(r"(in\d+)", interest)
                                 if res:
                                     interests.append(res.group(1))
                                 else:
@@ -1863,7 +2166,7 @@ class CollectionBuilder:
                             if company in imdb.company_options:
                                 companies.append(company)
                             else:
-                                res = re.search(r'(co\d+)', company)
+                                res = re.search(r"(co\d+)", company)
                                 if res:
                                     companies.append(res.group(1))
                                 else:
@@ -1904,7 +2207,7 @@ class CollectionBuilder:
                     elif search_attr == "cast":
                         casts = []
                         for cast in util.parse(self.Type, search_method, search_data, datatype="lowerlist", parent=method_name):
-                            res = re.search(r'(nm\d+)', cast)
+                            res = re.search(r"(nm\d+)", cast)
                             if res:
                                 casts.append(res.group(1))
                             else:
@@ -1914,7 +2217,7 @@ class CollectionBuilder:
                     elif search_attr == "series":
                         series = []
                         for show in util.parse(self.Type, search_method, search_data, datatype="lowerlist", parent=method_name):
-                            res = re.search(r'(tt\d+)', show)
+                            res = re.search(r"(tt\d+)", show)
                             if res:
                                 series.append(res.group(1))
                             else:
@@ -1924,7 +2227,7 @@ class CollectionBuilder:
                     elif search_attr == "list":
                         lists = []
                         for new_list in util.parse(self.Type, search_method, search_data, datatype="lowerlist", parent=method_name):
-                            res = re.search(r'(ls\d+)', new_list)
+                            res = re.search(r"(ls\d+)", new_list)
                             if res:
                                 lists.append(res.group(1))
                             else:
@@ -2003,27 +2306,41 @@ class CollectionBuilder:
             for dict_data in util.parse(self.Type, method_name, method_data, datatype="listdict"):
                 dict_methods = {dm.lower(): dm for dm in dict_data}
                 if method_name == "mal_season":
-                    if self.current_time.month in [1, 2, 3]:            default_season = "winter"
-                    elif self.current_time.month in [4, 5, 6]:          default_season = "spring"
-                    elif self.current_time.month in [7, 8, 9]:          default_season = "summer"
-                    else:                                               default_season = "fall"
+                    if self.current_time.month in [1, 2, 3]:
+                        default_season = "winter"
+                    elif self.current_time.month in [4, 5, 6]:
+                        default_season = "spring"
+                    elif self.current_time.month in [7, 8, 9]:
+                        default_season = "summer"
+                    else:
+                        default_season = "fall"
                     season = util.parse(self.Type, "season", dict_data, methods=dict_methods, parent=method_name, default=default_season, options=util.seasons)
                     if season == "current":
                         season = default_season
-                    self.builders.append((method_name, {
-                        "season": season,
-                        "sort_by": util.parse(self.Type, "sort_by", dict_data, methods=dict_methods, parent=method_name, default="members", options=mal.season_sort_options, translation=mal.season_sort_translation),
-                        "year": util.parse(self.Type, "year", dict_data, datatype="int", methods=dict_methods, default=self.current_year, parent=method_name, minimum=1917, maximum=self.current_year + 1),
-                        "limit": util.parse(self.Type, "limit", dict_data, datatype="int", methods=dict_methods, default=100, parent=method_name, maximum=500),
-                        "starting_only": util.parse(self.Type, "starting_only", dict_data, datatype="bool", methods=dict_methods, default=False, parent=method_name)
-                    }))
+                    self.builders.append(
+                        (
+                            method_name,
+                            {
+                                "season": season,
+                                "sort_by": util.parse(self.Type, "sort_by", dict_data, methods=dict_methods, parent=method_name, default="members", options=mal.season_sort_options, translation=mal.season_sort_translation),
+                                "year": util.parse(self.Type, "year", dict_data, datatype="int", methods=dict_methods, default=self.current_year, parent=method_name, minimum=1917, maximum=self.current_year + 1),
+                                "limit": util.parse(self.Type, "limit", dict_data, datatype="int", methods=dict_methods, default=100, parent=method_name, maximum=500),
+                                "starting_only": util.parse(self.Type, "starting_only", dict_data, datatype="bool", methods=dict_methods, default=False, parent=method_name),
+                            },
+                        )
+                    )
                 elif method_name == "mal_userlist":
-                    self.builders.append((method_name, {
-                        "username": util.parse(self.Type, "username", dict_data, methods=dict_methods, parent=method_name),
-                        "status": util.parse(self.Type, "status", dict_data, methods=dict_methods, parent=method_name, default="all", options=mal.userlist_status),
-                        "sort_by": util.parse(self.Type, "sort_by", dict_data, methods=dict_methods, parent=method_name, default="score", options=mal.userlist_sort_options, translation=mal.userlist_sort_translation),
-                        "limit": util.parse(self.Type, "limit", dict_data, datatype="int", methods=dict_methods, default=100, parent=method_name, maximum=1000)
-                    }))
+                    self.builders.append(
+                        (
+                            method_name,
+                            {
+                                "username": util.parse(self.Type, "username", dict_data, methods=dict_methods, parent=method_name),
+                                "status": util.parse(self.Type, "status", dict_data, methods=dict_methods, parent=method_name, default="all", options=mal.userlist_status),
+                                "sort_by": util.parse(self.Type, "sort_by", dict_data, methods=dict_methods, parent=method_name, default="score", options=mal.userlist_sort_options, translation=mal.userlist_sort_translation),
+                                "limit": util.parse(self.Type, "limit", dict_data, datatype="int", methods=dict_methods, default=100, parent=method_name, maximum=1000),
+                            },
+                        )
+                    )
                 elif method_name == "mal_search":
                     final_attributes = {}
                     final_text = "MyAnimeList Search"
@@ -2051,17 +2368,17 @@ class CollectionBuilder:
                         final_text += f"\nStatus: {final_attributes['status']}"
                     if "genre" in dict_methods:
                         genre_str = str(util.parse(self.Type, "genre", dict_data, methods=dict_methods, parent=method_name))
-                        out_text, out_ints = util.parse_and_or(self.Type, 'Genre', genre_str, self.config.MyAnimeList.genres)
+                        out_text, out_ints = util.parse_and_or(self.Type, "Genre", genre_str, self.config.MyAnimeList.genres)
                         final_text += f"\nGenre: {out_text}"
                         final_attributes["genres"] = out_ints
                     if "genre.not" in dict_methods:
                         genre_str = str(util.parse(self.Type, "genre.not", dict_data, methods=dict_methods, parent=method_name))
-                        out_text, out_ints = util.parse_and_or(self.Type, 'Genre', genre_str, self.config.MyAnimeList.genres)
+                        out_text, out_ints = util.parse_and_or(self.Type, "Genre", genre_str, self.config.MyAnimeList.genres)
                         final_text += f"\nNot Genre: {out_text}"
                         final_attributes["genres_exclude"] = out_ints
                     if "studio" in dict_methods:
                         studio_str = str(util.parse(self.Type, "studio", dict_data, methods=dict_methods, parent=method_name))
-                        out_text, out_ints = util.parse_and_or(self.Type, 'Studio', studio_str, self.config.MyAnimeList.studios)
+                        out_text, out_ints = util.parse_and_or(self.Type, "Studio", studio_str, self.config.MyAnimeList.studios)
                         final_text += f"\nStudio: {out_text}"
                         final_attributes["producers"] = out_ints
                     if "content_rating" in dict_methods:
@@ -2081,7 +2398,7 @@ class CollectionBuilder:
                         original_score = util.parse(self.Type, "score.lt", dict_data, datatype="float", methods=dict_methods, parent=method_name, minimum=0, maximum=10)
                         final_attributes["max_score"] = original_score - 0.01
                         final_text += f"\nScore Less Than: {original_score}"
-                    if "min_score" in final_attributes and "max_score"  in final_attributes and final_attributes["max_score"] <= final_attributes["min_score"]:
+                    if "min_score" in final_attributes and "max_score" in final_attributes and final_attributes["max_score"] <= final_attributes["min_score"]:
                         raise Failed(f"{self.Type} Error: mal_search score.lte/score.lt attribute must be greater than score.gte/score.gt")
                     if "sfw" in dict_methods:
                         sfw = util.parse(self.Type, "sfw", dict_data, datatype="bool", methods=dict_methods, parent=method_name)
@@ -2112,10 +2429,10 @@ class CollectionBuilder:
                 if not og_year:
                     raise Failed(f"{self.Type} Error: {method_name} year attribute is blank")
                 if og_year == "current":
-                    final["year"] = str(self.current_year) # noqa
+                    final["year"] = str(self.current_year)  # noqa
                 elif str(og_year).startswith("current-"):
                     try:
-                        final["year"] = str(self.current_year - int(og_year.split("-")[1])) # noqa
+                        final["year"] = str(self.current_year - int(og_year.split("-")[1]))  # noqa
                         if final["year"] not in mojo.year_options:
                             raise Failed(f"{self.Type} Error: {method_name} year attribute final value must be 1977 or greater: {og_year}")
                     except ValueError:
@@ -2161,16 +2478,16 @@ class CollectionBuilder:
                         final["range_data"] = util.parse(self.Type, "range_data", dict_data, methods=dict_methods, parent=method_name, options=mojo.holiday_options)
                     elif final["range"] == "daily":
                         if og_data == "current":
-                            final["range_data"] = datetime.strftime(self.current_time, "%Y-%m-%d") # noqa
+                            final["range_data"] = datetime.strftime(self.current_time, "%Y-%m-%d")  # noqa
                         elif str(og_data).startswith("current-"):
                             try:
-                                final["range_data"] = datetime.strftime(self.current_time - timedelta(days=int(og_data.split("-")[1])), "%Y-%m-%d") # noqa
+                                final["range_data"] = datetime.strftime(self.current_time - timedelta(days=int(og_data.split("-")[1])), "%Y-%m-%d")  # noqa
                             except ValueError:
                                 raise Failed(f"{self.Type} Error: {method_name} range_data attribute invalid: {og_data}")
                         else:
                             final["range_data"] = util.parse(self.Type, "range_data", dict_data, methods=dict_methods, parent=method_name, default="current", datatype="date", date_return="%Y-%m-%d")
                             if final["range_data"] == "current":
-                                final["range_data"] = datetime.strftime(self.current_time, "%Y-%m-%d") # noqa
+                                final["range_data"] = datetime.strftime(self.current_time, "%Y-%m-%d")  # noqa
                     elif final["range"] in ["weekend", "weekly"]:
                         if str(og_data).startswith("current-"):
                             try:
@@ -2272,7 +2589,7 @@ class CollectionBuilder:
                 "list_type": "popular" if method_name == "tautulli_popular" else "watched",
                 "list_days": util.parse(self.Type, "list_days", dict_data, datatype="int", methods=dict_methods, default=30, parent=method_name),
                 "list_size": util.parse(self.Type, "list_size", dict_data, datatype="int", methods=dict_methods, default=10, parent=method_name),
-                "list_minimum": util.parse(self.Type, "list_minimum", dict_data, datatype="int", methods=dict_methods, default=0, parent=method_name)
+                "list_minimum": util.parse(self.Type, "list_minimum", dict_data, datatype="int", methods=dict_methods, default=0, parent=method_name),
             }
             buff = final_dict["list_size"] * 3
             if self.library.Tautulli.has_section:
@@ -2407,11 +2724,7 @@ class CollectionBuilder:
                 final_method = "trakt_userlist"
             else:
                 terms = method_name.split("_")
-                trakt_dicts = {
-                    "chart": terms[1],
-                    "limit": util.parse(self.Type, method_name, method_data, datatype="int", default=10),
-                    "time_period": terms[2] if len(terms) > 2 else None
-                }
+                trakt_dicts = {"chart": terms[1], "limit": util.parse(self.Type, method_name, method_data, datatype="int", default=10), "time_period": terms[2] if len(terms) > 2 else None}
                 final_method = "trakt_chart"
             if method_name != final_method:
                 logger.warning(f"{self.Type} Warning: {method_name} will run as {final_method}")
@@ -2556,11 +2869,35 @@ class CollectionBuilder:
                         results_dict = {}
                         if items_to_fetch:
                             fields = [
-                                "Budget", "Chapters", "DateCreated", "Genres", "HomePageUrl", "IndexOptions",
-                                "MediaStreams", "Overview", "ParentId", "Path", "People", "ProductionYear", "PremiereDate", "ProviderIds",
-                                "LockedFields", "PrimaryImageAspectRatio", "Revenue", "SortName", "Studios", "Taglines", "CriticRating",
-                                "CommunityRating", "OfficialRating", "Tags", "TagItems", "RunTimeTicks",
-                                "ProductionLocations", "MediaSources", "OriginalTitle"
+                                "Budget",
+                                "Chapters",
+                                "DateCreated",
+                                "Genres",
+                                "HomePageUrl",
+                                "IndexOptions",
+                                "MediaStreams",
+                                "Overview",
+                                "ParentId",
+                                "Path",
+                                "People",
+                                "ProductionYear",
+                                "PremiereDate",
+                                "ProviderIds",
+                                "LockedFields",
+                                "PrimaryImageAspectRatio",
+                                "Revenue",
+                                "SortName",
+                                "Studios",
+                                "Taglines",
+                                "CriticRating",
+                                "CommunityRating",
+                                "OfficialRating",
+                                "Tags",
+                                "TagItems",
+                                "RunTimeTicks",
+                                "ProductionLocations",
+                                "MediaSources",
+                                "OriginalTitle",
                             ]
                             results_dict = self.library.EmbyServer.get_items_bulk(items_to_fetch, fields=fields) or {}
                             results_dict = {str(k): v for k, v in results_dict.items()}
@@ -2786,7 +3123,7 @@ class CollectionBuilder:
                 continue
             # if item not in self.found_items:
             if item.ratingKey not in found_rating_keys:
-                    # Weiteres Processing
+                # Weiteres Processing
                 if item.ratingKey in self.filtered_keys:
                     if self.details["show_filtered"] is True:
                         logger.info(f"{name} {self.Type} | X | {self.filtered_keys[item.ratingKey]}")
@@ -2902,7 +3239,7 @@ class CollectionBuilder:
                         mod_s = "does not contain" if modifier == ".not" else "contains"
                     elif mod_s is None:
                         mod_s = util.mod_displays[modifier]
-                    param_s = plex.search_display[attr] if attr in plex.search_display else attr.title().replace('_', ' ')
+                    param_s = plex.search_display[attr] if attr in plex.search_display else attr.title().replace("_", " ")
                     display_line = f"{indent}{param_s} {mod_s} {arg_s}"
                     return f"{arg_key}{mod}={arg}&", display_line
 
@@ -3008,6 +3345,7 @@ class CollectionBuilder:
     def validate_attribute(self, attribute, modifier, final, data, validate, plex_search=False):
         def smart_pair(list_to_pair):
             return [(t, t) for t in list_to_pair] if plex_search else list_to_pair
+
         if attribute in tag_attributes and modifier in [".regex"]:
             _, names = self.library.get_search_choices(attribute, title=not plex_search, name_pairs=True)
             valid_list = []
@@ -3057,8 +3395,7 @@ class CollectionBuilder:
                     except ValueError:
                         raise Failed(f"{self.Type} Error: {final} attribute modifier invalid '{year_values[1]}'")
                 return util.parse(self.Type, final, data, datatype="int", minimum=0)
-        elif (attribute in number_attributes and modifier in ["", ".not", ".gt", ".gte", ".lt", ".lte"]) \
-                or (attribute in tag_attributes and modifier in [".count_gt", ".count_gte", ".count_lt", ".count_lte"]):
+        elif (attribute in number_attributes and modifier in ["", ".not", ".gt", ".gte", ".lt", ".lte"]) or (attribute in tag_attributes and modifier in [".count_gt", ".count_gte", ".count_lt", ".count_lte"]):
             return util.parse(self.Type, final, data, datatype="int", minimum=0)
         elif attribute == "origin_country":
             return util.get_list(data, upper=True)
@@ -3189,7 +3526,7 @@ class CollectionBuilder:
             name, collection_items = self.library.get_collection_name_and_items(self.obj if self.obj else self.name, self.smart_label_collection)
         except:
             name = self.obj if self.obj else self.name
-            collection_items =[]
+            collection_items = []
         total = self.limit if self.limit and len(self.found_items) > self.limit else len(self.found_items)
         spacing = len(str(total)) * 2 + 1
         amount_added = 0
@@ -3200,7 +3537,7 @@ class CollectionBuilder:
         for i, item in enumerate(self.found_items, 1):
             if self.limit and amount_added + self.beginning_count - len([r for _, r in self.remove_item_map.items() if r is not None]) >= self.limit:
                 logger.info(f"{self.Type} Limit reached")
-                self.found_items = self.found_items[:i - 1]
+                self.found_items = self.found_items[: i - 1]
                 break
             # Emby
             current_operation = "=" if item.ratingKey in collection_items_keys else "+"
@@ -3209,7 +3546,7 @@ class CollectionBuilder:
             if current_operation == "+":
                 logger.info(f"{number_text_2:>{spacing}} | {name} {self.Type} | {current_operation} | {util.item_title(item)}")
             if item.ratingKey in collection_items_keys:
-            # if item in collection_items:
+                # if item in collection_items:
                 self.remove_item_map[item.ratingKey] = None
                 amount_unchanged += 1
             else:
@@ -3255,7 +3592,7 @@ class CollectionBuilder:
                 # self.library.item_reload(self.obj)
                 self.obj.removeItems(items_removed)
             elif items_removed:
-                self.library.alter_collection(items_removed, self.name, smart_label_collection=self.smart_label_collection, add=False, collection_id = self.obj.ratingKey)
+                self.library.alter_collection(items_removed, self.name, smart_label_collection=self.smart_label_collection, add=False, collection_id=self.obj.ratingKey)
             if self.do_report and items_removed:
                 self.library.add_removed(self.name, [(i.title, self.library.get_id_from_maps(i.ratingKey)) for i in items_removed], self.library.is_movie)
             logger.info("")
@@ -3616,11 +3953,11 @@ class CollectionBuilder:
                     logger.error(f"Plex Error: No location found for {item.title}: {item.locations}")
             if path and self.library.Radarr and item.ratingKey in self.library.movie_rating_key_map:
                 path = path.replace(self.library.Radarr.plex_path, self.library.Radarr.radarr_path)
-                path = path[:-1] if path.endswith(('/', '\\')) else path
+                path = path[:-1] if path.endswith(("/", "\\")) else path
                 tmdb_paths.append((self.library.movie_rating_key_map[item.ratingKey], path))
             if path and self.library.Sonarr and item.ratingKey in self.library.show_rating_key_map:
                 path = path.replace(self.library.Sonarr.plex_path, self.library.Sonarr.sonarr_path)
-                path = path[:-1] if path.endswith(('/', '\\')) else path
+                path = path[:-1] if path.endswith(("/", "\\")) else path
                 tvdb_paths.append((self.library.show_rating_key_map[item.ratingKey], path))
             if any([mn in plex.item_advance_keys for mn in self.item_details]) and hasattr(item, "preferences"):
                 advance_edits = {}
@@ -3711,7 +4048,7 @@ class CollectionBuilder:
                     new_col = self.library.EmbyServer.get_item(emby_col_id)
                     self.obj = self.library.EmbyServer.convert_emby_to_plex([new_col])[0]
                 if self.obj is None:
-                    emby_id= self.library.create_smart_collection(self.name, smart_type, self.smart_url, self.ignore_blank_results, minimum = self.minimum)
+                    emby_id = self.library.create_smart_collection(self.name, smart_type, self.smart_url, self.ignore_blank_results, minimum=self.minimum)
             except Failed:
                 raise Failed(f"{self.Type} Error: Label: {self.name} was not added to any items in the Library")
 
@@ -3722,7 +4059,6 @@ class CollectionBuilder:
             new_col = self.library.EmbyServer.get_item(emby_id)
             if new_col is not None:
                 self.obj = self.library.EmbyServer.convert_emby_to_plex([new_col])[0]
-
 
         # try:
         #     self.obj = self.library.get_playlist(self.name) if self.playlist else self.library.get_collection(self.name, force_search=True)
@@ -3736,31 +4072,56 @@ class CollectionBuilder:
         logger.info("")
         logger.separator(f"Updating Metadata of {self.name} {self.Type}", space=False, border=False)
         logger.info("")
-        if "summary" in self.summaries:                     summary = ("summary", self.summaries["summary"])
-        elif "translation" in self.summaries:               summary = ("translation", self.summaries["translation"])
-        elif "tmdb_description" in self.summaries:          summary = ("tmdb_description", self.summaries["tmdb_description"])
-        elif "tvdb_description" in self.summaries:          summary = ("tvdb_description", self.summaries["tvdb_description"])
-        elif "letterboxd_description" in self.summaries:    summary = ("letterboxd_description", self.summaries["letterboxd_description"])
-        elif "tmdb_summary" in self.summaries:              summary = ("tmdb_summary", self.summaries["tmdb_summary"])
-        elif "tvdb_summary" in self.summaries:              summary = ("tvdb_summary", self.summaries["tvdb_summary"])
-        elif "tmdb_biography" in self.summaries:            summary = ("tmdb_biography", self.summaries["tmdb_biography"])
-        elif "tmdb_person" in self.summaries:               summary = ("tmdb_person", self.summaries["tmdb_person"])
-        elif "tmdb_collection_details" in self.summaries:   summary = ("tmdb_collection_details", self.summaries["tmdb_collection_details"])
-        elif "trakt_list_details" in self.summaries:        summary = ("trakt_list_details", self.summaries["trakt_list_details"])
-        elif "tmdb_list_details" in self.summaries:         summary = ("tmdb_list_details", self.summaries["tmdb_list_details"])
-        elif "tvdb_list_details" in self.summaries:         summary = ("tvdb_list_details", self.summaries["tvdb_list_details"])
-        elif "letterboxd_list_details" in self.summaries:   summary = ("letterboxd_list_details", self.summaries["letterboxd_list_details"])
-        elif "icheckmovies_list_details" in self.summaries: summary = ("icheckmovies_list_details", self.summaries["icheckmovies_list_details"])
-        elif "tmdb_actor_details" in self.summaries:        summary = ("tmdb_actor_details", self.summaries["tmdb_actor_details"])
-        elif "tmdb_crew_details" in self.summaries:         summary = ("tmdb_crew_details", self.summaries["tmdb_crew_details"])
-        elif "tmdb_director_details" in self.summaries:     summary = ("tmdb_director_details", self.summaries["tmdb_director_details"])
-        elif "tmdb_producer_details" in self.summaries:     summary = ("tmdb_producer_details", self.summaries["tmdb_producer_details"])
-        elif "tmdb_writer_details" in self.summaries:       summary = ("tmdb_writer_details", self.summaries["tmdb_writer_details"])
-        elif "tmdb_movie_details" in self.summaries:        summary = ("tmdb_movie_details", self.summaries["tmdb_movie_details"])
-        elif "tvdb_movie_details" in self.summaries:        summary = ("tvdb_movie_details", self.summaries["tvdb_movie_details"])
-        elif "tvdb_show_details" in self.summaries:         summary = ("tvdb_show_details", self.summaries["tvdb_show_details"])
-        elif "tmdb_show_details" in self.summaries:         summary = ("tmdb_show_details", self.summaries["tmdb_show_details"])
-        else:                                               summary = (None, None)
+        if "summary" in self.summaries:
+            summary = ("summary", self.summaries["summary"])
+        elif "translation" in self.summaries:
+            summary = ("translation", self.summaries["translation"])
+        elif "tmdb_description" in self.summaries:
+            summary = ("tmdb_description", self.summaries["tmdb_description"])
+        elif "tvdb_description" in self.summaries:
+            summary = ("tvdb_description", self.summaries["tvdb_description"])
+        elif "letterboxd_description" in self.summaries:
+            summary = ("letterboxd_description", self.summaries["letterboxd_description"])
+        elif "tmdb_summary" in self.summaries:
+            summary = ("tmdb_summary", self.summaries["tmdb_summary"])
+        elif "tvdb_summary" in self.summaries:
+            summary = ("tvdb_summary", self.summaries["tvdb_summary"])
+        elif "tmdb_biography" in self.summaries:
+            summary = ("tmdb_biography", self.summaries["tmdb_biography"])
+        elif "tmdb_person" in self.summaries:
+            summary = ("tmdb_person", self.summaries["tmdb_person"])
+        elif "tmdb_collection_details" in self.summaries:
+            summary = ("tmdb_collection_details", self.summaries["tmdb_collection_details"])
+        elif "trakt_list_details" in self.summaries:
+            summary = ("trakt_list_details", self.summaries["trakt_list_details"])
+        elif "tmdb_list_details" in self.summaries:
+            summary = ("tmdb_list_details", self.summaries["tmdb_list_details"])
+        elif "tvdb_list_details" in self.summaries:
+            summary = ("tvdb_list_details", self.summaries["tvdb_list_details"])
+        elif "letterboxd_list_details" in self.summaries:
+            summary = ("letterboxd_list_details", self.summaries["letterboxd_list_details"])
+        elif "icheckmovies_list_details" in self.summaries:
+            summary = ("icheckmovies_list_details", self.summaries["icheckmovies_list_details"])
+        elif "tmdb_actor_details" in self.summaries:
+            summary = ("tmdb_actor_details", self.summaries["tmdb_actor_details"])
+        elif "tmdb_crew_details" in self.summaries:
+            summary = ("tmdb_crew_details", self.summaries["tmdb_crew_details"])
+        elif "tmdb_director_details" in self.summaries:
+            summary = ("tmdb_director_details", self.summaries["tmdb_director_details"])
+        elif "tmdb_producer_details" in self.summaries:
+            summary = ("tmdb_producer_details", self.summaries["tmdb_producer_details"])
+        elif "tmdb_writer_details" in self.summaries:
+            summary = ("tmdb_writer_details", self.summaries["tmdb_writer_details"])
+        elif "tmdb_movie_details" in self.summaries:
+            summary = ("tmdb_movie_details", self.summaries["tmdb_movie_details"])
+        elif "tvdb_movie_details" in self.summaries:
+            summary = ("tvdb_movie_details", self.summaries["tvdb_movie_details"])
+        elif "tvdb_show_details" in self.summaries:
+            summary = ("tvdb_show_details", self.summaries["tvdb_show_details"])
+        elif "tmdb_show_details" in self.summaries:
+            summary = ("tmdb_show_details", self.summaries["tmdb_show_details"])
+        else:
+            summary = (None, None)
 
         if self.playlist:
             if summary[1]:
@@ -3775,7 +4136,7 @@ class CollectionBuilder:
                     logger.info("")
         else:
             self.library.item_reload(self.obj)
-            #self.obj.batchEdits()
+            # self.obj.batchEdits()
             batch_display = "Collection Metadata Edits"
             if summary[1] and str(summary[1]) != str(self.obj.summary):
                 self.obj.editSummary(summary[1])
@@ -3805,14 +4166,14 @@ class CollectionBuilder:
                 sync_tags.append("Kometa")
             else:
                 add_tags.append("Kometa")
-            tag_results = self.library.edit_tags('label', self.obj, add_tags=add_tags, remove_tags=remove_tags, sync_tags=sync_tags, do_print=False)
+            tag_results = self.library.edit_tags("label", self.obj, add_tags=add_tags, remove_tags=remove_tags, sync_tags=sync_tags, do_print=False)
             if tag_results:
                 batch_display += f"\n{tag_results}"
 
             logger.info(batch_display)
             if len(batch_display) > 25:
                 try:
-                    #self.obj.saveEdits()
+                    # self.obj.saveEdits()
                     logger.info("Metadata: Update Completed")
                     updated_details.append("Metadata")
                 except NotFound:
@@ -3821,8 +4182,7 @@ class CollectionBuilder:
 
             advance_update = False
             if "collection_mode" in self.details:
-                if (self.blank_collection and self.created) or int(self.obj.collectionMode) not in plex.collection_mode_keys \
-                        or plex.collection_mode_keys[int(self.obj.collectionMode)] != self.details["collection_mode"]:
+                if (self.blank_collection and self.created) or int(self.obj.collectionMode) not in plex.collection_mode_keys or plex.collection_mode_keys[int(self.obj.collectionMode)] != self.details["collection_mode"]:
                     if self.blank_collection and self.created:
                         self.library.collection_mode_query(self.obj, "hide")
                         logger.info(f"Collection Mode | hide")
@@ -3840,8 +4200,7 @@ class CollectionBuilder:
                     logger.error("Collection Error: collection_filtering requires a more recent version of Plex Media Server")
 
             if "collection_order" in self.details:
-                if int(self.obj.collectionSort) not in plex.collection_order_keys \
-                        or plex.collection_order_keys[int(self.obj.collectionSort)] != self.details["collection_order"]:
+                if int(self.obj.collectionSort) not in plex.collection_order_keys or plex.collection_order_keys[int(self.obj.collectionSort)] != self.details["collection_order"]:
                     self.library.collection_order_query(self.obj, self.details["collection_order"])
                     logger.info(f"Collection Order | {self.details['collection_order']}")
                     advance_update = True
@@ -3873,8 +4232,10 @@ class CollectionBuilder:
         if self.asset_directory:
             name_mapping = self.name
             if "name_mapping" in self.details:
-                if self.details["name_mapping"]:                    name_mapping = self.details["name_mapping"]
-                else:                                               logger.error(f"{self.Type} Error: name_mapping attribute is blank")
+                if self.details["name_mapping"]:
+                    name_mapping = self.details["name_mapping"]
+                else:
+                    logger.error(f"{self.Type} Error: name_mapping attribute is blank")
             try:
                 asset_poster, asset_background, _, asset_location, _ = self.library.find_item_assets(name_mapping, asset_directory=self.asset_directory)
                 if asset_poster:
@@ -3945,31 +4306,56 @@ class CollectionBuilder:
         locked_fields = emby_item.get("LockedFields", [])
         new_properties = {}
 
-        if "summary" in self.summaries:                     summary = ("summary", self.summaries["summary"])
-        elif "translation" in self.summaries:               summary = ("translation", self.summaries["translation"])
-        elif "tmdb_description" in self.summaries:          summary = ("tmdb_description", self.summaries["tmdb_description"])
-        elif "tvdb_description" in self.summaries:          summary = ("tvdb_description", self.summaries["tvdb_description"])
-        elif "letterboxd_description" in self.summaries:    summary = ("letterboxd_description", self.summaries["letterboxd_description"])
-        elif "tmdb_summary" in self.summaries:              summary = ("tmdb_summary", self.summaries["tmdb_summary"])
-        elif "tvdb_summary" in self.summaries:              summary = ("tvdb_summary", self.summaries["tvdb_summary"])
-        elif "tmdb_biography" in self.summaries:            summary = ("tmdb_biography", self.summaries["tmdb_biography"])
-        elif "tmdb_person" in self.summaries:               summary = ("tmdb_person", self.summaries["tmdb_person"])
-        elif "tmdb_collection_details" in self.summaries:   summary = ("tmdb_collection_details", self.summaries["tmdb_collection_details"])
-        elif "trakt_list_details" in self.summaries:        summary = ("trakt_list_details", self.summaries["trakt_list_details"])
-        elif "tmdb_list_details" in self.summaries:         summary = ("tmdb_list_details", self.summaries["tmdb_list_details"])
-        elif "tvdb_list_details" in self.summaries:         summary = ("tvdb_list_details", self.summaries["tvdb_list_details"])
-        elif "letterboxd_list_details" in self.summaries:   summary = ("letterboxd_list_details", self.summaries["letterboxd_list_details"])
-        elif "icheckmovies_list_details" in self.summaries: summary = ("icheckmovies_list_details", self.summaries["icheckmovies_list_details"])
-        elif "tmdb_actor_details" in self.summaries:        summary = ("tmdb_actor_details", self.summaries["tmdb_actor_details"])
-        elif "tmdb_crew_details" in self.summaries:         summary = ("tmdb_crew_details", self.summaries["tmdb_crew_details"])
-        elif "tmdb_director_details" in self.summaries:     summary = ("tmdb_director_details", self.summaries["tmdb_director_details"])
-        elif "tmdb_producer_details" in self.summaries:     summary = ("tmdb_producer_details", self.summaries["tmdb_producer_details"])
-        elif "tmdb_writer_details" in self.summaries:       summary = ("tmdb_writer_details", self.summaries["tmdb_writer_details"])
-        elif "tmdb_movie_details" in self.summaries:        summary = ("tmdb_movie_details", self.summaries["tmdb_movie_details"])
-        elif "tvdb_movie_details" in self.summaries:        summary = ("tvdb_movie_details", self.summaries["tvdb_movie_details"])
-        elif "tvdb_show_details" in self.summaries:         summary = ("tvdb_show_details", self.summaries["tvdb_show_details"])
-        elif "tmdb_show_details" in self.summaries:         summary = ("tmdb_show_details", self.summaries["tmdb_show_details"])
-        else:                                               summary = (None, None)
+        if "summary" in self.summaries:
+            summary = ("summary", self.summaries["summary"])
+        elif "translation" in self.summaries:
+            summary = ("translation", self.summaries["translation"])
+        elif "tmdb_description" in self.summaries:
+            summary = ("tmdb_description", self.summaries["tmdb_description"])
+        elif "tvdb_description" in self.summaries:
+            summary = ("tvdb_description", self.summaries["tvdb_description"])
+        elif "letterboxd_description" in self.summaries:
+            summary = ("letterboxd_description", self.summaries["letterboxd_description"])
+        elif "tmdb_summary" in self.summaries:
+            summary = ("tmdb_summary", self.summaries["tmdb_summary"])
+        elif "tvdb_summary" in self.summaries:
+            summary = ("tvdb_summary", self.summaries["tvdb_summary"])
+        elif "tmdb_biography" in self.summaries:
+            summary = ("tmdb_biography", self.summaries["tmdb_biography"])
+        elif "tmdb_person" in self.summaries:
+            summary = ("tmdb_person", self.summaries["tmdb_person"])
+        elif "tmdb_collection_details" in self.summaries:
+            summary = ("tmdb_collection_details", self.summaries["tmdb_collection_details"])
+        elif "trakt_list_details" in self.summaries:
+            summary = ("trakt_list_details", self.summaries["trakt_list_details"])
+        elif "tmdb_list_details" in self.summaries:
+            summary = ("tmdb_list_details", self.summaries["tmdb_list_details"])
+        elif "tvdb_list_details" in self.summaries:
+            summary = ("tvdb_list_details", self.summaries["tvdb_list_details"])
+        elif "letterboxd_list_details" in self.summaries:
+            summary = ("letterboxd_list_details", self.summaries["letterboxd_list_details"])
+        elif "icheckmovies_list_details" in self.summaries:
+            summary = ("icheckmovies_list_details", self.summaries["icheckmovies_list_details"])
+        elif "tmdb_actor_details" in self.summaries:
+            summary = ("tmdb_actor_details", self.summaries["tmdb_actor_details"])
+        elif "tmdb_crew_details" in self.summaries:
+            summary = ("tmdb_crew_details", self.summaries["tmdb_crew_details"])
+        elif "tmdb_director_details" in self.summaries:
+            summary = ("tmdb_director_details", self.summaries["tmdb_director_details"])
+        elif "tmdb_producer_details" in self.summaries:
+            summary = ("tmdb_producer_details", self.summaries["tmdb_producer_details"])
+        elif "tmdb_writer_details" in self.summaries:
+            summary = ("tmdb_writer_details", self.summaries["tmdb_writer_details"])
+        elif "tmdb_movie_details" in self.summaries:
+            summary = ("tmdb_movie_details", self.summaries["tmdb_movie_details"])
+        elif "tvdb_movie_details" in self.summaries:
+            summary = ("tvdb_movie_details", self.summaries["tvdb_movie_details"])
+        elif "tvdb_show_details" in self.summaries:
+            summary = ("tvdb_show_details", self.summaries["tvdb_show_details"])
+        elif "tmdb_show_details" in self.summaries:
+            summary = ("tmdb_show_details", self.summaries["tmdb_show_details"])
+        else:
+            summary = (None, None)
 
         if self.playlist:
             if summary[1]:
@@ -3992,7 +4378,7 @@ class CollectionBuilder:
                     if str(summary[1]) != str(self.obj.summary):
                         new_properties["Overview"] = summary[1]
                         batch_display += f"\nSummary ({summary[0]}) | {summary[1]:<25}"
-                        
+
                         # Lock Overview to prevent Emby from overwriting it
                         # if "Overview" not in locked_fields:
                         #     locked_fields.append("Overview")
@@ -4032,7 +4418,7 @@ class CollectionBuilder:
             if "content_rating" in self.details and str(self.details["content_rating"]) != str(self.obj.contentRating):
                 new_properties["OfficialRating"] = self.details["content_rating"]
                 batch_display += f"\nContent Rating | {self.details['content_rating']}"
-                
+
                 # if "OfficialRating" not in locked_fields:
                 #     locked_fields.append("OfficialRating")
 
@@ -4051,8 +4437,7 @@ class CollectionBuilder:
             else:
                 add_tags.append("Kometa")
 
-            tag_results = self.library.edit_tags('label', self.obj, add_tags=add_tags, remove_tags=remove_tags,
-                                                 sync_tags=sync_tags, do_print=False)
+            tag_results = self.library.edit_tags("label", self.obj, add_tags=add_tags, remove_tags=remove_tags, sync_tags=sync_tags, do_print=False)
             if tag_results:
                 batch_display += f"\n{tag_results}"
 
@@ -4066,7 +4451,6 @@ class CollectionBuilder:
                     logger.error("Metadata: Failed to Update Please delete the collection and run again")
                 logger.info("")
 
-
             updated_details.append("Tag")
 
             # --- Unsupported / Different in Emby ---
@@ -4074,10 +4458,10 @@ class CollectionBuilder:
             # collection_filtering: Emby permissions are user-based, not set on the collection item itself.
             # collection_order: Emby collections usually respect the order added or have client-side sort settings.
             # visible_...: "Visible on Home" is a user preference in Emby, not a collection property.
-            
+
             # if "collection_mode" in self.details:
             #     logger.warning("Emby Warning: collection_mode is not supported in Emby (Global Library Setting)")
-            
+
             # if "collection_filtering" in self.details:
             #     logger.warning("Emby Warning: collection_filtering is not supported in Emby (User Permissions)")
 
@@ -4091,8 +4475,10 @@ class CollectionBuilder:
         if self.asset_directory:
             name_mapping = self.name
             if "name_mapping" in self.details:
-                if self.details["name_mapping"]:                    name_mapping = self.details["name_mapping"]
-                else:                                               logger.error(f"{self.Type} Error: name_mapping attribute is blank")
+                if self.details["name_mapping"]:
+                    name_mapping = self.details["name_mapping"]
+                else:
+                    logger.error(f"{self.Type} Error: name_mapping attribute is blank")
             try:
                 # return poster, background, logo, item_asset_directory, folder_name
 
@@ -4123,7 +4509,6 @@ class CollectionBuilder:
         if self.collection_poster:
             uploaded_poster, _, _ = self.library.upload_images(self.obj, poster=self.collection_poster)
 
-
         if self.collection_background and not "BackdropImageTags" in self.library.EmbyServer.get_item(self.obj.ratingKey):
 
             _, background_uploaded, _ = self.library.upload_images(self.obj, background=self.collection_background)
@@ -4145,7 +4530,7 @@ class CollectionBuilder:
         return updated_details
 
     def sort_collection(self):
-        #emby
+        # emby
         return
         logger.info("")
         logger.separator(f"Sorting {self.name} {self.Type}", space=False, border=False)
@@ -4158,7 +4543,7 @@ class CollectionBuilder:
             plex_search = {"sort_by": self.custom_sort}
             if self.builder_level in ["season", "episode"]:
                 plex_search["type"] = f"{self.builder_level}s"
-                plex_search["any"] = {f"{self.builder_level}_collection": [self.name]} # noqa
+                plex_search["any"] = {f"{self.builder_level}_collection": [self.name]}  # noqa
             else:
                 plex_search["any"] = {"collection": [self.name]}
             try:
@@ -4266,8 +4651,7 @@ class CollectionBuilder:
                 logger.info(f"Playlist: {self.name} not found on User {self.library.account.username}")
 
     def send_notifications(self, playlist=False):
-        if self.obj is not None and self.details["changes_webhooks"] and \
-                (self.created or len(self.notification_additions) > 0 or len(self.notification_removals) > 0):
+        if self.obj is not None and self.details["changes_webhooks"] and (self.created or len(self.notification_additions) > 0 or len(self.notification_removals) > 0):
             self.library.item_reload(self.obj)
             try:
                 self.library.Webhooks.collection_hooks(
@@ -4280,7 +4664,7 @@ class CollectionBuilder:
                     removals=self.notification_removals,
                     radarr=self.added_to_radarr,
                     sonarr=self.added_to_sonarr,
-                    playlist=playlist
+                    playlist=playlist,
                 )
             except Failed as e:
                 logger.stacktrace()

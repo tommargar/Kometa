@@ -1,8 +1,10 @@
 import re
 from datetime import datetime
+
+from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_fixed
+
 from modules import util
 from modules.util import Failed
-from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_not_exception_type
 
 logger = util.logger
 
@@ -11,27 +13,191 @@ base_url = "https://www.thetvdb.com"
 alt_url = "https://thetvdb.com"
 api_url = "https://api4.thetvdb.com/v4"
 language_translation = {
-    "ab": "abk", "aa": "aar", "af": "afr", "ak": "aka", "sq": "sqi", "am": "amh", "ar": "ara", "an": "arg", "hy": "hye",
-    "as": "asm", "av": "ava", "ae": "ave", "ay": "aym", "az": "aze", "bm": "bam", "ba": "bak", "eu": "eus", "be": "bel",
-    "bn": "ben", "bi": "bis", "bs": "bos", "br": "bre", "bg": "bul", "my": "mya", "ca": "cat", "ch": "cha", "ce": "che",
-    "ny": "nya", "zh": "zho", "cv": "chv", "kw": "cor", "co": "cos", "cr": "cre", "hr": "hrv", "cs": "ces", "da": "dan",
-    "dv": "div", "nl": "nld", "dz": "dzo", "en": "eng", "eo": "epo", "et": "est", "ee": "ewe", "fo": "fao", "fj": "fij",
-    "fi": "fin", "fr": "fra", "ff": "ful", "gl": "glg", "ka": "kat", "de": "deu", "el": "ell", "gn": "grn", "gu": "guj",
-    "ht": "hat", "ha": "hau", "he": "heb", "hz": "her", "hi": "hin", "ho": "hmo", "hu": "hun", "ia": "ina", "id": "ind",
-    "ie": "ile", "ga": "gle", "ig": "ibo", "ik": "ipk", "io": "ido", "is": "isl", "it": "ita", "iu": "iku", "ja": "jpn",
-    "jv": "jav", "kl": "kal", "kn": "kan", "kr": "kau", "ks": "kas", "kk": "kaz", "km": "khm", "ki": "kik", "rw": "kin",
-    "ky": "kir", "kv": "kom", "kg": "kon", "ko": "kor", "ku": "kur", "kj": "kua", "la": "lat", "lb": "ltz", "lg": "lug",
-    "li": "lim", "ln": "lin", "lo": "lao", "lt": "lit", "lu": "lub", "lv": "lav", "gv": "glv", "mk": "mkd", "mg": "mlg",
-    "ms": "msa", "ml": "mal", "mt": "mlt", "mi": "mri", "mr": "mar", "mh": "mah", "mn": "mon", "na": "nau", "nv": "nav",
-    "nd": "nde", "ne": "nep", "ng": "ndo", "nb": "nob", "nn": "nno", "no": "nor", "ii": "iii", "nr": "nbl", "oc": "oci",
-    "oj": "oji", "cu": "chu", "om": "orm", "or": "ori", "os": "oss", "pa": "pan", "pi": "pli", "fa": "fas", "pl": "pol",
-    "ps": "pus", "pt": "por", "qu": "que", "rm": "roh", "rn": "run", "ro": "ron", "ru": "rus", "sa": "san", "sc": "srd",
-    "sd": "snd", "se": "sme", "sm": "smo", "sg": "sag", "sr": "srp", "gd": "gla", "sn": "sna", "si": "sin", "sk": "slk",
-    "sl": "slv", "so": "som", "st": "sot", "es": "spa", "su": "sun", "sw": "swa", "ss": "ssw", "sv": "swe", "ta": "tam",
-    "te": "tel", "tg": "tgk", "th": "tha", "ti": "tir", "bo": "bod", "tk": "tuk", "tl": "tgl", "tn": "tsn", "to": "ton",
-    "tr": "tur", "ts": "tso", "tt": "tat", "tw": "twi", "ty": "tah", "ug": "uig", "uk": "ukr", "ur": "urd", "uz": "uzb",
-    "ve": "ven", "vi": "vie", "vo": "vol", "wa": "wln", "cy": "cym", "wo": "wol", "fy": "fry", "xh": "xho", "yi": "yid",
-    "yo": "yor", "za": "zha", "zu": "zul"}
+    "ab": "abk",
+    "aa": "aar",
+    "af": "afr",
+    "ak": "aka",
+    "sq": "sqi",
+    "am": "amh",
+    "ar": "ara",
+    "an": "arg",
+    "hy": "hye",
+    "as": "asm",
+    "av": "ava",
+    "ae": "ave",
+    "ay": "aym",
+    "az": "aze",
+    "bm": "bam",
+    "ba": "bak",
+    "eu": "eus",
+    "be": "bel",
+    "bn": "ben",
+    "bi": "bis",
+    "bs": "bos",
+    "br": "bre",
+    "bg": "bul",
+    "my": "mya",
+    "ca": "cat",
+    "ch": "cha",
+    "ce": "che",
+    "ny": "nya",
+    "zh": "zho",
+    "cv": "chv",
+    "kw": "cor",
+    "co": "cos",
+    "cr": "cre",
+    "hr": "hrv",
+    "cs": "ces",
+    "da": "dan",
+    "dv": "div",
+    "nl": "nld",
+    "dz": "dzo",
+    "en": "eng",
+    "eo": "epo",
+    "et": "est",
+    "ee": "ewe",
+    "fo": "fao",
+    "fj": "fij",
+    "fi": "fin",
+    "fr": "fra",
+    "ff": "ful",
+    "gl": "glg",
+    "ka": "kat",
+    "de": "deu",
+    "el": "ell",
+    "gn": "grn",
+    "gu": "guj",
+    "ht": "hat",
+    "ha": "hau",
+    "he": "heb",
+    "hz": "her",
+    "hi": "hin",
+    "ho": "hmo",
+    "hu": "hun",
+    "ia": "ina",
+    "id": "ind",
+    "ie": "ile",
+    "ga": "gle",
+    "ig": "ibo",
+    "ik": "ipk",
+    "io": "ido",
+    "is": "isl",
+    "it": "ita",
+    "iu": "iku",
+    "ja": "jpn",
+    "jv": "jav",
+    "kl": "kal",
+    "kn": "kan",
+    "kr": "kau",
+    "ks": "kas",
+    "kk": "kaz",
+    "km": "khm",
+    "ki": "kik",
+    "rw": "kin",
+    "ky": "kir",
+    "kv": "kom",
+    "kg": "kon",
+    "ko": "kor",
+    "ku": "kur",
+    "kj": "kua",
+    "la": "lat",
+    "lb": "ltz",
+    "lg": "lug",
+    "li": "lim",
+    "ln": "lin",
+    "lo": "lao",
+    "lt": "lit",
+    "lu": "lub",
+    "lv": "lav",
+    "gv": "glv",
+    "mk": "mkd",
+    "mg": "mlg",
+    "ms": "msa",
+    "ml": "mal",
+    "mt": "mlt",
+    "mi": "mri",
+    "mr": "mar",
+    "mh": "mah",
+    "mn": "mon",
+    "na": "nau",
+    "nv": "nav",
+    "nd": "nde",
+    "ne": "nep",
+    "ng": "ndo",
+    "nb": "nob",
+    "nn": "nno",
+    "no": "nor",
+    "ii": "iii",
+    "nr": "nbl",
+    "oc": "oci",
+    "oj": "oji",
+    "cu": "chu",
+    "om": "orm",
+    "or": "ori",
+    "os": "oss",
+    "pa": "pan",
+    "pi": "pli",
+    "fa": "fas",
+    "pl": "pol",
+    "ps": "pus",
+    "pt": "por",
+    "qu": "que",
+    "rm": "roh",
+    "rn": "run",
+    "ro": "ron",
+    "ru": "rus",
+    "sa": "san",
+    "sc": "srd",
+    "sd": "snd",
+    "se": "sme",
+    "sm": "smo",
+    "sg": "sag",
+    "sr": "srp",
+    "gd": "gla",
+    "sn": "sna",
+    "si": "sin",
+    "sk": "slk",
+    "sl": "slv",
+    "so": "som",
+    "st": "sot",
+    "es": "spa",
+    "su": "sun",
+    "sw": "swa",
+    "ss": "ssw",
+    "sv": "swe",
+    "ta": "tam",
+    "te": "tel",
+    "tg": "tgk",
+    "th": "tha",
+    "ti": "tir",
+    "bo": "bod",
+    "tk": "tuk",
+    "tl": "tgl",
+    "tn": "tsn",
+    "to": "ton",
+    "tr": "tur",
+    "ts": "tso",
+    "tt": "tat",
+    "tw": "twi",
+    "ty": "tah",
+    "ug": "uig",
+    "uk": "ukr",
+    "ur": "urd",
+    "uz": "uzb",
+    "ve": "ven",
+    "vi": "vie",
+    "vo": "vol",
+    "wa": "wln",
+    "cy": "cym",
+    "wo": "wol",
+    "fy": "fry",
+    "xh": "xho",
+    "yi": "yid",
+    "yo": "yor",
+    "za": "zha",
+    "zu": "zul",
+}
+
 
 class TVDbObj:
     def __init__(self, tvdb, tvdb_id, is_movie=False, ignore_cache=False, data=None):
@@ -71,6 +237,7 @@ class TVDbObj:
 
         if self._tvdb.cache and not ignore_cache:
             self._tvdb.cache.update_tvdb(expired, self, self._tvdb.expiration)
+
 
 class TVDb:
     def __init__(self, requests, cache, params):
@@ -147,13 +314,13 @@ class TVDb:
             slug = tvdb_url.split("/movies/")[1].split("/")[0]
 
         if not slug:
-             # Try dereferrer ID
-             if "/dereferrer/" in tvdb_url:
-                 try:
-                     return int(tvdb_url.split("/")[-1]), None, None
-                 except ValueError:
-                     pass
-             raise Failed(f"TVDb Error: Could not parse slug from {tvdb_url}")
+            # Try dereferrer ID
+            if "/dereferrer/" in tvdb_url:
+                try:
+                    return int(tvdb_url.split("/")[-1]), None, None
+                except ValueError:
+                    pass
+            raise Failed(f"TVDb Error: Could not parse slug from {tvdb_url}")
 
         try:
             results = self._request("/search", params={"query": slug, "type": "movie" if is_movie else "series"})
@@ -227,23 +394,23 @@ class TVDb:
             "genres": [g["name"] for g in (data.get("genres") or [])],
             "networks": [n["name"] for n in (data.get("networks") or [])],
             "production": production,
-            "studio": studios
+            "studio": studios,
         }
-        
+
         # Handle translations if needed
         lang = language_translation.get(self.language, self.language)
-        
+
         # If language is not eng, try to fetch translation
         if self.language != "eng" and self.language != "en":
-             try:
-                 trans = self._request(f"/{'movies' if is_movie else 'series'}/{tvdb_id}/translations/{lang}")
-                 if trans and "data" in trans:
-                     if trans["data"].get("name"):
-                         item["title"] = trans["data"]["name"]
-                     if trans["data"].get("overview"):
-                         item["summary"] = trans["data"]["overview"]
-             except Failed:
-                 pass
+            try:
+                trans = self._request(f"/{'movies' if is_movie else 'series'}/{tvdb_id}/translations/{lang}")
+                if trans and "data" in trans:
+                    if trans["data"].get("name"):
+                        item["title"] = trans["data"]["name"]
+                    if trans["data"].get("overview"):
+                        item["summary"] = trans["data"]["overview"]
+            except Failed:
+                pass
 
         return item
 
@@ -328,7 +495,6 @@ class TVDb:
                 modifier = f".{modifier[7:]}"
                 if test_number is None or util.is_number_filter(test_number, modifier, filter_data):
                     return False
-            elif (not list(set(filter_data) & set(attrs)) and modifier == "") \
-                    or (list(set(filter_data) & set(attrs)) and modifier == ".not"):
+            elif (not list(set(filter_data) & set(attrs)) and modifier == "") or (list(set(filter_data) & set(attrs)) and modifier == ".not"):
                 return False
         return True

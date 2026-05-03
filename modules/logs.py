@@ -76,10 +76,7 @@ class MyLogger:
         self._formatter(handler=_handler)
         if os.path.isfile(log_file):
             self._logger.removeHandler(_handler)
-            try:
-                _handler.doRollover()
-            except (PermissionError, OSError):
-                pass
+            _handler.doRollover()
             self._logger.addHandler(_handler)
         return _handler
 

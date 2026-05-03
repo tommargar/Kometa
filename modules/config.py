@@ -13,6 +13,7 @@ from modules.github import GitHub
 from modules.gotify import Gotify
 from modules.icheckmovies import ICheckMovies
 from modules.imdb import IMDb
+from modules.jellyfin import Jellyfin
 from modules.letterboxd import Letterboxd
 from modules.mal import MyAnimeList
 from modules.mdblist import MDBList
@@ -22,9 +23,9 @@ from modules.notifiarr import Notifiarr
 from modules.ntfy import Ntfy
 from modules.omdb import OMDb
 from modules.overlays import Overlays
-from modules.jellyfin import Jellyfin
 from modules.plex import Plex
 from modules.radarr import Radarr
+from modules.simkl import Simkl
 from modules.sonarr import Sonarr
 from modules.stevenlu import StevenLu
 from modules.tautulli import Tautulli
@@ -220,6 +221,7 @@ library_operations = {
     "plex_bulk_edit_batch_size": "int",
     "mass_cast_and_crew_update": "bool",
 }
+
 
 class ConfigFile:
     def __init__(self, in_request, default_dir, attrs, secrets):
@@ -470,6 +472,7 @@ class ConfigFile:
                 if str(next_data).startswith("<<") and str(next_data).endswith(">>"):
                     return None
                 return next_data
+
         self.data = check_next(self.data)
 
         def check_for_attribute(
@@ -595,11 +598,11 @@ class ConfigFile:
             if test_list:
                 for test_option, test_description in test_list.items():
                     if len(options) > 0:
-                        options = f"{options}\\n"
+                        options = f"{options}\n"
                     options = f"{options}    {test_option} ({test_description})"
             if (default is None and not default_is_none) or throw:
                 if len(options) > 0:
-                    message = message + "\\n" + options
+                    message = message + "\n" + options
                 raise Failed(f"Config Error: {message}")
             if do_print:
                 logger.warning(f"Config Warning: {message}")
@@ -658,7 +661,7 @@ class ConfigFile:
             "overlay_refresh_emby_items": check_for_attribute(self.data, "overlay_refresh_emby_items", parent="settings", var_type="bool", default=False),
             "assets_for_all": check_for_attribute(self.data, "assets_for_all", parent="settings", var_type="bool", default=False, save=False, do_print=False),
             "assets_for_all_collections": check_for_attribute(self.data, "assets_for_all_collections", parent="settings", var_type="bool", default=False, save=False, do_print=False),
-            "cache_builders": check_for_attribute(self.data, "cache_builders", parent="settings", var_type="int", default=0, int_min=0)
+            "cache_builders": check_for_attribute(self.data, "cache_builders", parent="settings", var_type="int", default=0, int_min=0),
         }
         self.custom_repo = None
         if self.general["custom_repo"]:
@@ -962,21 +965,22 @@ class ConfigFile:
                 logger.info("Connecting to TVDb...")
                 logger.info("Metadata provided by TheTVDB. Please consider adding missing information or subscribing.")
                 try:
-                    self.TVDb = TVDb(self.Requests, self.Cache, {
-                        "apikey": check_for_attribute(self.data, "apikey", parent="tvdb", throw=True),
-                        "pin": check_for_attribute(self.data, "pin", parent="tvdb", default_is_none=True),
-                        "language": check_for_attribute(self.data, "language", parent="tvdb", default=self.general["tvdb_language"]),
-                        "cache_expiration": check_for_attribute(self.data, "cache_expiration", parent="tvdb", var_type="int", default=self.general["cache_expiration"], int_min=1)
-                    })
+                    self.TVDb = TVDb(
+                        self.Requests,
+                        self.Cache,
+                        {
+                            "apikey": check_for_attribute(self.data, "apikey", parent="tvdb", throw=True),
+                            "pin": check_for_attribute(self.data, "pin", parent="tvdb", default_is_none=True),
+                            "language": check_for_attribute(self.data, "language", parent="tvdb", default=self.general["tvdb_language"]),
+                            "cache_expiration": check_for_attribute(self.data, "cache_expiration", parent="tvdb", var_type="int", default=self.general["cache_expiration"], int_min=1),
+                        },
+                    )
                 except Failed as e:
                     logger.error(e)
                 logger.info(f"TVDb Connection {'Failed' if self.TVDb is None else 'Successful'}")
 
             if self.TVDb is None:
-                self.TVDb = TVDb(self.Requests, self.Cache, {
-                    "language": self.general["tvdb_language"],
-                    "cache_expiration": self.general["cache_expiration"]
-                })
+                self.TVDb = TVDb(self.Requests, self.Cache, {"language": self.general["tvdb_language"], "cache_expiration": self.general["cache_expiration"]})
             self.IMDb = IMDb(self.Requests, self.Cache, self.default_dir)
             self.Convert = Convert(self.Requests, self.Cache, self.TMDb)
             self.AniList = AniList(self.Requests)
@@ -989,14 +993,14 @@ class ConfigFile:
 
             logger.separator()
 
-            logger.info("Connecting to Emby Libraries...")
+            logger.info(f"Connecting to Media Center Libraries...")
 
             self.general["plex"] = {
                 "url": check_for_attribute(self.data, "url", parent="plex", var_type="url", default_is_none=True),
                 "token": check_for_attribute(self.data, "token", parent="plex", default_is_none=True),
                 "timeout": check_for_attribute(self.data, "timeout", parent="plex", var_type="int", default=60),
                 "verify_ssl": check_for_attribute(self.data, "verify_ssl", parent="plex", var_type="bool", default_is_none=True),
-                "db_cache": check_for_attribute(self.data, "db_cache", parent="plex", var_type="int", default_is_none=True)
+                "db_cache": check_for_attribute(self.data, "db_cache", parent="plex", var_type="int", default_is_none=True),
             }
             self.general["emby"] = {
                 "url": check_for_attribute(self.data, "url", parent="emby", var_type="url", default_is_none=True),
@@ -1005,7 +1009,7 @@ class ConfigFile:
                 "overlay_destination_folder": check_for_attribute(self.data, "overlay_destination_folder", parent="emby", default_is_none=True),
                 "timeout": check_for_attribute(self.data, "timeout", parent="emby", var_type="int", default=60),
                 "verify_ssl": check_for_attribute(self.data, "verify_ssl", parent="emby", var_type="bool", default_is_none=True),
-                "db_cache": check_for_attribute(self.data, "db_cache", parent="emby", var_type="int", default_is_none=True)
+                "db_cache": check_for_attribute(self.data, "db_cache", parent="emby", var_type="int", default_is_none=True),
             }
             for attr in ["clean_bundles", "empty_trash", "optimize"]:
                 try:
@@ -1116,8 +1120,12 @@ class ConfigFile:
                 params["ignore_ids"].extend([i for i in self.general["ignore_ids"] if i not in params["ignore_ids"]])
                 params["ignore_imdb_ids"] = check_for_attribute(lib, "ignore_imdb_ids", parent="settings", var_type="lower_list", default_is_none=True, do_print=False, save=False)
                 params["ignore_imdb_ids"].extend([i for i in self.general["ignore_imdb_ids"] if i not in params["ignore_imdb_ids"]])
-                params["overlay_artwork_filetype"] = check_for_attribute(lib, "overlay_artwork_filetype", parent="settings", test_list=filetype_list, translations={"webp": "webp_lossy"}, default=self.general["overlay_artwork_filetype"], do_print=False, save=False)
-                params["overlay_artwork_quality"] = check_for_attribute(lib, "overlay_artwork_quality", parent="settings", var_type="int", default=self.general["overlay_artwork_quality"], default_is_none=True, int_min=1, int_max=100, do_print=False, save=False)
+                params["overlay_artwork_filetype"] = check_for_attribute(
+                    lib, "overlay_artwork_filetype", parent="settings", test_list=filetype_list, translations={"webp": "webp_lossy"}, default=self.general["overlay_artwork_filetype"], do_print=False, save=False
+                )
+                params["overlay_artwork_quality"] = check_for_attribute(
+                    lib, "overlay_artwork_quality", parent="settings", var_type="int", default=self.general["overlay_artwork_quality"], default_is_none=True, int_min=1, int_max=100, do_print=False, save=False
+                )
                 params["overlay_refresh_emby_items"] = check_for_attribute(lib, "overlay_refresh_emby_items", parent="settings", var_type="bool", default=self.general["overlay_refresh_emby_items"], do_print=False, save=False)
                 params["cache_builders"] = check_for_attribute(lib, "cache_builders", parent="settings", var_type="int", default=self.general["cache_builders"], do_print=False, save=False)
                 params["changes_webhooks"] = check_for_attribute(lib, "changes", parent="webhooks", var_type="list", default=self.webhooks["changes"], do_print=False, save=False, default_is_none=True)
@@ -1224,7 +1232,7 @@ class ConfigFile:
                                         "path": default_path,
                                         "exclude": check_for_attribute(input_dict, "exclude", var_type="lower_list", default_is_none=True, save=False),
                                         "sync_tags": check_for_attribute(input_dict, "sync_tags", var_type="bool", default=False, save=False),
-                                        "add_blank_entries": check_for_attribute(input_dict, "add_blank_entries", var_type="bool", default=True, save=False)
+                                        "add_blank_entries": check_for_attribute(input_dict, "add_blank_entries", var_type="bool", default=True, save=False),
                                     }
                                 elif "mapper" in op:
                                     section_final[op] = {}
@@ -1234,7 +1242,7 @@ class ConfigFile:
                                         elif new_value and str(old_value) == str(new_value):
                                             logger.warning(f"Config Warning: {op} value '{new_value}' ignored as it cannot be mapped to itself")
                                         else:
-                                            section_final[op][str(old_value)] = str(new_value) if new_value else None # noqa
+                                            section_final[op][str(old_value)] = str(new_value) if new_value else None  # noqa
                                 elif op == "delete_collections":
                                     section_final[op] = {
                                         "managed": check_for_attribute(input_dict, "managed", var_type="bool", default_is_none=True, save=False),
@@ -1341,13 +1349,10 @@ class ConfigFile:
                         files, _ = util.load_files(lib["overlay_files"], "overlay_files", lib_vars=lib_vars)
                         for file in util.get_list(lib["overlay_files"], split=False):
                             if isinstance(file, dict):
-                                if ("remove_overlays" in file and file["remove_overlays"] is True) \
-                                        or ("remove_overlay" in file and file["remove_overlay"] is True) \
-                                        or ("revert_overlays" in file and file["revert_overlays"] is True):
+                                if ("remove_overlays" in file and file["remove_overlays"] is True) or ("remove_overlay" in file and file["remove_overlay"] is True) or ("revert_overlays" in file and file["revert_overlays"] is True):
                                     logger.warning("Config Warning: remove_overlays under overlay_files is deprecated it now goes directly under the library attribute.")
                                     params["remove_overlays"] = True
-                                if ("reapply_overlays" in file and file["reapply_overlays"] is True) \
-                                        or ("reapply_overlay" in file and file["reapply_overlay"] is True):
+                                if ("reapply_overlays" in file and file["reapply_overlays"] is True) or ("reapply_overlay" in file and file["reapply_overlay"] is True):
                                     logger.warning("Config Warning: reapply_overlays under overlay_files is deprecated it now goes directly under the library attribute.")
                                     params["reapply_overlays"] = True
                                 if "reset_overlays" in file or "reset_overlay" in file:
@@ -1362,12 +1367,9 @@ class ConfigFile:
                         logger.error(e)
 
                 if lib:
-                    if ("remove_overlays" in lib and lib["remove_overlays"] is True) \
-                            or ("remove_overlay" in lib and lib["remove_overlay"] is True) \
-                            or ("revert_overlays" in lib and lib["revert_overlays"] is True):
+                    if ("remove_overlays" in lib and lib["remove_overlays"] is True) or ("remove_overlay" in lib and lib["remove_overlay"] is True) or ("revert_overlays" in lib and lib["revert_overlays"] is True):
                         params["remove_overlays"] = True
-                    if ("reapply_overlays" in lib and lib["reapply_overlays"] is True) \
-                            or ("reapply_overlay" in lib and lib["reapply_overlay"] is True):
+                    if ("reapply_overlays" in lib and lib["reapply_overlays"] is True) or ("reapply_overlay" in lib and lib["reapply_overlay"] is True):
                         params["reapply_overlays"] = True
                     if "reset_overlays" in lib or "reset_overlay" in lib:
                         attr = f"reset_overlay{'s' if 'reset_overlays' in lib else ''}"
@@ -1432,7 +1434,7 @@ class ConfigFile:
                         "token": check_for_attribute(lib, "token", parent="plex", default=self.general["plex"]["token"], req_default=True, save=False),
                         "timeout": check_for_attribute(lib, "timeout", parent="plex", var_type="int", default=self.general["plex"]["timeout"], save=False),
                         "verify_ssl": check_for_attribute(lib, "verify_ssl", parent="plex", var_type="bool", default=self.general["plex"]["verify_ssl"], default_is_none=True, save=False),
-                        "db_cache": check_for_attribute(lib, "db_cache", parent="plex", var_type="int", default=self.general["plex"]["db_cache"], default_is_none=True, save=False)
+                        "db_cache": check_for_attribute(lib, "db_cache", parent="plex", var_type="int", default=self.general["plex"]["db_cache"], default_is_none=True, save=False),
                     }
                     params["emby"] = {
                         "url": check_for_attribute(lib, "url", parent="emby", var_type="url", default=self.general["emby"]["url"], req_default=True, save=False),
@@ -1441,7 +1443,7 @@ class ConfigFile:
                         "overlay_destination_folder": check_for_attribute(lib, "overlay_destination_folder", parent="emby", default=self.general["emby"]["overlay_destination_folder"], req_default=True, save=False),
                         "timeout": check_for_attribute(lib, "timeout", parent="emby", var_type="int", default=self.general["emby"]["timeout"], save=False),
                         "verify_ssl": check_for_attribute(lib, "verify_ssl", parent="emby", var_type="bool", default=self.general["emby"]["verify_ssl"], default_is_none=True, save=False),
-                        "db_cache": check_for_attribute(lib, "db_cache", parent="emby", var_type="int", default=self.general["emby"]["db_cache"], default_is_none=True, save=False)
+                        "db_cache": check_for_attribute(lib, "db_cache", parent="emby", var_type="int", default=self.general["emby"]["db_cache"], default_is_none=True, save=False),
                     }
                     params["library_tags"] = check_for_attribute(lib, "library_tags", parent="settings", var_type="bool", default=True, save=False)
 
@@ -1465,13 +1467,12 @@ class ConfigFile:
                     if params["plex"]["token"].lower() == "env":
                         params["plex"]["token"] = self.env_plex_token
 
-
                     self.server_type = str(self.data.get("settings", {}).get("server_type", "plex")).lower() if self.data else "plex"
                     if self.server_type == "emby":
                         library = Emby(self, params)
                     elif self.server_type == "jellyfin":
                         library = Jellyfin(self, params)
-                    else: # bug, todo plex
+                    else:  # bug, todo plex
                         library = Plex(self, params)
 
                     logger.info("")
@@ -1483,8 +1484,7 @@ class ConfigFile:
                     if False:
                         emby_library.scan_files(self.operations_only, self.overlays_only, self.collection_only, self.metadata_only)
                         if not emby_library.collection_files and not emby_library.metadata_files and not emby_library.overlay_files and not emby_library.library_operation and not emby_library.images_files and not self.playlist_files:
-                            raise Failed(
-                                "Config Error: No valid collection file, metadata file, overlay file, image file, playlist file, or library operations found")
+                            raise Failed("Config Error: No valid collection file, metadata file, overlay file, image file, playlist file, or library operations found")
                     # test end
 
                     if not library.collection_files and not library.metadata_files and not library.overlay_files and not library.library_operation and not library.images_files and not self.playlist_files:
@@ -1503,23 +1503,28 @@ class ConfigFile:
                     logger.info(f"Connecting to {display_name} library's Radarr...")
                     logger.info("")
                     try:
-                        library.Radarr = Radarr(self.Requests, self.Cache, library, {
-                            "url": check_for_attribute(lib, "url", parent="radarr", var_type="url", default=self.general["radarr"]["url"], req_default=True, save=False),
-                            "token": check_for_attribute(lib, "token", parent="radarr", default=self.general["radarr"]["token"], req_default=True, save=False),
-                            "add_missing": check_for_attribute(lib, "add_missing", parent="radarr", var_type="bool", default=self.general["radarr"]["add_missing"], save=False),
-                            "add_existing": check_for_attribute(lib, "add_existing", parent="radarr", var_type="bool", default=self.general["radarr"]["add_existing"], save=False),
-                            "upgrade_existing": check_for_attribute(lib, "upgrade_existing", parent="radarr", var_type="bool", default=self.general["radarr"]["upgrade_existing"], save=False),
-                            "monitor_existing": check_for_attribute(lib, "monitor_existing", parent="radarr", var_type="bool", default=self.general["radarr"]["monitor_existing"], save=False),
-                            "ignore_cache": check_for_attribute(lib, "ignore_cache", parent="radarr", var_type="bool", default=self.general["radarr"]["ignore_cache"], save=False),
-                            "root_folder_path": check_for_attribute(lib, "root_folder_path", parent="radarr", default=self.general["radarr"]["root_folder_path"], req_default=True, save=False),
-                            "monitor": check_for_attribute(lib, "monitor", parent="radarr", var_type="bool", default=self.general["radarr"]["monitor"], save=False),
-                            "availability": check_for_attribute(lib, "availability", parent="radarr", test_list=radarr.availability_descriptions, default=self.general["radarr"]["availability"], save=False),
-                            "quality_profile": check_for_attribute(lib, "quality_profile", parent="radarr", default=self.general["radarr"]["quality_profile"], req_default=True, save=False),
-                            "tag": check_for_attribute(lib, "tag", parent="radarr", var_type="lower_list", default=self.general["radarr"]["tag"], default_is_none=True, save=False),
-                            "search": check_for_attribute(lib, "search", parent="radarr", var_type="bool", default=self.general["radarr"]["search"], save=False),
-                            "radarr_path": check_for_attribute(lib, "radarr_path", parent="radarr", default=self.general["radarr"]["radarr_path"], default_is_none=True, save=False),
-                            "plex_path": check_for_attribute(lib, "plex_path", parent="radarr", default=self.general["radarr"]["plex_path"], default_is_none=True, save=False)
-                        })
+                        library.Radarr = Radarr(
+                            self.Requests,
+                            self.Cache,
+                            library,
+                            {
+                                "url": check_for_attribute(lib, "url", parent="radarr", var_type="url", default=self.general["radarr"]["url"], req_default=True, save=False),
+                                "token": check_for_attribute(lib, "token", parent="radarr", default=self.general["radarr"]["token"], req_default=True, save=False),
+                                "add_missing": check_for_attribute(lib, "add_missing", parent="radarr", var_type="bool", default=self.general["radarr"]["add_missing"], save=False),
+                                "add_existing": check_for_attribute(lib, "add_existing", parent="radarr", var_type="bool", default=self.general["radarr"]["add_existing"], save=False),
+                                "upgrade_existing": check_for_attribute(lib, "upgrade_existing", parent="radarr", var_type="bool", default=self.general["radarr"]["upgrade_existing"], save=False),
+                                "monitor_existing": check_for_attribute(lib, "monitor_existing", parent="radarr", var_type="bool", default=self.general["radarr"]["monitor_existing"], save=False),
+                                "ignore_cache": check_for_attribute(lib, "ignore_cache", parent="radarr", var_type="bool", default=self.general["radarr"]["ignore_cache"], save=False),
+                                "root_folder_path": check_for_attribute(lib, "root_folder_path", parent="radarr", default=self.general["radarr"]["root_folder_path"], req_default=True, save=False),
+                                "monitor": check_for_attribute(lib, "monitor", parent="radarr", var_type="bool", default=self.general["radarr"]["monitor"], save=False),
+                                "availability": check_for_attribute(lib, "availability", parent="radarr", test_list=radarr.availability_descriptions, default=self.general["radarr"]["availability"], save=False),
+                                "quality_profile": check_for_attribute(lib, "quality_profile", parent="radarr", default=self.general["radarr"]["quality_profile"], req_default=True, save=False),
+                                "tag": check_for_attribute(lib, "tag", parent="radarr", var_type="lower_list", default=self.general["radarr"]["tag"], default_is_none=True, save=False),
+                                "search": check_for_attribute(lib, "search", parent="radarr", var_type="bool", default=self.general["radarr"]["search"], save=False),
+                                "radarr_path": check_for_attribute(lib, "radarr_path", parent="radarr", default=self.general["radarr"]["radarr_path"], default_is_none=True, save=False),
+                                "plex_path": check_for_attribute(lib, "plex_path", parent="radarr", default=self.general["radarr"]["plex_path"], default_is_none=True, save=False),
+                            },
+                        )
                     except Failed as e:
                         logger.stacktrace()
                         logger.error(e)
@@ -1533,26 +1538,35 @@ class ConfigFile:
                     logger.info(f"Connecting to {display_name} library's Sonarr...")
                     logger.info("")
                     try:
-                        library.Sonarr = Sonarr(self.Requests, self.Cache, library, {
-                            "url": check_for_attribute(lib, "url", parent="sonarr", var_type="url", default=self.general["sonarr"]["url"], req_default=True, save=False),
-                            "token": check_for_attribute(lib, "token", parent="sonarr", default=self.general["sonarr"]["token"], req_default=True, save=False),
-                            "add_missing": check_for_attribute(lib, "add_missing", parent="sonarr", var_type="bool", default=self.general["sonarr"]["add_missing"], save=False),
-                            "add_existing": check_for_attribute(lib, "add_existing", parent="sonarr", var_type="bool", default=self.general["sonarr"]["add_existing"], save=False),
-                            "upgrade_existing": check_for_attribute(lib, "upgrade_existing", parent="sonarr", var_type="bool", default=self.general["sonarr"]["upgrade_existing"], save=False),
-                            "monitor_existing": check_for_attribute(lib, "monitor_existing", parent="sonarr", var_type="bool", default=self.general["sonarr"]["monitor_existing"], save=False),
-                            "ignore_cache": check_for_attribute(lib, "ignore_cache", parent="sonarr", var_type="bool", default=self.general["sonarr"]["ignore_cache"], save=False),
-                            "root_folder_path": check_for_attribute(lib, "root_folder_path", parent="sonarr", default=self.general["sonarr"]["root_folder_path"], req_default=True, save=False),
-                            "monitor": check_for_attribute(lib, "monitor", parent="sonarr", test_list=sonarr.monitor_descriptions, default=self.general["sonarr"]["monitor"], save=False),
-                            "quality_profile": check_for_attribute(lib, "quality_profile", parent="sonarr", default=self.general["sonarr"]["quality_profile"], req_default=True, save=False),
-                            "language_profile": check_for_attribute(lib, "language_profile", parent="sonarr", default=self.general["sonarr"]["language_profile"], save=False) if self.general["sonarr"]["language_profile"] else check_for_attribute(lib, "language_profile", parent="sonarr", default_is_none=True, save=False),
-                            "series_type": check_for_attribute(lib, "series_type", parent="sonarr", test_list=sonarr.series_type_descriptions, default=self.general["sonarr"]["series_type"], save=False),
-                            "season_folder": check_for_attribute(lib, "season_folder", parent="sonarr", var_type="bool", default=self.general["sonarr"]["season_folder"], save=False),
-                            "tag": check_for_attribute(lib, "tag", parent="sonarr", var_type="lower_list", default=self.general["sonarr"]["tag"], default_is_none=True, save=False),
-                            "search": check_for_attribute(lib, "search", parent="sonarr", var_type="bool", default=self.general["sonarr"]["search"], save=False),
-                            "cutoff_search": check_for_attribute(lib, "cutoff_search", parent="sonarr", var_type="bool", default=self.general["sonarr"]["cutoff_search"], save=False),
-                            "sonarr_path": check_for_attribute(lib, "sonarr_path", parent="sonarr", default=self.general["sonarr"]["sonarr_path"], default_is_none=True, save=False),
-                            "plex_path": check_for_attribute(lib, "plex_path", parent="sonarr", default=self.general["sonarr"]["plex_path"], default_is_none=True, save=False)
-                        })
+                        library.Sonarr = Sonarr(
+                            self.Requests,
+                            self.Cache,
+                            library,
+                            {
+                                "url": check_for_attribute(lib, "url", parent="sonarr", var_type="url", default=self.general["sonarr"]["url"], req_default=True, save=False),
+                                "token": check_for_attribute(lib, "token", parent="sonarr", default=self.general["sonarr"]["token"], req_default=True, save=False),
+                                "add_missing": check_for_attribute(lib, "add_missing", parent="sonarr", var_type="bool", default=self.general["sonarr"]["add_missing"], save=False),
+                                "add_existing": check_for_attribute(lib, "add_existing", parent="sonarr", var_type="bool", default=self.general["sonarr"]["add_existing"], save=False),
+                                "upgrade_existing": check_for_attribute(lib, "upgrade_existing", parent="sonarr", var_type="bool", default=self.general["sonarr"]["upgrade_existing"], save=False),
+                                "monitor_existing": check_for_attribute(lib, "monitor_existing", parent="sonarr", var_type="bool", default=self.general["sonarr"]["monitor_existing"], save=False),
+                                "ignore_cache": check_for_attribute(lib, "ignore_cache", parent="sonarr", var_type="bool", default=self.general["sonarr"]["ignore_cache"], save=False),
+                                "root_folder_path": check_for_attribute(lib, "root_folder_path", parent="sonarr", default=self.general["sonarr"]["root_folder_path"], req_default=True, save=False),
+                                "monitor": check_for_attribute(lib, "monitor", parent="sonarr", test_list=sonarr.monitor_descriptions, default=self.general["sonarr"]["monitor"], save=False),
+                                "quality_profile": check_for_attribute(lib, "quality_profile", parent="sonarr", default=self.general["sonarr"]["quality_profile"], req_default=True, save=False),
+                                "language_profile": (
+                                    check_for_attribute(lib, "language_profile", parent="sonarr", default=self.general["sonarr"]["language_profile"], save=False)
+                                    if self.general["sonarr"]["language_profile"]
+                                    else check_for_attribute(lib, "language_profile", parent="sonarr", default_is_none=True, save=False)
+                                ),
+                                "series_type": check_for_attribute(lib, "series_type", parent="sonarr", test_list=sonarr.series_type_descriptions, default=self.general["sonarr"]["series_type"], save=False),
+                                "season_folder": check_for_attribute(lib, "season_folder", parent="sonarr", var_type="bool", default=self.general["sonarr"]["season_folder"], save=False),
+                                "tag": check_for_attribute(lib, "tag", parent="sonarr", var_type="lower_list", default=self.general["sonarr"]["tag"], default_is_none=True, save=False),
+                                "search": check_for_attribute(lib, "search", parent="sonarr", var_type="bool", default=self.general["sonarr"]["search"], save=False),
+                                "cutoff_search": check_for_attribute(lib, "cutoff_search", parent="sonarr", var_type="bool", default=self.general["sonarr"]["cutoff_search"], save=False),
+                                "sonarr_path": check_for_attribute(lib, "sonarr_path", parent="sonarr", default=self.general["sonarr"]["sonarr_path"], default_is_none=True, save=False),
+                                "plex_path": check_for_attribute(lib, "plex_path", parent="sonarr", default=self.general["sonarr"]["plex_path"], default_is_none=True, save=False),
+                            },
+                        )
                     except Failed as e:
                         logger.stacktrace()
                         logger.error(e)
@@ -1566,10 +1580,14 @@ class ConfigFile:
                     logger.info(f"Connecting to {display_name} library's Tautulli...")
                     logger.info("")
                     try:
-                        library.Tautulli = Tautulli(self.Requests, library, {
-                            "url": check_for_attribute(lib, "url", parent="tautulli", var_type="url", default=self.general["tautulli"]["url"], req_default=True, save=False),
-                            "apikey": check_for_attribute(lib, "apikey", parent="tautulli", default=self.general["tautulli"]["apikey"], req_default=True, save=False)
-                        })
+                        library.Tautulli = Tautulli(
+                            self.Requests,
+                            library,
+                            {
+                                "url": check_for_attribute(lib, "url", parent="tautulli", var_type="url", default=self.general["tautulli"]["url"], req_default=True, save=False),
+                                "apikey": check_for_attribute(lib, "apikey", parent="tautulli", default=self.general["tautulli"]["apikey"], req_default=True, save=False),
+                            },
+                        )
                     except Failed as e:
                         logger.stacktrace()
                         logger.error(e)

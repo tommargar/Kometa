@@ -185,12 +185,13 @@ nav:
       - Notifiarr: config/notifiarr.md
       - Gotify: config/gotify.md
       - ntfy: config/ntfy.md
+      - Simkl: config/simkl.md
       - AniDB: config/anidb.md
       - Radarr: config/radarr.md
       - Sonarr: config/sonarr.md
       - Trakt: config/trakt.md
       - MyAnimeList: config/myanimelist.md
-      - Trakt and MyAnimeList Authentication: config/authentication.md
+      - Kometa Utilities Authentication: config/authentication.md
       - Webhooks: config/webhooks.md
   - OTHER:
     - Settings: config/settings.md
@@ -227,6 +228,7 @@ nav:
       - IMDb Charts: defaults/chart/imdb.md
       - Letterboxd Charts: defaults/chart/letterboxd.md
       - MyAnimeList Charts: defaults/chart/myanimelist.md
+      - Simkl Charts: defaults/chart/simkl.md
       - Tautulli Charts: defaults/chart/tautulli.md
       - TMDb Charts: defaults/chart/tmdb.md
       - Trakt Charts: defaults/chart/trakt.md
@@ -407,12 +409,16 @@ nav:
         - Never Hit: files/builders/boxofficemojo/never.md
         - Other Records: files/builders/boxofficemojo/record.md
         - Worldwide: files/builders/boxofficemojo/world.md
-      - Reciperr:
-        - Overview: files/builders/reciperr/overview.md
-        - List: files/builders/reciperr/list.md
+      - SIMKL:
+        - Overview: files/builders/simkl/overview.md
+        - Trending: files/builders/simkl/trending.md
+        - DVD: files/builders/simkl/dvd.md
       - StevenLu:
         - Overview: files/builders/stevenlu/overview.md
         - Popular: files/builders/stevenlu/popular.md
+      - Text File:
+        - Overview: files/builders/textfile/overview.md
+        - Text File: files/builders/textfile/text-file.md
       - AniDB:
         - Overview: files/builders/anidb/overview.md
         - ID: files/builders/anidb/id.md

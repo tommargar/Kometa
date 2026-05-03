@@ -1,20 +1,25 @@
-import os, re
+import os
+import re
 from datetime import datetime
-from modules import plex, util, overlay
+
+from num2words import num2words
+from PIL import Image, ImageFilter
+from plexapi.exceptions import BadRequest
+from plexapi.video import Episode, Season
+
+from modules import overlay, plex, util
 from modules.builder import CollectionBuilder
 from modules.poster import ImageData
-from modules.util import Failed, FilterFailed, NotScheduled, LimitReached
-from num2words import num2words
-from plexapi.exceptions import BadRequest
-from plexapi.video import Season, Episode
-from PIL import Image, ImageFilter
+from modules.util import Failed, FilterFailed, LimitReached, NotScheduled
 
 logger = util.logger
 
+
 class Overlays:
     def __init__(self, config, library):
-        from modules.config import ConfigFile # avoid circle import
-        self.config : ConfigFile = config
+        from modules.config import ConfigFile  # avoid circle import
+
+        self.config: ConfigFile = config
         self.cache = self.config.Cache
         self.library = library
         self.overlays = []
@@ -63,13 +68,11 @@ class Overlays:
                         for i, item in enumerate(label_items, 1):
                             item_title = self.library.get_item_display_title(item)
                             logger.ghost(f"Restoring {old_overlay.title}: {i}/{len(label_items)} {item_title}")
-                            self.remove_overlay(item, item_title, old_overlay.title, [
-                                os.path.join(self.library.overlay_folder, old_overlay.title[:-8], f"{item.ratingKey}.png")
-                            ])
+                            self.remove_overlay(item, item_title, old_overlay.title, [os.path.join(self.library.overlay_folder, old_overlay.title[:-8], f"{item.ratingKey}.png")])
                 logger.info("")
 
         # emby_image_manager = Emby_Image_Manager(self.library.name)
-        if False: # ToDo: Remove overlays not working as expected - deactiveted
+        if False:  # ToDo: Remove overlays not working as expected - deactiveted
             remove_overlays = self.get_overlay_items(ignore=ignore_list)
             if self.library.is_show:
                 remove_overlays.extend(self.get_overlay_items(libtype="episode", ignore=ignore_list))
@@ -82,11 +85,12 @@ class Overlays:
                 for i, item in enumerate(remove_overlays, 1):
                     item_title = self.library.get_item_display_title(item)
                     logger.ghost(f"Restoring: {i}/{len(remove_overlays)} {item_title}")
-                    self.remove_overlay(item, item_title, "Overlay", [
-                        os.path.join(self.library.overlay_destination_folder, f"{item}.png"),
-                        os.path.join(self.library.overlay_destination_folder, f"{item}.jpg"),
-                        os.path.join(self.library.overlay_destination_folder, f"{item}.webp")
-                    ])
+                    self.remove_overlay(
+                        item,
+                        item_title,
+                        "Overlay",
+                        [os.path.join(self.library.overlay_destination_folder, f"{item}.png"), os.path.join(self.library.overlay_destination_folder, f"{item}.jpg"), os.path.join(self.library.overlay_destination_folder, f"{item}.webp")],
+                    )
                 logger.exorcise()
             else:
                 logger.separator(f"No Overlays to Remove for the {self.library.name} Library")
@@ -96,6 +100,7 @@ class Overlays:
             logger.info("")
 
             _trakt_ratings = None
+
             def trakt_ratings():
                 nonlocal _trakt_ratings
                 if _trakt_ratings is None:
@@ -146,12 +151,11 @@ class Overlays:
                         my_overlay_path = os.path.join(self.library.overlay_destination_folder, f"{item.ratingKey}.{self.library.overlay_artwork_filetype}")
                         has_overlay = os.path.exists(my_overlay_path)
                     else:
-                        has_overlay = any(
-                            [item_tag.tag.lower() == "overlay" for item_tag in self.library.item_labels(item)])
+                        has_overlay = any([item_tag.tag.lower() == "overlay" for item_tag in self.library.item_labels(item)])
 
                     special_text_cache = self.cache.query_overlay_special_text(item.ratingKey) if self.cache else {}
                     compare_names = {properties[ov].get_overlay_compare(): ov for ov in over_names}
-                    overlay_change = self.get_overlay_change_reason(item, over_names, properties, overlay_compare,compare_names, has_overlay, special_text_cache)
+                    overlay_change = self.get_overlay_change_reason(item, over_names, properties, overlay_compare, compare_names, has_overlay, special_text_cache)
 
                     blur_num = 0
                     applied_names = []
@@ -173,21 +177,23 @@ class Overlays:
                             applied_names.append(over_name)
 
                     try:
-                        #todo: for Emby transparent PNG, ignore existing poster files
+                        # todo: for Emby transparent PNG, ignore existing poster files
                         poster, background, logo, item_dir, name = self.library.find_item_assets(item)
                         if self.library.EmbyServer:
-                            poster :ImageData = ImageData("asset_directory", my_overlay_path if has_overlay else "", is_url=False)
+                            poster: ImageData = ImageData("asset_directory", my_overlay_path if has_overlay else "", is_url=False)
                         # poster = ImageData("asset_directory", emby_poster.get("Path"), is_url=False, compare=poster_compare)
                         # background = ImageData("asset_directory", emby_thumb.get("Path"), compare=emby_item.get("ImageTags").get("Thumb"))
                         item_dir = os.path.dirname(poster.location)
-                        name = str(item_dir).split('\\')[-1]
+                        name = str(item_dir).split("\\")[-1]
 
                         # poster, background, item_dir, name = self.library.find_item_assets(item)
 
                         if not poster and self.library.assets_for_all:
-                            if (isinstance(item, Episode) and self.library.show_missing_episode_assets) or \
-                                    (isinstance(item, Season) and self.library.show_missing_season_assets) or \
-                                    (not isinstance(item, (Episode, Season)) and self.library.show_missing_assets):
+                            if (
+                                (isinstance(item, Episode) and self.library.show_missing_episode_assets)
+                                or (isinstance(item, Season) and self.library.show_missing_season_assets)
+                                or (not isinstance(item, (Episode, Season)) and self.library.show_missing_assets)
+                            ):
                                 if self.library.asset_folders:
                                     logger.warning(f"Asset Warning: No poster found for '{item_title}' in the assets folder '{item_dir}'")
                                 else:
@@ -236,10 +242,10 @@ class Overlays:
                             # todo if filetype png / emby overlay
                             # canvas_width, canvas_height = overlay.get_canvas_size(item)
                             new_poster = Image.new("RGBA", (canvas_width, canvas_height), (0, 0, 0, 0))
-                            with (new_poster):
-                            # with Image.open(poster.location if poster else has_original) as new_poster:
+                            with new_poster:
+                                # with Image.open(poster.location if poster else has_original) as new_poster:
                                 exif_tags = new_poster.getexif()
-                                exif_tags[0x04bc] = "overlay"
+                                exif_tags[0x04BC] = "overlay"
                                 # new_poster = new_poster.convert("RGBA").resize((canvas_width, canvas_height), Image.LANCZOS)
                                 # new_poster = new_poster.convert("RGB").resize((canvas_width, canvas_height), Image.Resampling.LANCZOS)
 
@@ -254,12 +260,18 @@ class Overlays:
                                     provider = None
                                     if text_overlay.path:
                                         lower_path = text_overlay.path.lower()
-                                        if "letterboxd" in lower_path: provider = "letterboxd"
-                                        elif "imdb" in lower_path: provider = "imdb"
-                                        elif "tmdb" in lower_path: provider = "tmdb"
-                                        elif "rotten" in lower_path or "rt_" in lower_path: provider = "rt"
-                                        elif "metacritic" in lower_path: provider = "metacritic"
-                                        elif "trakt" in lower_path: provider = "trakt"
+                                        if "letterboxd" in lower_path:
+                                            provider = "letterboxd"
+                                        elif "imdb" in lower_path:
+                                            provider = "imdb"
+                                        elif "tmdb" in lower_path:
+                                            provider = "tmdb"
+                                        elif "rotten" in lower_path or "rt_" in lower_path:
+                                            provider = "rt"
+                                        elif "metacritic" in lower_path:
+                                            provider = "metacritic"
+                                        elif "trakt" in lower_path:
+                                            provider = "trakt"
 
                                     for format_var in overlay.vars_by_type[text_overlay.level]:
                                         if f"<<{format_var}" in full_text and format_var == "originally_available[":
@@ -310,10 +322,7 @@ class Overlays:
                                                     if actual_value in [None, ""] and native_item.get("ProviderIds") and "CustomRating" in native_item["ProviderIds"]:
                                                         actual_value = native_item["ProviderIds"]["CustomRating"]
                                                     if actual_value is None and native_item.get("CustomRating"):
-                                                        logger.warning(
-                                                            "Overlay Warning: Emby custom ratings must be provided via "
-                                                            "ProviderIds['CustomRating']; the CustomRating field is ignored."
-                                                        )
+                                                        logger.warning("Overlay Warning: Emby custom ratings must be provided via " "ProviderIds['CustomRating']; the CustomRating field is ignored.")
                                             if actual_value is None and hasattr(item, actual_attr):
                                                 actual_value = getattr(item, actual_attr)
                                             # if actual_value is not None and "%" in full_text:
@@ -468,7 +477,7 @@ class Overlays:
                                                     ratings = self.library.get_ratings(item)
                                                     rating_key = format_var.replace("_rating", "")
                                                     try:
-                                                        found_rating = ratings[rating_key] # noqa
+                                                        found_rating = ratings[rating_key]  # noqa
                                                     except KeyError:
                                                         found_rating = None
                                             except Failed as err:
@@ -521,8 +530,7 @@ class Overlays:
                                                     elif format_var == "critic_rating":
                                                         actual_value = native_item.get("CriticRating")
                                                     elif format_var == "user_rating":
-                                                        actual_value = emby_server.get_custom_rating_from_item(native_item,
-                                                                                                           raw=True)
+                                                        actual_value = emby_server.get_custom_rating_from_item(native_item, raw=True)
                                                 if actual_value is None and fresh_emby_item is None:
                                                     if native_emby_data:
                                                         fresh_emby_item = native_emby_data
@@ -537,8 +545,6 @@ class Overlays:
                                                             actual_value = native_item.get("CriticRating")
                                                         elif format_var == "user_rating":
                                                             actual_value = emby_server.get_custom_rating_from_item(native_item, raw=True)
-
-
 
                                             if actual_value is None:
                                                 raise Failed(f"Overlay Warning: No {full_text} found")
@@ -711,7 +717,7 @@ class Overlays:
                         logger.info(f"  Overlay Update Not Needed {item_id} - {item_title} (Current Overlays: {', '.join(over_names)})")
 
                     if self.cache and poster_compare:
-                        self.cache.update_image_map(item.ratingKey, f"{self.library.image_table_name}_overlays", item.thumb, poster_compare, overlay='|'.join(sorted(compare_names)))
+                        self.cache.update_image_map(item.ratingKey, f"{self.library.image_table_name}_overlays", item.thumb, poster_compare, overlay="|".join(sorted(compare_names)))
                 except Failed as e:
                     logger.error(f"  {e}\n  Overlays Attempted on {item_title}: {', '.join(over_names)}")
                 except Exception as e:
@@ -724,7 +730,7 @@ class Overlays:
         for _, over in properties.items():
             if over.image:
                 over.image.close()
-        overlay_run_time = str(datetime.now() - overlay_start).split('.')[0]
+        overlay_run_time = str(datetime.now() - overlay_start).split(".")[0]
         logger.info("")
         logger.separator(f"Finished {self.library.name} Library Overlays\nOverlays Run Time: {overlay_run_time}")
         return overlay_run_time
@@ -802,13 +808,13 @@ class Overlays:
                         stripped = False
                         for mod in overlay.double_mods:
                             if base_var.endswith(mod):
-                                base_var = base_var[:-len(mod)]
+                                base_var = base_var[: -len(mod)]
                                 stripped = True
                                 break
                         if not stripped:
                             for mod in overlay.single_mods:
                                 if base_var.endswith(mod):
-                                    base_var = base_var[:-len(mod)]
+                                    base_var = base_var[: -len(mod)]
                                     break
                     expected_vars.add(base_var)
 
@@ -1021,13 +1027,13 @@ class Overlays:
         if libtype:
             emby_items = self.library.EmbyServer.get_items(include_item_types=[libtype], params={"ParentId": self.library.EmbyServer.library_id, "Recursive": "True"})
         else:
-            emby_items = self.library.EmbyServer.get_items(params={"ParentId": self.library.EmbyServer.library_id, "Recursive": "True"},include_item_types =["Series,Movie,Season,Episode"])
+            emby_items = self.library.EmbyServer.get_items(params={"ParentId": self.library.EmbyServer.library_id, "Recursive": "True"}, include_item_types=["Series,Movie,Season,Episode"])
         all_emby_ids = [item.get("Id") for item in emby_items]
         all_emby_ids = all_emby_ids if not ignore else [o for o in all_emby_ids if o not in ignore]
         return all_emby_ids
 
     def remove_overlay(self, item, item_title, label, locations):
-        #todo: delete overlay png from Emby plugin folder
+        # todo: delete overlay png from Emby plugin folder
         try:
             poster, _, _, _, _ = self.library.find_item_assets(item)
         except Failed:

@@ -1,0 +1,54 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "N:\\Kometa\\__EmbyPlugin\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{1E2052F1-17BE-4520-BFE1-8C59E2A3771A}|EmbyPluginUiDemo.csproj|n:\\kometa\\__embyplugin\\embypluginuidemo.csproj||{FA3CD31E-987B-443A-9B81-186104E8DAC1}|",
+      "RelativeMoniker": "D:0:0:{1E2052F1-17BE-4520-BFE1-8C59E2A3771A}|EmbyPluginUiDemo.csproj|solutionrelative:embypluginuidemo.csproj||{FA3CD31E-987B-443A-9B81-186104E8DAC1}|"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{1E2052F1-17BE-4520-BFE1-8C59E2A3771A}|EmbyPluginUiDemo.csproj|n:\\kometa\\__embyplugin\\meet\\imageenhancer.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{1E2052F1-17BE-4520-BFE1-8C59E2A3771A}|EmbyPluginUiDemo.csproj|solutionrelative:meet\\imageenhancer.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 265,
+          "SelectedChildIndex": 0,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "EmbyPluginUiDemo",
+              "DocumentMoniker": "N:\\Kometa\\__EmbyPlugin\\EmbyPluginUiDemo.csproj",
+              "RelativeDocumentMoniker": "EmbyPluginUiDemo.csproj",
+              "ToolTip": "N:\\Kometa\\__EmbyPlugin\\EmbyPluginUiDemo.csproj",
+              "RelativeToolTip": "EmbyPluginUiDemo.csproj",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAADgAAAAKAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000758|",
+              "WhenOpened": "2026-04-15T16:58:15.114Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "ImageEnhancer.cs",
+              "DocumentMoniker": "N:\\Kometa\\__EmbyPlugin\\meet\\ImageEnhancer.cs",
+              "RelativeDocumentMoniker": "meet\\ImageEnhancer.cs",
+              "ToolTip": "N:\\Kometa\\__EmbyPlugin\\meet\\ImageEnhancer.cs",
+              "RelativeToolTip": "meet\\ImageEnhancer.cs",
+              "ViewState": "AgIAAEQAAAAAAAAAAAAcwE4AAAATAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-23T23:49:26.241Z",
+              "EditorCaption": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
