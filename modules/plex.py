@@ -863,9 +863,10 @@ class Plex(Library):
         return self.Plex.fetchItems(f"/library/sections/{self.Plex.key}/all{'' if uri_args is None else uri_args}")
 
     def get_all(self, builder_level=None, load=False):
-        if load and builder_level in [None, "show", "artist", "movie"]:
+        cache_top_level = builder_level in [None, "show", "artist", "movie"]
+        if load and cache_top_level:
             self._all_items = []
-        if self._all_items and builder_level in [None, "show", "artist", "movie"]:
+        if self._all_items and cache_top_level:
             return self._all_items
         builder_type = builder_level if builder_level else self.Plex.TYPE
         if not builder_level:
@@ -891,7 +892,7 @@ class Plex(Library):
             logger.ghost(f"Loaded: {total_size if container_start > total_size else container_start}/{total_size}")
 
         logger.info(f"Loaded {total_size} {builder_level.capitalize()}s")
-        if builder_level in [None, "show", "artist", "movie"]:
+        if cache_top_level:
             self._all_items = results
         return results
 
@@ -1249,9 +1250,13 @@ class Plex(Library):
         else:
             locked_items = items
 
+        batch_size = 100
+        total_sent = 0
         for _items, locked in [(locked_items, True), (unlocked_items, False)]:
-            if _items:
-                self.Plex.batchMultiEdits(_items)
+            for i in range(0, len(_items), batch_size) if _items else []:
+                chunk = _items[i : i + batch_size]
+                logger.ghost(f"{'Adding' if add else 'Removing'} {len(chunk)} items [{total_sent} so far] to{' smart label' if smart_label_collection else ''} collection: {collection.title()} (Locked: {locked})")
+                self.Plex.batchMultiEdits(chunk)
                 if smart_label_collection:
                     self.query_data(self.Plex.addLabel if add else self.Plex.removeLabel, collection)
                 elif add:
@@ -1259,6 +1264,8 @@ class Plex(Library):
                 else:
                     self.Plex.removeCollection(collection, locked=locked)
                 self.Plex.saveMultiEdits()
+                total_sent += len(chunk)
+            logger.exorcise()
 
     def move_item(self, collection, item, after=None):
         key = f"{collection.key}/items/{item}/move"

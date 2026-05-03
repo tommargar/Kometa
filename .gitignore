@@ -10,6 +10,7 @@ __pycache__/
 .idea
 .vscode
 .Python
+.worktrees
 
 logs/
 config/*
@@ -146,3 +147,5 @@ dmypy.json
 # Mac OS files
 .DS_Store
 ._*
+.worktrees/
+dictionary.dic
