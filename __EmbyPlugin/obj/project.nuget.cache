@@ -1,11 +1,11 @@
 {
   "version": 2,
-  "dgSpecHash": "C8llLKal5SU=",
+  "dgSpecHash": "riF8uIeC2LE=",
   "success": true,
   "projectFilePath": "N:\\Kometa\\__EmbyPlugin\\EmbyPluginUiDemo.csproj",
   "expectedPackageFiles": [
-    "C:\\Users\\tmgae\\.nuget\\packages\\mediabrowser.common\\4.9.1.90\\mediabrowser.common.4.9.1.90.nupkg.sha512",
-    "C:\\Users\\tmgae\\.nuget\\packages\\mediabrowser.server.core\\4.9.1.90\\mediabrowser.server.core.4.9.1.90.nupkg.sha512",
+    "C:\\Users\\tmgae\\.nuget\\packages\\mediabrowser.common\\4.8.2\\mediabrowser.common.4.8.2.nupkg.sha512",
+    "C:\\Users\\tmgae\\.nuget\\packages\\mediabrowser.server.core\\4.8.2\\mediabrowser.server.core.4.8.2.nupkg.sha512",
     "C:\\Users\\tmgae\\.nuget\\packages\\system.memory\\4.6.3\\system.memory.4.6.3.nupkg.sha512"
   ],
   "logs": []

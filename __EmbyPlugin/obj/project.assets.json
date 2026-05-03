@@ -2,7 +2,7 @@
   "version": 3,
   "targets": {
     "net8.0": {
-      "MediaBrowser.Common/4.9.1.90": {
+      "MediaBrowser.Common/4.8.2": {
         "type": "package",
         "compile": {
           "lib/netstandard2.0/Emby.Media.Model.dll": {
@@ -33,10 +33,10 @@
           }
         }
       },
-      "MediaBrowser.Server.Core/4.9.1.90": {
+      "MediaBrowser.Server.Core/4.8.2": {
         "type": "package",
         "dependencies": {
-          "MediaBrowser.Common": "4.9.1.90"
+          "MediaBrowser.Common": "4.8.2"
         },
         "compile": {
           "lib/netstandard2.0/Emby.Naming.dll": {
@@ -67,10 +67,10 @@
     }
   },
   "libraries": {
-    "MediaBrowser.Common/4.9.1.90": {
-      "sha512": "QzXFYh7TPskAtctdCguJxep9aMSfIrsT4F+xUrdAVh4pj2KAD3DzwkY1DDPIUUD6M+Lgwag/NesBgd1pgLffbQ==",
+    "MediaBrowser.Common/4.8.2": {
+      "sha512": "9TG7pQef5P+JocZUKh44KKcHShfzaEUld9epNn5yRDWwUL6IaYteQdCric5bocv5fnczhtsaBh1QVI5YtQ/W9Q==",
       "type": "package",
-      "path": "mediabrowser.common/4.9.1.90",
+      "path": "mediabrowser.common/4.8.2",
       "files": [
         ".nupkg.metadata",
         ".signature.p7s",
@@ -86,14 +86,14 @@
         "lib/netstandard2.0/MediaBrowser.Model.dll",
         "lib/netstandard2.0/MediaBrowser.Model.pdb",
         "lib/netstandard2.0/MediaBrowser.Model.xml",
-        "mediabrowser.common.4.9.1.90.nupkg.sha512",
+        "mediabrowser.common.4.8.2.nupkg.sha512",
         "mediabrowser.common.nuspec"
       ]
     },
-    "MediaBrowser.Server.Core/4.9.1.90": {
-      "sha512": "lyThQ7kXhzLNisMfqzSoxrhG/7gnK9/lJyNfV/TCo10c30oKiTR2n5nG+ognv6hCNz9jmcPpAt3561Oj7EIVwQ==",
+    "MediaBrowser.Server.Core/4.8.2": {
+      "sha512": "WjHaKgQELuUsRkdDJi//EYNmGGWNxkK+eYyIvdQFUlqvM2ZUvyYm+FrJ365mlCg7y1ZJPBz3XQZfI4+Mv9nzPQ==",
       "type": "package",
-      "path": "mediabrowser.server.core/4.9.1.90",
+      "path": "mediabrowser.server.core/4.8.2",
       "files": [
         ".nupkg.metadata",
         ".signature.p7s",
@@ -103,7 +103,7 @@
         "lib/netstandard2.0/MediaBrowser.Controller.dll",
         "lib/netstandard2.0/MediaBrowser.Controller.pdb",
         "lib/netstandard2.0/MediaBrowser.Controller.xml",
-        "mediabrowser.server.core.4.9.1.90.nupkg.sha512",
+        "mediabrowser.server.core.4.8.2.nupkg.sha512",
         "mediabrowser.server.core.nuspec"
       ]
     },
@@ -131,7 +131,7 @@
   },
   "projectFileDependencyGroups": {
     "net8.0": [
-      "MediaBrowser.Server.Core >= 4.9.1.90",
+      "MediaBrowser.Server.Core >= 4.8.2",
       "System.Memory >= 4.6.3"
     ]
   },
@@ -182,7 +182,7 @@
         "dependencies": {
           "MediaBrowser.Server.Core": {
             "target": "Package",
-            "version": "[4.9.1.90, )"
+            "version": "[4.8.2, )"
           },
           "System.Memory": {
             "target": "Package",
@@ -205,7 +205,7 @@
             "privateAssets": "all"
           }
         },
-        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\9.0.307/PortableRuntimeIdentifierGraph.json"
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\9.0.312/PortableRuntimeIdentifierGraph.json"
       }
     }
   }
