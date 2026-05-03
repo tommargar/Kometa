@@ -49,7 +49,7 @@ class Overlays:
                         pass
                     logger.ghost(f"Refreshing {i}/{len(emby_server.dirty_items)} Item ID: {item_id}")
                     emby_server.get_item(item_id, force_refresh=True)
-                if self.library.Plex:
+                if hasattr(self.library, "Plex") and self.library.Plex:
                     logger.info(f"Refreshing library cache after {len(emby_server.dirty_items)} item updates")
                     try:
                         self.library.Plex.reload()
