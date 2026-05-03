@@ -1858,11 +1858,16 @@ class MetadataFile(DataFile):
                             final_value = value
                         if current != str(final_value):
                             if key == "title":
-                                # current_item.editTitle(final_value)
-                                self.library.EmbyServer.editItemTitle(current_item.ratingKey, final_value)
+                                current_item.editTitle(final_value)
+                                if self.library.is_emby:
+                                    if not hasattr(self.library.EmbyServer, "dirty_items"):
+                                        self.library.EmbyServer.dirty_items = set()
+                                    self.library.EmbyServer.dirty_items.add(current_item.ratingKey)
                             else:
-                                # current_item.editField(key, final_value)
-                                self.library.EmbyServer.editItemField(current_item.ratingKey, final_value)
+                                if self.library.is_emby:
+                                    self.library.EmbyServer.editItemField(current_item.ratingKey, final_value)
+                                else:
+                                    current_item.editField(key, final_value)
 
                             logger.info(f"Metadata: {name} updated to {final_value}")
                             updated = True

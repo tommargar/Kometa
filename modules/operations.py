@@ -127,8 +127,11 @@ class Operations:
             for i, track in enumerate(tracks, 1):
                 logger.ghost(f"Processing Track: {i}/{len(tracks)} {track.title}")
                 if not track.title and track.titleSort:
-                    # track.editTitle(track.titleSort)
-                    self.library.EmbyServer.editItemTitle(track.ratingKey, track.titleSort)
+                    track.editTitle(track.titleSort)
+                    if self.library.is_emby:
+                        if not hasattr(self.library.EmbyServer, "dirty_items"):
+                            self.library.EmbyServer.dirty_items = set()
+                        self.library.EmbyServer.dirty_items.add(track.ratingKey)
 
                     num_edited += 1
                     logger.info(f"Track: {track.titleSort} was updated with sort title")
@@ -185,12 +188,18 @@ class Operations:
             for i, item in enumerate(items, 1):
                 logger.info("")
                 logger.info(f"({i}/{total_items}) {item.title}")
-                # try:
-                #     item = self.library.reload(item)
-                # except Failed as e:
-                #     logger.error(e)
-                #     continue
-                emby_item = self.library.EmbyServer.get_item(item.ratingKey)
+                try:
+                    item = self.library.reload(item)
+                except Failed as e:
+                    logger.error(e)
+                    continue
+                if self.library.is_emby:
+                    if not hasattr(self.library.EmbyServer, "dirty_items"):
+                        self.library.EmbyServer.dirty_items = set()
+                    self.library.EmbyServer.dirty_items.add(item.ratingKey)
+                    emby_item = self.library.EmbyServer.get_item(item.ratingKey)
+                else:
+                    emby_item = None
 
                 current_labels = [la.tag for la in self.library.item_labels(item)] if self.library.label_operations else []
 
@@ -207,8 +216,11 @@ class Operations:
                 if self.library.remove_title_parentheses:
                     if not any([f.name == "title" and f.locked for f in item.fields]) and item.title.endswith(")"):
                         new_title = re.sub(" \\(\\w+\\)$", "", item.title)
-                        # item.editTitle(new_title)
-                        self.library.EmbyServer.editItemTitle(item.ratingKey, new_title)
+                        item.editTitle(new_title)
+                        if self.library.is_emby:
+                            if not hasattr(self.library.EmbyServer, "dirty_items"):
+                                self.library.EmbyServer.dirty_items = set()
+                            self.library.EmbyServer.dirty_items.add(item.ratingKey)
                         item_edits.append(f"\nUpdated Title: {item.title[:25]:<25} | {new_title}")
                 if self.library.mass_imdb_parental_labels:
                     # Emby: not tested
