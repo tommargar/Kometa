@@ -625,6 +625,10 @@ class Operations:
                                     break
                             except Failed:
                                 continue
+                            except Exception as e:
+                                # Handle timeouts and other API errors gracefully
+                                logger.warning(f"Error getting {option} genres: {e}")
+                                continue
                         if merge_genres and new_genres:
                             new_genres = list(dict.fromkeys(new_genres))
 
