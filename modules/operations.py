@@ -1,6 +1,7 @@
 import math
 import os
 import re
+import time
 from datetime import datetime, timedelta, timezone
 
 from plexapi.exceptions import NotFound
@@ -49,6 +50,14 @@ class Operations:
     def __init__(self, config, library):
         self.config = config
         self.library = library
+        # Circuit breaker timestamps for external APIs
+        # When an API call times out, pause that API until this timestamp
+        # to avoid waiting full timeout (180s) for every item
+        self._tmdb_pause_until = 0
+        self._mdb_pause_until = 0
+        self._tvdb_pause_until = 0
+        self._omdb_pause_until = 0
+        self._api_pause_duration = 60  # Pause API for 60 seconds after timeout
 
     def run_operations(self):
         # ToDo: Batch critic rating items not counted in total, leadin to (40/10)
@@ -292,12 +301,19 @@ class Operations:
                     nonlocal _tmdb_obj
                     if _tmdb_obj is None:
                         _tmdb_obj = False
+                        # Circuit breaker: skip TMDb call if recently timed out
+                        if time.time() < self._tmdb_pause_until:
+                            raise Failed("TMDb temporarily paused after recent timeout")
                         try:
                             _item = self.config.TMDb.get_item(item, tmdb_id, tvdb_id, imdb_id, is_movie=self.library.is_movie)
                             if _item:
                                 _tmdb_obj = _item
                         except Failed as err:
                             logger.error(str(err))
+                        except Exception as err:
+                            # Pause TMDb after timeout/error to avoid waiting full timeout for next items
+                            self._tmdb_pause_until = time.time() + self._api_pause_duration
+                            logger.warning(f"TMDb error, pausing for {self._api_pause_duration}s: {err}")
                     if not _tmdb_obj:
                         raise Failed
                     return _tmdb_obj
@@ -313,13 +329,17 @@ class Operations:
                         elif not imdb_id:
                             logger.info(f"No IMDb ID for Guid: {item.guid}")
                         else:
+                            # Circuit breaker: skip OMDb call if recently timed out
+                            if time.time() < self._omdb_pause_until:
+                                raise Failed("OMDb temporarily paused after recent timeout")
                             try:
                                 _omdb_obj = self.config.OMDb.get_omdb(imdb_id)
                             except Failed as err:
                                 logger.error(str(err))
-                            except Exception:
-                                logger.error(f"IMDb ID: {imdb_id}")
-                                raise
+                            except Exception as err:
+                                # Pause OMDb after timeout/error
+                                self._omdb_pause_until = time.time() + self._api_pause_duration
+                                logger.warning(f"OMDb error, pausing for {self._api_pause_duration}s: {err}")
                     if not _omdb_obj:
                         raise Failed
                     return _omdb_obj
@@ -331,10 +351,17 @@ class Operations:
                     if _tvdb_obj is None:
                         _tvdb_obj = False
                         if tvdb_id:
+                            # Circuit breaker: skip TVDb call if recently timed out
+                            if time.time() < self._tvdb_pause_until:
+                                raise Failed("TVDb temporarily paused after recent timeout")
                             try:
                                 _tvdb_obj = self.config.TVDb.get_tvdb_obj(tvdb_id, is_movie=self.library.is_movie)
                             except Failed as err:
                                 logger.error(str(err))
+                            except Exception as err:
+                                # Pause TVDb after timeout/error
+                                self._tvdb_pause_until = time.time() + self._api_pause_duration
+                                logger.warning(f"TVDb error, pausing for {self._api_pause_duration}s: {err}")
                         else:
                             logger.info(f"No TVDb ID for Guid: {item.guid}")
                     if not _tvdb_obj:
@@ -347,6 +374,9 @@ class Operations:
                     nonlocal _mdb_obj
                     if _mdb_obj is None:
                         _mdb_obj = False
+                        # Circuit breaker: skip MDBList call if recently timed out
+                        if time.time() < self._mdb_pause_until:
+                            raise Failed("MDBList temporarily paused after recent timeout")
                         # Reworked so that the code still gets the data from cache if limit reached
                         # if self.config.MDBList.limit is False:
                         if self.library.is_show and tvdb_id:
@@ -356,9 +386,10 @@ class Operations:
                                 logger.debug(err)
                             except Failed as err:
                                 logger.error(str(err))
-                            except Exception:
-                                logger.trace(f"TVDb ID: {tvdb_id}")
-                                raise
+                            except Exception as err:
+                                # Pause MDBList after timeout/error
+                                self._mdb_pause_until = time.time() + self._api_pause_duration
+                                logger.warning(f"MDBList error, pausing for {self._api_pause_duration}s: {err}")
                         if self.library.is_movie and tmdb_id:
                             try:
                                 _mdb_obj = self.config.MDBList.get_movie(tmdb_id)
@@ -366,9 +397,10 @@ class Operations:
                                 logger.debug(err)
                             except Failed as err:
                                 logger.error(str(err))
-                            except Exception:
-                                logger.trace(f"TMDb ID: {tmdb_id}")
-                                raise
+                            except Exception as err:
+                                # Pause MDBList after timeout/error
+                                self._mdb_pause_until = time.time() + self._api_pause_duration
+                                logger.warning(f"MDBList error, pausing for {self._api_pause_duration}s: {err}")
                         if imdb_id and not _mdb_obj:
                             try:
                                 _mdb_obj = self.config.MDBList.get_imdb(imdb_id)
@@ -376,9 +408,10 @@ class Operations:
                                 logger.debug(err)
                             except Failed as err:
                                 logger.error(str(err))
-                            except Exception:
-                                logger.trace(f"IMDb ID: {imdb_id}")
-                                raise
+                            except Exception as err:
+                                # Pause MDBList after timeout/error
+                                self._mdb_pause_until = time.time() + self._api_pause_duration
+                                logger.warning(f"MDBList error, pausing for {self._api_pause_duration}s: {err}")
                         if not _mdb_obj:
                             logger.warning(f"No MdbItem for {item.title} (Guid: {item.guid})")
                     if not _mdb_obj:
