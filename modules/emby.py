@@ -3181,9 +3181,11 @@ class Emby(Library):
 
     def reload(self, item, force=False):
         self.EmbyServer.invalidate_item(item.ratingKey)
-        # todo: set dirty
-        return item
-        pass
+        # Fetch fresh item from server after invalidating cache
+        fresh_item = self.EmbyServer.get_item(item.ratingKey, force_refresh=True)
+        if not fresh_item:
+            raise Failed(f"Failed to reload item: {item.ratingKey}")
+        return fresh_item
     def upload_poster(self, item, image, url=""):
         if url:
             return self.EmbyServer.set_image_smart(item.ratingKey, url, image_type="Primary")
