@@ -4043,19 +4043,20 @@ class CollectionBuilder:
                 if not self.library.smart_label_check(self.name):
                     raise Failed
                 smart_type, _, self.smart_url = self.build_filter("smart_label", self.smart_label, default_sort="random")
-                emby_col_id = self.library.EmbyServer.get_collection_id(self.name)
-                if emby_col_id:
-                    new_col = self.library.EmbyServer.get_item(emby_col_id)
-                    self.obj = self.library.EmbyServer.convert_emby_to_plex([new_col])[0]
+                if self.library.EmbyServer:
+                    emby_col_id = self.library.EmbyServer.get_collection_id(self.name)
+                    if emby_col_id:
+                        new_col = self.library.EmbyServer.get_item(emby_col_id)
+                        self.obj = self.library.EmbyServer.convert_emby_to_plex([new_col])[0]
                 if self.obj is None:
                     emby_id = self.library.create_smart_collection(self.name, smart_type, self.smart_url, self.ignore_blank_results, minimum=self.minimum)
             except Failed:
                 raise Failed(f"{self.Type} Error: Label: {self.name} was not added to any items in the Library")
 
-        if emby_id is None:
+        if emby_id is None and self.library.EmbyServer:
             emby_id = self.library.EmbyServer.get_collection_id(self.name)
 
-        if self.obj is None and emby_id is not None:
+        if self.obj is None and emby_id is not None and self.library.EmbyServer:
             new_col = self.library.EmbyServer.get_item(emby_id)
             if new_col is not None:
                 self.obj = self.library.EmbyServer.convert_emby_to_plex([new_col])[0]
@@ -4509,7 +4510,7 @@ class CollectionBuilder:
         if self.collection_poster:
             uploaded_poster, _, _ = self.library.upload_images(self.obj, poster=self.collection_poster)
 
-        if self.collection_background and not "BackdropImageTags" in self.library.EmbyServer.get_item(self.obj.ratingKey):
+        if self.collection_background and self.library.EmbyServer and not "BackdropImageTags" in self.library.EmbyServer.get_item(self.obj.ratingKey):
 
             _, background_uploaded, _ = self.library.upload_images(self.obj, background=self.collection_background)
 
