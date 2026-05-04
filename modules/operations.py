@@ -172,7 +172,7 @@ class Operations:
             people_alias_revert = []
             emby_payload = {}  # populated but not yet consumed; kept for future use
 
-            if self.library.mc_type == "emby" and getattr(self.library, "mass_cast_and_crew_update", False):
+            if self.library.mc_type == "emby" and self.library.mass_cast_and_crew_update:
                 self.library.EmbyServer.cleanup_stuck_aliases()
 
             trakt_user_ratings = None
@@ -935,7 +935,7 @@ class Operations:
                                     break
                                 except Failed:
                                     continue
-                if self.library.mc_type == "emby" and getattr(self.library, "mass_cast_and_crew_update", False) and tmdb_id:
+                if self.library.mc_type == "emby" and self.library.mass_cast_and_crew_update and tmdb_id:
                     try:
                         tmdb_item = tmdb_obj()
                     except Failed:
