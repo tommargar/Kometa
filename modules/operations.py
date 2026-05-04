@@ -582,6 +582,10 @@ class Operations:
                                     # break
                                 except Failed:
                                     continue
+                                except Exception as e:
+                                    # Handle timeouts and other API errors gracefully
+                                    logger.warning(f"Error getting {option} rating: {e}")
+                                    continue
 
                 if self.library.mass_genre_update or self.library.genre_mapper:
                     new_genres = []
@@ -721,6 +725,10 @@ class Operations:
                                     new_rating = str(new_rating)
                                     break
                             except Failed:
+                                continue
+                            except Exception as e:
+                                # Handle timeouts and other API errors gracefully
+                                logger.warning(f"Error getting {option} content rating: {e}")
                                 continue
 
                     is_none = False
