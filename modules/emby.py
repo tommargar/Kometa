@@ -3180,10 +3180,8 @@ class Emby(Library):
 
 
     def reload(self, item, force=False):
-        # Invalidate cache so subsequent accesses fetch fresh data from server
-        self.EmbyServer.invalidate_item(item.ratingKey)
-        # Return the same item object - it will refresh from server when accessed
-        # since the cache is now invalid
+        # For Emby, items are already fresh from the server when fetched
+        # No special reload needed like in Plex
         return item
     def upload_poster(self, item, image, url=""):
         if url:
