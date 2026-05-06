@@ -316,11 +316,12 @@ class Overlays:
                                             actual_attr = plex.attribute_translation.get(format_var, format_var)
                                             actual_value = None
                                             if item_id is not None:
-                                                # Always force-refresh for user_rating to ensure we get the latest
-                                                # CustomRating from ProviderIds, since this is updated by mass_user_rating_update
-                                                # operations that happen earlier in the same run
-                                                fresh_emby_item = emby_server.get_item(item_id, force_refresh=True)
-                                                native_emby_data = fresh_emby_item
+                                                if fresh_emby_item is None:
+                                                    if native_emby_data:
+                                                        fresh_emby_item = native_emby_data
+                                                    else:
+                                                        fresh_emby_item = emby_server.get_item(item_id, force_refresh=True)
+                                                        native_emby_data = fresh_emby_item
                                                 native_item = fresh_emby_item
                                                 if native_item:
                                                     actual_value = emby_server.get_custom_rating_from_item(native_item, raw=True)
@@ -509,10 +510,12 @@ class Overlays:
                                             #     case 'rating':
                                             actual_value = None
                                             if emby_server and item_id and format_var in ["critic_rating", "audience_rating", "user_rating"]:
-                                                # Always force-refresh for ratings to ensure we get the latest values
-                                                # since these are updated by mass_xxx_rating_update operations earlier in the same run
-                                                fresh_emby_item = emby_server.get_item(item_id, force_refresh=True)
-                                                native_emby_data = fresh_emby_item
+                                                if fresh_emby_item is None:
+                                                    if native_emby_data:
+                                                        fresh_emby_item = native_emby_data
+                                                    else:
+                                                        fresh_emby_item = emby_server.get_item(item_id, force_refresh=True)
+                                                        native_emby_data = fresh_emby_item
                                                 native_item = fresh_emby_item
                                                 if native_item:
                                                     if format_var == "audience_rating":
