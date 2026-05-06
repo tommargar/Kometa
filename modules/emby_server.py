@@ -1456,9 +1456,20 @@ class EmbyServer:
             # Optional: Check TTL here if desired, currently assuming cache is valid unless dirty/forced
             return cached_item
 
-        endpoint = f"/emby/users/{self.user_id}/Items/{item_id_str}?api_key={self.api_key}"
+        # Include all important fields explicitly - Emby's default response does NOT
+        # include ProviderIds, LockedFields, etc. without explicit Fields parameter.
+        # This was causing CustomRating from ProviderIds to be missing after refreshes,
+        # leading to ratings not being visible in overlays during the same run.
+        fields = (
+            "Budget,Chapters,DateCreated,Genres,HomePageUrl,IndexOptions,MediaStreams,"
+            "Overview,ParentId,Path,People,ProductionYear,PremiereDate,ProviderIds,LockedFields,"
+            "PrimaryImageAspectRatio,Revenue,SortName,Studios,Taglines,CriticRating,"
+            "CommunityRating,OfficialRating,Tags,TagItems,RunTimeTicks,ProductionLocations,"
+            "MediaSources,OriginalTitle"
+        )
+        endpoint = f"/emby/users/{self.user_id}/Items/{item_id_str}?api_key={self.api_key}&Fields={fields}"
         url = self.emby_server_url + endpoint
-        
+
         headers = self.headers.copy()
         # Don't use Etag if force_refresh or item is dirty - we need actual fresh data
         if cached_item and "Etag" in cached_item and not force_refresh and not is_dirty:
@@ -1466,7 +1477,7 @@ class EmbyServer:
 
         try:
             resp = self.session.get(url, headers=headers)
-            
+
             if resp.status_code == 304:
                 self._items_cache_ts[item_id_str] = time.time()
                 self.dirty_items.discard(item_id_int)
