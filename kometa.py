@@ -236,8 +236,49 @@ sys.excepthook = my_except_hook
 
 old_send = requests.Session.send
 
+# External APIs that we don't want hanging the entire library on a single call.
+# Tighter timeout (connect, read) so a stalled API errors out fast and the
+# per-API circuit breaker in operations.py can pause it for the rest of the run.
+_EXTERNAL_API_HOSTS = (
+    "api.themoviedb.org",
+    "image.tmdb.org",
+    "api4.thetvdb.com",
+    "api.thetvdb.com",
+    "thetvdb.com",
+    "www.imdb.com",
+    "imdb.com",
+    "caching.graphql.imdb.com",
+    "api.graphql.imdb.com",
+    "graphql.imdb.com",
+    "api.mdblist.com",
+    "mdblist.com",
+    "www.omdbapi.com",
+    "omdbapi.com",
+    "api.trakt.tv",
+    "api.myanimelist.net",
+    "api.anidb.net",
+    "anidb.net",
+    "letterboxd.com",
+    "www.letterboxd.com",
+)
+_EXTERNAL_API_TIMEOUT = (10, 20)  # (connect, read) — fail fast so the run keeps moving
+
 def new_send(*send_args, **kwargs):
-    if kwargs.get("timeout", None) is None:
+    # send_args = (self, request)
+    request = send_args[1] if len(send_args) >= 2 else None
+    is_external = False
+    if request is not None:
+        try:
+            host = (request.url.split("://", 1)[-1].split("/", 1)[0] or "").lower()
+            host = host.split("@")[-1].split(":")[0]  # strip auth/port
+            is_external = any(host == h or host.endswith("." + h) for h in _EXTERNAL_API_HOSTS)
+        except Exception:
+            is_external = False
+
+    if is_external:
+        # Force the tight timeout even if the caller passed a longer one
+        kwargs["timeout"] = _EXTERNAL_API_TIMEOUT
+    elif kwargs.get("timeout", None) is None:
         kwargs["timeout"] = run_args["timeout"]
     return old_send(*send_args, **kwargs)
 

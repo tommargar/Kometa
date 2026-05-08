@@ -240,7 +240,7 @@ class EmbyServer:
         self.api_key = api_key
         self.headers = {"X-MediaBrowser-Token": api_key}
         # To prevent too long URLs, queries are done in batches of n
-        self.api_batch_size = 50
+        self.api_batch_size = 250
         self.seconds_between_requests = 0.05
         # get system info to see if it works
         self.session = None
@@ -1490,14 +1490,16 @@ class EmbyServer:
             self.cached_plex_objects.pop(item_id_int, None)
             return data
         except Exception as e:
-            logger.ghost(f"Error occurred while getting item: {e}. URL: {url}.")
-            return None
+            logger.warning(f"Emby get_item({item_id_str}) failed/timed out: {e}")
+            # Return cached version if we have one, so the item can still be processed
+            # with stale data instead of being skipped entirely.
+            return cached_item if cached_item else None
 
     def get_item_images(self, item_id) -> dict:
         endpoint = f"/emby/Items/{item_id}/Images?api_key={self.api_key}"
         url = self.emby_server_url + endpoint
         try:
-            return self.session.get(url, headers=self.headers).json()
+            return self.session.get(url, headers=self.headers, timeout=(5, 20)).json()
         except Exception as e:
             logger.error(f"Error occurred while getting item image: {e}. URL: {url}.")
             return None
@@ -1506,8 +1508,17 @@ class EmbyServer:
         return self.__update_item(item_id, {property_name: property_value})
 
     def _build_collection_id_cache(self):
-        all_collections = self.get_boxsets_from_library()
-        self._collection_id_cache = {c.title: c.ratingKey for c in all_collections}
+        # Use native=True to skip per-collection get_items_in_boxset() calls
+        # inside convert_emby_to_plex. The ID cache only needs {title: id};
+        # the previous implementation loaded every collection's full item list
+        # on first lookup, firing 765+ sequential HTTP calls and hanging
+        # for minutes before the first collection could even be processed.
+        all_collections = self.get_boxsets_from_library(native=True)
+        self._collection_id_cache = {
+            c.title: c.ratingKey
+            for c in all_collections
+            if getattr(c, "title", None) and getattr(c, "ratingKey", None) is not None
+        }
 
     def get_show_season_years(self, series_id=None):
         """Returns a set of season production years per SeriesId. Cached per library.
@@ -1671,13 +1682,19 @@ class EmbyServer:
                 query_params["Ids"] = ",".join(batch)
             current_index = start_index
 
+            page_count = 0
             while True:
-                time.sleep(self.seconds_between_requests)
+                # Only throttle between pages (after the first), not before. Otherwise
+                # every single get_items call pays a sleep tax even when it returns
+                # in one page.
+                if page_count > 0:
+                    time.sleep(self.seconds_between_requests)
+                page_count += 1
                 query_params["StartIndex"] = current_index
                 encoded_query = self.custom_encode(query_params)
                 full_url = f"{url}?{encoded_query}"
                 logger.trace(f"Fetching batch #{batches.index(batch) + 1} of {len(batches)} batches)")
-                response = self.session.get(full_url, headers=self.headers)
+                response = self.session.get(full_url, headers=self.headers, timeout=(10, 60))
                 try:
                     response_data = response.json()
                 except Exception as e:
@@ -2289,7 +2306,7 @@ class EmbyServer:
             start_index = i * batch_size
             end_index = min((i + 1) * batch_size, len(item_ids))
             batch_item_ids = item_ids[start_index:end_index]
-            # print(".", end="", flush=True)
+            logger.ghost(f"  Batch {i + 1}/{num_batches} ({len(batch_item_ids)} items) | {collection_name} | {operation}")
 
             if operation == "add":
                 response = self.session.post(
@@ -2309,7 +2326,7 @@ class EmbyServer:
             affected_count += len(batch_item_ids)
             time.sleep(self.seconds_between_requests)
 
-        # print()
+        logger.exorcise()
         logger.info(f"Finished '{operation}' with {len(item_ids)} items in {collection_name}")
 
         return affected_count
@@ -2341,7 +2358,7 @@ class EmbyServer:
             start_index = i * batch_size
             end_index = min((i + 1) * batch_size, len(item_ids))
             batch_item_ids = item_ids[start_index:end_index]
-            # print(".", end="", flush=True)
+            logger.ghost(f"  Batch {i + 1}/{num_batches} ({len(batch_item_ids)} items) | {collection_name} | {operation}")
 
             if operation == "add":
                 response = self.session.post(
@@ -2361,7 +2378,7 @@ class EmbyServer:
             affected_count += len(batch_item_ids)
             time.sleep(self.seconds_between_requests)
 
-        # print()
+        logger.exorcise()
         logger.info(f"Finished '{operation}' with {len(item_ids)} items in {collection_name}")
 
         return affected_count
@@ -3119,13 +3136,18 @@ class EmbyServer:
         from urllib3.util.retry import Retry
 
         self.session = requests.Session()
+        # Retry tuned down: 5 retries × 0.5 backoff = 15.5s pure waiting per
+        # failed call before bubbling up — that's a long time to lose to a
+        # transient blip. Also: only retry idempotent methods (GET/HEAD) by
+        # default to avoid duplicate writes on POST/PUT/PATCH (Emby creates
+        # collections, posts metadata edits — duplicates can be very bad).
         retries = Retry(
-            total=5,
-            backoff_factor=0.5,
+            total=2,
+            backoff_factor=0.25,
             status_forcelist=(429, 500, 502, 503, 504),
-            allowed_methods=frozenset(["GET", "POST", "PUT", "PATCH"])
+            allowed_methods=frozenset(["GET", "HEAD"])
         )
-        adapter = HTTPAdapter(max_retries=retries, pool_connections=10, pool_maxsize=20)
+        adapter = HTTPAdapter(max_retries=retries, pool_connections=20, pool_maxsize=40)
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
 
@@ -4179,42 +4201,55 @@ class EmbyServer:
         if to_fetch:
             logger.trace(f"Emby bulk cache: {len(fetch_ids_all)} total, {len(to_fetch)} to fetch")
 
-        # 2) Fehlende/nicht vollständige Items in Batches nachladen
+        # 2) Fehlende/nicht vollständige Items in Batches nachladen — parallel
         if to_fetch:
             url = f"{self.emby_server_url}/emby/Items"
-            for i in range(0, len(to_fetch), CHUNK):
-                batch = to_fetch[i:i + CHUNK]
+            batches = [to_fetch[i:i + CHUNK] for i in range(0, len(to_fetch), CHUNK)]
+
+            def _fetch_batch(batch):
                 params = {"Ids": ",".join(batch), "api_key": self.api_key}
                 if fields_param:
                     params["Fields"] = fields_param
-
-                resp = self.session.get(url, headers=self.headers, params=params, timeout=120)
+                resp = self.session.get(url, headers=self.headers, params=params, timeout=(10, 60))
                 resp.raise_for_status()
                 data = resp.json() or {}
-                items = data.get("Items") or data.get("items") or []
+                return data.get("Items") or data.get("items") or []
 
-                now_fetch = time.time()
-                for it in items:
-                    it_id = str(it.get("Id") or "")
-                    if not it_id:
-                        continue
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            max_workers = min(6, max(1, len(batches)))
+            all_fetched: list[dict] = []
+            if len(batches) == 1:
+                all_fetched = _fetch_batch(batches[0])
+            else:
+                with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="emby-bulk") as pool:
+                    futures = [pool.submit(_fetch_batch, b) for b in batches]
+                    for fut in as_completed(futures):
+                        try:
+                            all_fetched.extend(fut.result())
+                        except Exception as e:
+                            logger.warning(f"Emby bulk batch failed: {e}")
 
-                    # Bestehendes Cache-Objekt erweitern/überschreiben (merge)
-                    if it_id in self._items_cache:
-                        self._items_cache[it_id].update(it)
-                        # wir wissen, dass mindestens die angeforderten Fields zurückkamen:
-                        self._items_cache_fields[it_id] |= req_fields_set
-                    else:
-                        self._items_cache[it_id] = it
-                        self._items_cache_fields[it_id] = set(req_fields_set)
+            now_fetch = time.time()
+            for it in all_fetched:
+                it_id = str(it.get("Id") or "")
+                if not it_id:
+                    continue
 
-                    self._items_cache_ts[it_id] = now_fetch
-                    out[it_id] = self._items_cache[it_id]
+                # Bestehendes Cache-Objekt erweitern/überschreiben (merge)
+                if it_id in self._items_cache:
+                    self._items_cache[it_id].update(it)
+                    self._items_cache_fields[it_id] |= req_fields_set
+                else:
+                    self._items_cache[it_id] = it
+                    self._items_cache_fields[it_id] = set(req_fields_set)
 
-                    try:
-                        self.dirty_items.discard(int(it_id))
-                    except (TypeError, ValueError):
-                        pass
+                self._items_cache_ts[it_id] = now_fetch
+                out[it_id] = self._items_cache[it_id]
+
+                try:
+                    self.dirty_items.discard(int(it_id))
+                except (TypeError, ValueError):
+                    pass
 
         return out
 

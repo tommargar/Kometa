@@ -196,21 +196,68 @@ class Operations:
 
             for i, item in enumerate(items, 1):
                 logger.info("")
-                logger.info(f"({i}/{total_items}) {item.title}")
+                # Defensive: a raw Emby dict can slip through if convert_emby_to_plex
+                # hit an edge case (e.g. unknown media_type or stale cache). Convert
+                # on the fly so the loop never crashes on item.title / item.ratingKey.
+                if isinstance(item, dict):
+                    if self.library.is_emby:
+                        try:
+                            converted = self.library.EmbyServer.convert_emby_to_plex([item])
+                        except Exception as conv_err:
+                            logger.error(f"Failed to convert Emby item dict: {conv_err}")
+                            converted = []
+                        if converted:
+                            item = converted[0]
+                        else:
+                            logger.error(
+                                f"Skipping unconvertable Emby item: "
+                                f"Id={item.get('Id')} Name={item.get('Name')} Type={item.get('Type')}"
+                            )
+                            continue
+                    else:
+                        logger.error(f"Unexpected dict item in non-Emby library: {item}")
+                        continue
+
+                title = getattr(item, "title", None) or "Unknown"
+                logger.info(f"({i}/{total_items}) {title}")
                 try:
                     item = self.library.reload(item)
                 except Failed as e:
                     logger.error(e)
                     continue
+
+                rating_key = getattr(item, "ratingKey", None)
+                if rating_key is None:
+                    logger.error(f"Item has no ratingKey, skipping: {title}")
+                    continue
+
+                # Per-item timing instrumentation: surface any phase >5s
+                _item_start = time.time()
+                _phase_start = _item_start
+                _slow_threshold = 5.0
+                def _phase(name):
+                    nonlocal _phase_start
+                    elapsed = time.time() - _phase_start
+                    if elapsed > _slow_threshold:
+                        logger.warning(f"[SLOW] {title}: phase '{name}' took {elapsed:.1f}s")
+                    _phase_start = time.time()
+
                 if self.library.is_emby:
                     if not hasattr(self.library.EmbyServer, "dirty_items"):
                         self.library.EmbyServer.dirty_items = set()
-                    self.library.EmbyServer.dirty_items.add(item.ratingKey)
-                    emby_item = self.library.EmbyServer.get_item(item.ratingKey)
+                    # NOTE: Do NOT mark this item as dirty preemptively. dirty_items is
+                    # for cache invalidation AFTER edits (so re-reads see fresh data).
+                    # Marking dirty here forces an HTTP roundtrip to Emby per item,
+                    # bypassing the bulk cache populated by get_all() — that means
+                    # ~9k unnecessary HTTP requests per run, and any single hung
+                    # request blocks the entire library on the global timeout.
+                    emby_item = self.library.EmbyServer.get_item(rating_key)
                 else:
                     emby_item = None
+                _phase("emby_get_item")
 
                 current_labels = [la.tag for la in self.library.item_labels(item)] if self.library.label_operations else []
+                _phase("item_labels")
 
                 if self.library.assets_for_all and self.library.asset_directory:
                     self.library.find_and_upload_assets(item, current_labels)
@@ -470,6 +517,7 @@ class Operations:
                         raise Failed
                     return _mal_obj
 
+                _phase("pre_rating_setup")
                 for attribute, item_attr in [(self.library.mass_audience_rating_update, "audienceRating"), (self.library.mass_critic_rating_update, "rating"), (self.library.mass_user_rating_update, "userRating")]:
                     if attribute:
                         current = getattr(item, item_attr)
@@ -620,6 +668,7 @@ class Operations:
                                     logger.warning(f"Error getting {option} rating: {e}")
                                     continue
 
+                _phase("rating_loop")
                 if self.library.mass_genre_update or self.library.genre_mapper:
                     new_genres = []
                     extra_option = None
@@ -717,6 +766,7 @@ class Operations:
 
                         do_cast_update = True
 
+                _phase("genre_loop")
                 if self.library.mass_content_rating_update or self.library.content_rating_mapper:
                     new_rating = None
                     extra_option = None
@@ -809,6 +859,7 @@ class Operations:
                         unlock_edits["contentRating"].append(item.ratingKey)
                         item_edits.append("Unlock Content Rating (Batched)")
 
+                _phase("content_rating_loop")
                 if self.library.mass_original_title_update:
                     current_original = item.originalTitle
                     for option in self.library.mass_original_title_update:
@@ -860,6 +911,7 @@ class Operations:
                             except Failed:
                                 continue
 
+                _phase("original_title_loop")
                 if self.library.mass_studio_update:
                     current_studio = item.studio
                     current_studio_str = str(current_studio).strip() if current_studio else ""
@@ -980,6 +1032,7 @@ class Operations:
                                     break
                                 except Failed:
                                     continue
+                _phase("studio_loop")
                 if self.library.mc_type == "emby" and self.library.mass_cast_and_crew_update and tmdb_id:
                     try:
                         tmdb_item = tmdb_obj()
@@ -1056,6 +1109,11 @@ class Operations:
                     # Title and case updates end
 
                     # tick("Emby genres updated", min_ms=5)
+
+                _phase("post_genre_phase_to_edits")
+                _total_elapsed = time.time() - _item_start
+                if _total_elapsed > _slow_threshold:
+                    logger.warning(f"[SLOW] {title}: TOTAL item processing took {_total_elapsed:.1f}s")
 
                 if len(item_edits) > 0:
                     # logger.info(f"{item_edits[1:]}")

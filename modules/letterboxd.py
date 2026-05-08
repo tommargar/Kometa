@@ -278,12 +278,23 @@ class Letterboxd:
         return items
 
     def _tmdb(self, letterboxd_url, language):
+        """Returns (id, kind) where kind is 'movie' or 'show'.
+
+        Letterboxd lists occasionally contain TV shows / TV movies that link to
+        themoviedb.org/tv/<id> instead of /movie/<id>. We previously raised a
+        hard error for those, polluting the run summary with dozens of
+        'TMDb Movie ID not found' lines per run. Now we return the show ID
+        with kind='show' so the caller can decide whether to include it
+        (movie libraries skip; show libraries use it).
+        """
         ids = self._request(letterboxd_url, language, "//a[@data-track-action='TMDb' or @data-track-action='TMDB']/@href")
         if len(ids) > 0 and ids[0]:
             if "themoviedb.org/movie" in ids[0]:
-                return util.regex_first_int(ids[0], "TMDb Movie ID")
-            raise Failed(f"Letterboxd Error: TMDb Movie ID not found in {ids[0]}")
-        raise Failed(f"Letterboxd Error: TMDb Movie ID not found at {letterboxd_url}")
+                return util.regex_first_int(ids[0], "TMDb Movie ID"), "movie"
+            if "themoviedb.org/tv" in ids[0]:
+                return util.regex_first_int(ids[0], "TMDb TV ID"), "show"
+            raise Failed(f"Letterboxd Error: TMDb ID not found in {ids[0]}")
+        raise Failed(f"Letterboxd Error: TMDb ID not found at {letterboxd_url}")
 
     def get_user_lists(self, username, sort, language):
         next_page = [f"/{username}/lists/{sort_options[sort]}"]
@@ -443,15 +454,20 @@ class Letterboxd:
                     expired = None
                     if self.cache:
                         tmdb_id, expired = self.cache.query_letterboxd_map(letterboxd_id)
+                    kind = "movie"
                     if not tmdb_id or expired is not False:
                         try:
-                            tmdb_id = self._tmdb(f"{base_url}{slug}", language)
+                            tmdb_id, kind = self._tmdb(f"{base_url}{slug}", language)
                         except Failed as e:
-                            logger.error(e)
+                            # Skip silently — upstream summaries get noisy when
+                            # a list mixes movies and TV / TV-movies.
+                            logger.debug(str(e))
                             continue
-                        if self.cache:
+                        # Only cache movie IDs (cache layer expects movie int);
+                        # TV entries are returned but not persisted.
+                        if self.cache and kind == "movie":
                             self.cache.update_letterboxd_map(expired, letterboxd_id, tmdb_id)
-                    ids.append((tmdb_id, "tmdb"))
+                    ids.append((tmdb_id, "tmdb" if kind == "movie" else "tmdb_show"))
                 logger.info(f"Processed {total_items} TMDb IDs")
                 if filtered_ids:
                     logger.info(f"Filtered: {filtered_ids}")
@@ -508,15 +524,20 @@ class Letterboxd:
                     expired = None
                     if self.cache:
                         tmdb_id, expired = self.cache.query_letterboxd_map(letterboxd_id)
+                    kind = "movie"
                     if not tmdb_id or expired is not False:
                         try:
-                            tmdb_id = self._tmdb(f"{base_url}{slug}", language)
+                            tmdb_id, kind = self._tmdb(f"{base_url}{slug}", language)
                         except Failed as e:
-                            logger.error(e)
+                            # Skip silently — upstream summaries get noisy when
+                            # a list mixes movies and TV / TV-movies.
+                            logger.debug(str(e))
                             continue
-                        if self.cache:
+                        # Only cache movie IDs (cache layer expects movie int);
+                        # TV entries are returned but not persisted.
+                        if self.cache and kind == "movie":
                             self.cache.update_letterboxd_map(expired, letterboxd_id, tmdb_id)
-                    ids.append((tmdb_id, "tmdb"))
+                    ids.append((tmdb_id, "tmdb" if kind == "movie" else "tmdb_show"))
                 
                 # Update incremental state if we have new items
                 if data.get("incremental", True) and self.cache and new_item_ids:

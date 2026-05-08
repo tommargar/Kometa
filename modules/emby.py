@@ -1030,9 +1030,12 @@ class Emby(Library):
                 if "ProviderIds" not in entry["update"]:
                     entry["update"]["ProviderIds"] = entry["provider_ids"].copy()
                 entry["update"]["ProviderIds"]["Tmdb"] = str(tmdb_id)
-        len_items = len(item_updates)
-        my_index = 1
-        # Apply all collected updates to Emby
+        # First pass: build all payloads + diffs serially (CPU-bound, fast).
+        # Then submit Emby POSTs in parallel via ThreadPool — Emby is sometimes
+        # slow on individual updates (single item can take 100s+); serial loop
+        # blocks the entire library on those stragglers. Threading lets healthy
+        # POSTs proceed while one is stuck.
+        prepared_updates = []  # list of (item_id, update_payload, diff)
         for item_id, data in item_updates.items():
             update_payload = dict(data["update"])
 
@@ -1071,49 +1074,62 @@ class Emby(Library):
                     else:
                         provider_ids_payload[self.EmbyServer.CUSTOM_RATING_PROVIDER] = normalized_rating
                 update_payload["ProviderIds"] = provider_ids_payload
-            if update_payload:
-                current = item_cache.get(str(item_id)) or item_cache.get(item_id) or {}
-                diff = {}
-                for key, new_val in update_payload.items():
-                    old_val = current.get(key)
-                    if key == "ProviderIds":
-                        old_prov_raw = dict(old_val or {})
-                        new_prov_raw = dict(new_val or {})
-                        old_prov = {k.lower(): (k, v) for k, v in old_prov_raw.items()}
-                        new_prov = {k.lower(): (k, v) for k, v in new_prov_raw.items()}
-                        prov_diff = {}
-                        for kl, (k, v) in new_prov.items():
-                            if kl in old_prov:
-                                old_v = old_prov[kl][1]
-                                if old_v != v:
-                                    prov_diff[k] = f"{old_v!r} → {v!r}"
-                            else:
-                                prov_diff[k] = f"+{v!r}"
-                        for kl, (k, v) in old_prov.items():
-                            if kl not in new_prov:
-                                prov_diff[k] = f"-{v!r}"
-                        if prov_diff:
-                            diff["ProviderIds"] = prov_diff
-                    elif key in ("Tags", "TagItems", "Genres", "GenreItems", "LockedFields"):
-                        try:
-                            old_set = set(old_val or [])
-                            new_set = set(new_val or [])
-                            added = new_set - old_set
-                            removed = old_set - new_set
-                            if added or removed:
-                                diff[key] = {**({"+" + v: "" for v in added} if added else {}),
-                                             **({"-" + v: "" for v in removed} if removed else {})}
-                        except TypeError:
-                            pass
-                    elif key == "Studios":
-                        diff[key] = new_val
-                    elif old_val != new_val:
-                        diff[key] = f"{old_val!r} → {new_val!r}" if old_val is not None else f"+{new_val!r}"
-                if diff:
-                    logger.info(f"Updating {item_id}: {diff}")
+            if not update_payload:
+                continue
+
+            current = item_cache.get(str(item_id)) or item_cache.get(item_id) or {}
+            diff = {}
+            for key, new_val in update_payload.items():
+                old_val = current.get(key)
+                if key == "ProviderIds":
+                    old_prov_raw = dict(old_val or {})
+                    new_prov_raw = dict(new_val or {})
+                    old_prov = {k.lower(): (k, v) for k, v in old_prov_raw.items()}
+                    new_prov = {k.lower(): (k, v) for k, v in new_prov_raw.items()}
+                    prov_diff = {}
+                    for kl, (k, v) in new_prov.items():
+                        if kl in old_prov:
+                            old_v = old_prov[kl][1]
+                            if old_v != v:
+                                prov_diff[k] = f"{old_v!r} → {v!r}"
+                        else:
+                            prov_diff[k] = f"+{v!r}"
+                    for kl, (k, v) in old_prov.items():
+                        if kl not in new_prov:
+                            prov_diff[k] = f"-{v!r}"
+                    if prov_diff:
+                        diff["ProviderIds"] = prov_diff
+                elif key in ("Tags", "TagItems", "Genres", "GenreItems", "LockedFields"):
+                    try:
+                        old_set = set(old_val or [])
+                        new_set = set(new_val or [])
+                        added = new_set - old_set
+                        removed = old_set - new_set
+                        if added or removed:
+                            diff[key] = {**({"+" + v: "" for v in added} if added else {}),
+                                         **({"-" + v: "" for v in removed} if removed else {})}
+                    except TypeError:
+                        pass
+                elif key == "Studios":
+                    diff[key] = new_val
+                elif old_val != new_val:
+                    diff[key] = f"{old_val!r} → {new_val!r}" if old_val is not None else f"+{new_val!r}"
+
+            prepared_updates.append((item_id, update_payload, diff))
+
+        # Serial apply (user requested no parallel updates).
+        len_items = len(prepared_updates)
+        if len_items == 0:
+            return
+        my_index = 1
+        for item_id, update_payload, diff in prepared_updates:
+            if diff:
+                logger.info(f"Updating {item_id}: {diff}")
+            try:
                 self.EmbyServer.update_item(item_id, update_payload)
+            except Exception as e:
+                logger.warning(f"Failed to update {item_id}: {e}")
             logger.ghost(f"{my_index}/{len_items}")
-            len_items -=1
             my_index += 1
 
     def needs_collection_mode_update(self, collection, mode):
@@ -1982,8 +1998,14 @@ class Emby(Library):
         if not emby_query_params:
             return False
 
+        # Ids filter CAN be served from local cache — we already have the full
+        # native item list. Going back to Emby with a 3000-element Ids list
+        # forces 12+ batched HTTP calls (250 IDs each) — pure waste.
+        # Only bypass cache if Ids is set AND we don't have the native list yet.
         if emby_query_params.get("Ids"):
-            return False
+            if not self._emby_all_items_native:
+                return False
+            # Otherwise let _filter_emby_native_items handle it
 
         if "PersonIds" in emby_query_params:
             include_types = emby_query_params.get("IncludeItemTypes", "")
@@ -2017,6 +2039,7 @@ class Emby(Library):
             "SortOrder",
             "PersonIds",
             "PersonTypes",
+            "Ids",
         }
 
         for key, value in emby_query_params.items():
@@ -2261,6 +2284,26 @@ class Emby(Library):
                         return True
             return False
 
+        # Ids filter — handle first since it's the most selective and avoids
+        # round-tripping a 3000-element ID list back to Emby (would otherwise
+        # need 12+ batched HTTP calls). The native cache already has everything.
+        # IMPORTANT: if Ids key is PRESENT but empty (e.g. country filter found
+        # zero matches), filter to empty — NOT to "all items". Skipping the filter
+        # on empty Ids was returning the entire library for collections with no
+        # country matches (Africa got 9346 items instead of ~50).
+        if "Ids" in query_params:
+            ids_value = query_params.get("Ids")
+            if isinstance(ids_value, list):
+                allowed_ids = {str(i).strip() for i in ids_value if str(i).strip()}
+            elif ids_value is None:
+                allowed_ids = set()
+            else:
+                allowed_ids = {i.strip() for i in str(ids_value).split(",") if i.strip()}
+            if allowed_ids:
+                filtered = [item for item in filtered if str(item.get("Id")) in allowed_ids]
+            else:
+                filtered = []
+
         include_item_types = query_params.get("IncludeItemTypes")
         if include_item_types:
             allowed_types = {t.strip() for t in include_item_types.split(",") if t.strip()}
@@ -2372,6 +2415,11 @@ class Emby(Library):
 
             filtered = updated_results
 
+        # CRITICAL: For all of these filters, if the key is PRESENT in query_params
+        # but the parsed allowed-set is empty (e.g. nobody matched a name lookup),
+        # the user's intent is "match nothing" — NOT "no filter, match everything".
+        # The previous code silently skipped the filter on empty inputs which is
+        # what caused Africa to get 9346 items instead of ~85.
         if "Studios" in query_params:
             studio_value = query_params["Studios"]
             if isinstance(studio_value, str):
@@ -2386,6 +2434,8 @@ class Emby(Library):
                             studio_filter_results.append(item)
                             break
                 filtered = studio_filter_results
+            else:
+                filtered = []
 
         if "Genres" in query_params:
             genres_value = query_params["Genres"]
@@ -2400,6 +2450,8 @@ class Emby(Library):
                     for item in filtered
                     if requested_genres.issubset({str(g) for g in item.get("Genres", []) if g})
                 ]
+            else:
+                filtered = []
 
         if "Tags" in query_params:
             requested_tags = {tag.strip() for tag in query_params["Tags"].split("|") if tag.strip()}
@@ -2409,6 +2461,8 @@ class Emby(Library):
                     for item in filtered
                     if (tags := get_tags(item)) and requested_tags.intersection(tags)
                 ]
+            else:
+                filtered = []
 
         if "OfficialRatings" in query_params:
             allowed_ratings = {r.strip() for r in query_params["OfficialRatings"].split("|") if r.strip()}
@@ -2418,6 +2472,8 @@ class Emby(Library):
                     for item in filtered
                     if item.get("OfficialRating") in allowed_ratings
                 ]
+            else:
+                filtered = []
 
         resolution_filters = query_params.get("_Resolutions")
         require_hdr = query_params.get("_RequireHdr")
@@ -2680,11 +2736,32 @@ class Emby(Library):
                         if 'Ids' not in emby_query_params:
                             emby_query_params['Ids'] = []
 
-                        for it, val in self.EmbyServer.production_search.items():
-                            if value in val:
+                        # Make sure production_search is populated for THIS library.
+                        # get_emby_countries() early-returns if production_countries is
+                        # already set (from any previous library), but production_search
+                        # might be stale or empty for the current one.
+                        prod_search = self.EmbyServer.production_search
+                        if not prod_search:
+                            self.EmbyServer.get_emby_countries(self.Emby.get("Id"))
+                            prod_search = self.EmbyServer.production_search
+
+                        # Case- and whitespace-tolerant matching. Emby returns names like
+                        # "Cote D'Ivoire" / "South Africa" but URI/config might differ
+                        # in capitalization or extra spaces.
+                        wanted = value.strip().casefold()
+                        wanted_alt = f"{self.name} {value_decoded}".strip().casefold()
+                        match_count = 0
+                        for it, val in prod_search.items():
+                            if not val:
+                                continue
+                            normalized = [str(c).strip().casefold() for c in val if c]
+                            if wanted in normalized or wanted_alt in normalized:
                                 emby_query_params['Ids'].append(it)
-                            elif f"{self.name} {value_decoded}" in val:
-                                emby_query_params['Ids'].append(it)
+                                match_count += 1
+                        logger.trace(
+                            f"Country filter '{value}': matched {match_count} items "
+                            f"(production_search size: {len(prod_search)})"
+                        )
 
                         # emby_query_params['Ids'].append(encode_tags_to_uri(emby_item_ids))
 

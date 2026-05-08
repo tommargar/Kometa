@@ -37,18 +37,29 @@ class Overlays:
         if not self.library.remove_overlays:
             emby_server = getattr(self.library, "EmbyServer", None)
             if emby_server and emby_server.dirty_items:
+                dirty_list = list(emby_server.dirty_items)
                 pre_warmed_ids = set(emby_server.dirty_items)
                 logger.info("")
-                logger.separator(f"Refreshing {len(emby_server.dirty_items)} Dirty Items for the {self.library.name} Library")
+                logger.separator(f"Refreshing {len(dirty_list)} Dirty Items for the {self.library.name} Library")
                 logger.info("")
-                for i, item_id in enumerate(list(emby_server.dirty_items), 1):
+                # Pop stale plex objects up front (set ops are cheap)
+                for item_id in dirty_list:
                     emby_server.cached_plex_objects.pop(str(item_id), None)
                     try:
                         emby_server.cached_plex_objects.pop(int(item_id), None)
                     except (TypeError, ValueError):
                         pass
-                    logger.ghost(f"Refreshing {i}/{len(emby_server.dirty_items)} Item ID: {item_id}")
-                    emby_server.get_item(item_id, force_refresh=True)
+                # Parallel pre-warm: hundreds of force_refresh get_item calls,
+                # serial = 100ms+ each = 30s+ for big runs. Threaded keeps it snappy.
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+                emby_server._ensure_http_session()  # avoid race
+                max_workers = min(8, max(1, len(dirty_list)))
+                done_count = 0
+                with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="overlay-prewarm") as pool:
+                    futures = {pool.submit(emby_server.get_item, item_id, force_refresh=True): item_id for item_id in dirty_list}
+                    for fut in as_completed(futures):
+                        done_count += 1
+                        logger.ghost(f"Refreshing {done_count}/{len(dirty_list)} Item ID: {futures[fut]}")
                 if hasattr(self.library, "Plex") and self.library.Plex:
                     logger.info(f"Refreshing library cache after {len(emby_server.dirty_items)} item updates")
                     try:

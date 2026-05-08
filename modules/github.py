@@ -100,6 +100,16 @@ class GitHub:
             self._translation_keys = [tk[:-4] for tk in self.get_tree(tree["defaults"]["url"])]
         return self._translation_keys
 
+    # Local translation overrides for keys missing from the upstream
+    # Kometa-Team/Translations repo. Add new keys here when Emby has the
+    # collection but the upstream YAML doesn't translate it.
+    _LOCAL_TRANSLATIONS = {
+        "composer": {
+            "en": {"name": "Composers Collections", "summary": "Movie Composers Collections."},
+            "de": {"name": "Komponisten-Kollektionen", "summary": "Filmkomponisten-Kollektionen."},
+        },
+    }
+
     def translation_yaml(self, translation_key):
         if translation_key not in self._translations:
             yaml = self._requests(f"{self.translation_url}{translation_key}.yml", yaml=True).data
@@ -107,5 +117,14 @@ class GitHub:
             for k in output:
                 if k in yaml:
                     output[k] = yaml[k]
+            # Inject local overrides — pick the lang block matching this file's
+            # translation_key (e.g. "en", "de") and fall back to "en".
+            lang_code = translation_key.split("_", 1)[0].lower()
+            for ckey, lang_map in self._LOCAL_TRANSLATIONS.items():
+                if ckey in output["collections"]:
+                    continue  # upstream already has it, don't override
+                entry = lang_map.get(lang_code) or lang_map.get("en")
+                if entry:
+                    output["collections"][ckey] = entry
             self._translations[translation_key] = output
         return self._translations[translation_key]
