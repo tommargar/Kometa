@@ -299,6 +299,17 @@ class Operations:
                 current_labels = [la.tag for la in self.library.item_labels(item)] if self.library.label_operations else []
                 _phase("item_labels")
 
+                if self.library.item_has_ignore_label(item, current_labels=current_labels):
+                    logger.info("Ignored by ignore_labels")
+                    continue
+
+                tmdb_id, tvdb_id, imdb_id = self.library.get_ids(item)
+                if self.library.respect_ignore_ids and self.library.item_is_ignored(
+                    item, tmdb_id=tmdb_id, tvdb_id=tvdb_id, imdb_id=imdb_id
+                ):
+                    logger.info("Ignored by ignore_ids or ignore_imdb_ids")
+                    continue
+
                 if self.library.assets_for_all and self.library.asset_directory:
                     self.library.find_and_upload_assets(item, current_labels)
 
