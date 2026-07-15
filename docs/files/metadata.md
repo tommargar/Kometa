@@ -24,7 +24,9 @@ tags:
   - episodes
   - f1_season
   - file_background
+  - file_logo
   - file_poster
+  - file_square_art
   - genre
   - keep_episodes
   - label
@@ -56,7 +58,9 @@ tags:
   - update_episodes
   - update_seasons
   - url_background
+  - url_logo
   - url_poster
+  - url_square_art
   - use_original_title
   - user_rating
   - writer
@@ -243,9 +247,9 @@ can match and edit multiple items. The available matching options are outlined b
 
     | <div style="width:165px">Attribute</div>                                                          | Description                                                                                                                         |
     |:--------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------|
-    | `blank_edition` :material-numeric-3-circle:{ data-tooltip data-tooltip-id="tippy-metadata-3" }    | Only matches movies that have no Edition.<br>**Default:** <code>false</code><br>**Values:** <code>true</code> or <code>false</code> |
-    | `edition_contains` :material-numeric-3-circle:{ data-tooltip data-tooltip-id="tippy-metadata-3" } | Only matches where the movie's Edition contains the given string.<br>Can be a list (only one needs to match).                       |
-    | `edition` :material-numeric-3-circle:{ data-tooltip data-tooltip-id="tippy-metadata-3" }          | Only matches movies that exactly match the movie's Edition.<br>Can be a list (only one needs to match).                             |
+    | `blank_edition` :material-numeric-3-circle:{ data-tooltip data-tooltip-id="tippy-metadata-3" }    | Only matches items that have no Edition.<br>**Default:** <code>false</code><br>**Values:** <code>true</code> or <code>false</code>  |
+    | `edition_contains` :material-numeric-3-circle:{ data-tooltip data-tooltip-id="tippy-metadata-3" } | Only matches where the item's Edition contains the given string.<br>Can be a list (only one needs to match).                        |
+    | `edition` :material-numeric-3-circle:{ data-tooltip data-tooltip-id="tippy-metadata-3" }          | Only matches items that exactly match the item's Edition.<br>Can be a list (only one needs to match).                               |
     | `mapping_id` :material-numeric-2-circle:{ data-tooltip data-tooltip-id="tippy-metadata-2" }       | Only matches movies that have the given TMDb or IMDb ID.                                                                            |
     | `title` :material-numeric-1-circle:{ data-tooltip data-tooltip-id="tippy-metadata-1" }            | Only matches movies that exactly match the movie's Title.<br>Can be a list (only one needs to match).                               |
     | `year`                                                                                            | Only matches movies that were released in the given year.                                                                           |
@@ -254,6 +258,9 @@ can match and edit multiple items. The available matching options are outlined b
 
     | <div style="width:165px">Attribute</div>                                                    | Allowed Values                                                                                      |
     |:--------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------|
+    | `blank_edition` :material-numeric-3-circle:{ data-tooltip data-tooltip-id="tippy-metadata-3" }    | Only matches items that have no Edition.<br>**Default:** <code>false</code><br>**Values:** <code>true</code> or <code>false</code> |
+    | `edition_contains` :material-numeric-3-circle:{ data-tooltip data-tooltip-id="tippy-metadata-3" } | Only matches where the item's Edition contains the given string.<br>Can be a list (only one needs to match).                       |
+    | `edition` :material-numeric-3-circle:{ data-tooltip data-tooltip-id="tippy-metadata-3" }          | Only matches items that exactly match the item's Edition.<br>Can be a list (only one needs to match).                              |
     | `mapping_id` :material-numeric-2-circle:{ data-tooltip data-tooltip-id="tippy-metadata-2" } | Only matches shows that have the given TVDb or IMDb ID.                                             |
     | `title` :material-numeric-1-circle:{ data-tooltip data-tooltip-id="tippy-metadata-1" }      | Only matches shows that exactly match the show's Title.<br>Can be a list (only one needs to match). |
     | `year`                                                                                      | Only matches shows that were released in the given year.                                            |
@@ -474,7 +481,7 @@ The available attributes for editing movies are as follows
 | `content_rating`                                                                         | Text to change Content Rating.                                              | `Movies`, `Shows`, `Episodes`                                           |
 | `critic_rating`                                                                          | Number to change Critic Rating.                                             | `Movies`, `Shows`, `Episodes`, `Albums`                                 |
 | `disc`                                                                                   | Text to change Disc.                                                        | `Tracks`                                                                |
-| `edition` :material-numeric-4-circle:{ data-tooltip data-tooltip-id="tippy-metadata-4" } | Text to change Edition.                                                     | `Movies`                                                                |
+| `edition` :material-numeric-4-circle:{ data-tooltip data-tooltip-id="tippy-metadata-4" } | Text to change Edition.                                                     | `Movies`, `Shows`                                                       |
 | `original_artist`                                                                        | Text to change Original Artist.                                             | `Tracks`                                                                |
 | `original_title`                                                                         | Text to change Original Title.                                              | `Movies`, `Shows`                                                       |
 | `originally_available`                                                                   | Date to change Originally Available.<br><strong>Format:</strong> YYYY-MM-DD | `Movies`, `Shows`, `Episodes`, `Albums`                                 |
@@ -511,12 +518,14 @@ You can add `.sync` to any tag attribute to sync all tags vs just appending the 
 
 | Attribute         | <div style="width:365px">Allowed Values</div>    | Item Types                                                    |
 |:------------------|:-------------------------------------------------|:--------------------------------------------------------------|
-| `file_background` | Path to image in the file system.                | `Movies`, `Shows`, `Seasons`, `Episodes`, `Artists`, `Albums` |
-| `file_poster`     | Path to image in the file system.                | `Movies`, `Shows`, `Seasons`, `Episodes`, `Artists`, `Albums` |
-| `file_logo`       | Path to image in the file system.                | `Movies`, `Shows`, `Seasons`, `Episodes`                      | 
-| `url_background`  | URL of image publicly available on the internet. | `Movies`, `Shows`, `Seasons`, `Episodes`, `Artists`, `Albums` |
-| `url_poster`      | URL of image publicly available on the internet. | `Movies`, `Shows`, `Seasons`, `Episodes`, `Artists`, `Albums` |
-| `url_logo`        | URL of image publicly available on the internet. | `Movies`, `Shows`, `Seasons`, `Episodes`                      |
+| `file_background`  | Path to image in the file system.                | `Movies`, `Shows`, `Seasons`, `Episodes`, `Artists`, `Albums` |
+| `file_poster`      | Path to image in the file system.                | `Movies`, `Shows`, `Seasons`, `Episodes`, `Artists`, `Albums` |
+| `file_logo`        | Path to image in the file system.                | `Movies`, `Shows`                                             |
+| `file_square_art`  | Path to image in the file system.                | `Movies`, `Shows`                                             |
+| `url_background`   | URL of image publicly available on the internet. | `Movies`, `Shows`, `Seasons`, `Episodes`, `Artists`, `Albums` |
+| `url_poster`       | URL of image publicly available on the internet. | `Movies`, `Shows`, `Seasons`, `Episodes`, `Artists`, `Albums` |
+| `url_logo`         | URL of image publicly available on the internet. | `Movies`, `Shows`                                             |
+| `url_square_art`   | URL of image publicly available on the internet. | `Movies`, `Shows`                                             |
 
 ### Advanced Attributes
 
@@ -534,4 +543,3 @@ You can add `.sync` to any tag attribute to sync all tags vs just appending the 
 | `subtitle_language` :material-numeric-5-circle:{ data-tooltip data-tooltip-id="tippy-metadata-5" }  | `default`, `en`, `ar-SA`, `ca-ES`, `cs-CZ`, `da-DK`, `de-DE`, `el-GR`, `en-AU`, `en-CA`, `en-GB`, `en-US`, `es-ES`, `es-MX`, `et-EE`, `fa-IR`, `fi-FI`, `fr-CA`, `fr-FR`, `he-IL`, `hi-IN`, `hu-HU`, `id-ID`, `it-IT`, `ja-JP`, `ko-KR`, `lt-LT`, `lv-LV`, `nb-NO`, `nl-NL`, `pl-PL`, `pt-BR`, `pt-PT`, `ro-RO`, `ru-RU`, `sk-SK`, `sv-SE`, `th-TH`, `tr-TR`, `uk-UA`, `vi-VN`, `zh-CN`, `zh-HK`, `zh-TW`                                                                 | `Shows`, `Seasons`                        |
 | `subtitle_mode` :material-numeric-5-circle:{ data-tooltip data-tooltip-id="tippy-metadata-5" }      | <table class="clearTable"><tbody><tr><td>`default`</td><td>Account default</td></tr><tr><td>`no`</td><td>No</td></tr><tr><td>`yes`</td><td>Yes</td></tr></tbody></table>                                                                                                                                                                                                                                                                                                  | `Shows`, `Seasons`                        |
 | `use_original_title` :material-numeric-5-circle:{ data-tooltip data-tooltip-id="tippy-metadata-5" } | <table class="clearTable"><tbody><tr><td>`default`</td><td>Library default</td></tr><tr><td>`no`</td><td>No</td></tr><tr><td>`yes`</td><td>Yes</td></tr></tbody></table>                                                                                                                                                                                                                                                                                                  | `Movies`, `Shows`                         |
-

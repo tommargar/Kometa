@@ -1,10 +1,17 @@
-import io, logging, os, re, sys, traceback
+import io
+import logging
+import os
+import re
+import sys
+import traceback
 from logging.handlers import RotatingFileHandler
+from urllib.parse import quote, quote_plus
 
 LOG_DIR = "logs"
 COLLECTION_DIR = "collections"
 PLAYLIST_DIR = "playlists"
 MAIN_LOG = "meta.log"
+VALIDATE_LOG = "validate.log"
 LIBRARY_LOG = "library.log"
 COLLECTION_LOG = "collection.log"
 PLAYLIST_LOG = "playlist.log"
@@ -19,13 +26,34 @@ INFO = 20
 DEBUG = 10
 TRACE = 0
 
+SUPPRESS_STACKTRACE_PATTERNS = [
+    r"Plex Error: .* not found",
+    r"No matches found with regex pattern",
+    r"No Items found in Plex",
+]
+
+
+def _suppress_traceback_hook(etype, value, tb):
+    """Custom exception hook that suppresses full tracebacks for known, non-critical errors."""
+    message = f"{etype.__name__}: {value}"
+    for pattern in SUPPRESS_STACKTRACE_PATTERNS:
+        if re.search(pattern, message):
+            print(f"[WARNING] {message}", file=sys.stderr)
+            return
+    traceback.print_exception(etype, value, tb)
+
+
+sys.excepthook = _suppress_traceback_hook
+
 
 def fmt_filter(record):
     record.levelname = f"[{record.levelname}]"
     record.filename = f"[{record.filename}:{record.lineno}]"
     return True
 
+
 _srcfile = os.path.normcase(fmt_filter.__code__.co_filename)
+
 
 def log_namer(default_name):
     log_path = os.path.dirname(default_name)
@@ -94,7 +122,8 @@ class MyLogger:
         self._logger.addHandler(self.main_handler)
 
     def remove_main_handler(self):
-        self._logger.removeHandler(self.main_handler)
+        if self.main_handler is not None:
+            self._logger.removeHandler(self.main_handler)
 
     def add_library_handler(self, library_key):
         os.makedirs(os.path.join(self.log_dir, library_key, COLLECTION_DIR), exist_ok=True)
@@ -115,7 +144,8 @@ class MyLogger:
         self._logger.addHandler(self.playlists_handler)
 
     def remove_playlists_handler(self):
-        self._logger.removeHandler(self.playlists_handler)
+        if self.playlists_handler is not None:
+            self._logger.removeHandler(self.playlists_handler)
 
     def add_collection_handler(self, library_key, collection_key):
         collection_dir = os.path.join(self.log_dir, str(library_key), COLLECTION_DIR, str(collection_key))
@@ -210,7 +240,14 @@ class MyLogger:
             self._log(CRITICAL, str(msg), args, **kwargs)
 
     def stacktrace(self, trace=False):
-        self.print(traceback.format_exc(), debug=not trace, trace=trace)
+        stack = traceback.format_exc()
+
+        suppress_stacktrace_patterns = [r"Plex Error: .* not found", r"No matches found with regex pattern", r"Plex Error: No Items found in Plex"]
+
+        if any(re.search(pattern, stack) for pattern in suppress_stacktrace_patterns):
+            return
+
+        self.print(stack, debug=not trace, trace=trace)
 
     def _space(self, display_title):
         display_title = str(display_title)
@@ -234,8 +271,13 @@ class MyLogger:
             self.spacing = 0
 
     def secret(self, text):
-        if text and str(text) not in self.secrets:
-            self.secrets.append(str(text))
+        if not text:
+            return
+        # Register percent-encoded forms too, so a secret embedded in a
+        # logged URL query string still gets redacted.
+        for variant in [str(text), quote(str(text)), quote_plus(str(text))]:
+            if variant not in self.secrets:
+                self.secrets.append(variant)
 
     def _log(self, level, msg, args, exc_info=None, extra=None, stack_info=False, stacklevel=1):
         trace = level == TRACE
@@ -287,7 +329,7 @@ class MyLogger:
         if not f:
             f = orig_f
         rv = "(unknown file)", 0, "(unknown function)", None
-        while hasattr(f, "f_code"):
+        while f is not None:
             co = f.f_code
             filename = os.path.normcase(co.co_filename)
             if filename == _srcfile:
@@ -296,10 +338,10 @@ class MyLogger:
             sinfo = None
             if stack_info:
                 sio = io.StringIO()
-                sio.write('Stack (most recent call last):\n')
+                sio.write("Stack (most recent call last):\n")
                 traceback.print_stack(f, file=sio)
                 sinfo = sio.getvalue()
-                if sinfo[-1] == '\n':
+                if sinfo[-1] == "\n":
                     sinfo = sinfo[:-1]
                 sio.close()
             rv = (co.co_filename, f.f_lineno, co.co_name, sinfo)

@@ -81,10 +81,11 @@ jobs:
       - name: Update VERSION File
         id: update-version
         run: |
-            branch_name=${{ github.event.pull_request.head.ref }}
+            branch_name="${{ github.event.pull_request.head.ref }}"
+            branch_name=$(echo "${branch_name}" | sed 's/[^a-zA-Z0-9._-]/-/g')
             repo_name=${{ github.event.pull_request.head.repo.full_name }}
             base_name="${repo_name%/*}"
-            if [[ "${branch_name}" =~ ^(master|develop|nightly)$ ]]; then 
+            if [[ "${branch_name}" =~ ^(master|develop|nightly)$ ]]; then
                 pr_tag="${base_name}"
             else
                 pr_tag="${branch_name}"
@@ -148,6 +149,9 @@ jobs:
       - name: Set up Docker Buildx
         id: buildx
         uses: docker/setup-buildx-action@v4
+        with:
+          driver-opts: |
+            image=moby/buildkit:v0.20.0
 
       - name: Build and Push
         id: docker_build
@@ -160,9 +164,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ vars.DOCKER_TEAM }}/${{ vars.DOCKER_REPO }}:nightly
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
+          cache-from: type=registry,ref=${{ vars.DOCKER_TEAM }}/${{ vars.DOCKER_REPO }}:buildcache-nightly
+          cache-to: type=registry,ref=${{ vars.DOCKER_TEAM }}/${{ vars.DOCKER_REPO }}:buildcache-nightly,mode=min
       - name: Discord Success Notification
         uses: Kometa-Team/discord-notifications@master
         if: success()

@@ -1,27 +1,37 @@
-import base64, cloudscraper, os, ruamel.yaml, requests, time
+import base64
+import os
+import time
+from urllib import parse
+
+import cloudscraper
+import requests
+import ruamel.yaml
 from lxml import html
+from requests.exceptions import ConnectionError, RequestException
+from tenacity import retry, stop_after_attempt, wait_exponential
+
 from modules import util
 from modules.poster import ImageData
 from modules.util import Failed
-from requests.exceptions import ConnectionError
-from tenacity import retry, stop_after_attempt, wait_fixed
-from urllib import parse
 
 logger = util.logger
 
 image_content_types = ["image/png", "image/jpeg", "image/webp"]
 
+# Per-socket-operation timeout for every outbound request; without one a
+# stalled external server hangs the whole run (tenacity only retries on
+# raised exceptions, and a silent stall never raises).
+DEFAULT_TIMEOUT = 30
+
+
 def get_header(headers, header, language):
     if headers:
         return headers
-    else:
-        if header and not language:
-            language = "en-US,en;q=0.5"
-        if language:
-            return {
-                "Accept-Language": "eng" if language == "default" else language,
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:147.0) Gecko/20100101 Firefox/147.0"
-            }
+    if header and not language:
+        language = "en-US,en;q=0.5"
+    if language:
+        return {"Accept-Language": "eng" if language == "default" else language, "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:147.0) Gecko/20100101 Firefox/147.0"}
+    return {}
 
 
 def quote(data):
@@ -38,6 +48,7 @@ def parse_qs(data):
 
 def urlparse(data):
     return parse.urlparse(str(data))
+
 
 class Version:
     def __init__(self, version_string="Unknown", part_string=""):
@@ -57,6 +68,7 @@ class Version:
 
     def __str__(self):
         return f"{self.full}.{self.part}" if self.part else self.full
+
 
 class Requests:
     def __init__(self, local, part, env_branch, git_branch, verify_ssl=True):
@@ -83,11 +95,15 @@ class Requests:
         return session
 
     def no_verify_ssl(self, session=None):
+        global_opt_out = session is None
         if session is None:
             session = self.session
         session.verify = False
-        if session.verify is False:
+        if global_opt_out:
+            # Only a config-level opt-out silences the warning process-wide;
+            # a scoped session keeps it so other connections still surface it.
             import urllib3
+
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     def download_image(self, title, image_url, download_directory, session=None, image_type="poster", filename=None):
@@ -118,8 +134,17 @@ class Requests:
             raise Failed(f"URL Error: {response.status_code} on {url}")
         return YAML(input_data=response.content, check_empty=check_empty)
 
-    def get_image(self, url, session=None):
-        response = self.get(url, header=True) if session is None else session.get(url, headers=get_header(None, True, None))
+    def get_image(self, url, session=None, validate_only=False):
+        active_session = session if session is not None else self.session
+        request_headers = get_header(None, True, None)
+        try:
+            if validate_only:
+                response = active_session.head(url, headers=request_headers, timeout=DEFAULT_TIMEOUT, allow_redirects=True)
+            else:
+                response = active_session.get(url, headers=request_headers, timeout=DEFAULT_TIMEOUT)
+        except RequestException as e:
+            # Network-level failure (reset, timeout, DNS, etc.) is treated the same as an unreachable image, not a crash
+            raise Failed(f"Image Error: Unable to reach Image URL: {url} ({e})")
         if response.status_code == 404:
             raise Failed(f"Image Error: Not Found on Image URL: {url}")
         if response.status_code >= 400:
@@ -129,27 +154,34 @@ class Requests:
         return response
 
     def get_stream(self, url, location, info="Item"):
-        with self.session.get(url, stream=True) as r:
+        with self.session.get(url, stream=True, timeout=DEFAULT_TIMEOUT) as r:
             r.raise_for_status()
-            total_length = r.headers.get('content-length')
+            total_length = r.headers.get("content-length")
             if total_length is not None:
                 total_length = int(total_length)
             dl = 0
+            last_log = 0.0
             with open(location, "wb") as f:
                 for chunk in r.iter_content(chunk_size=8192):
                     dl += len(chunk)
                     f.write(chunk)
-                    logger.ghost(f"Downloading {info}: {dl / total_length * 100:6.2f}%")
+                    now = time.monotonic()
+                    if now - last_log >= 0.25 or dl == total_length:
+                        last_log = now
+                        if total_length:
+                            logger.ghost(f"Downloading {info}: {dl / total_length * 100:6.2f}%")
+                        else:
+                            logger.ghost(f"Downloading {info}: {dl} bytes")
                 logger.exorcise()
 
     def get_cloudscrape_html(self, url, headers=None, params=None, language=None):
         cloud_headers = get_header(headers, True, language)
         cloud_headers.pop("User-Agent")
-        response = self.cloudscraper.get(url, params=params, headers=cloud_headers)
+        response = self.cloudscraper.get(url, params=params, headers=cloud_headers, timeout=DEFAULT_TIMEOUT)
         if response.status_code == 403:
             time.sleep(3)
             self.cloudscraper = cloudscraper.create_scraper()
-            response = self.cloudscraper.get(url, params=params, headers=cloud_headers)
+            response = self.cloudscraper.get(url, params=params, headers=cloud_headers, timeout=DEFAULT_TIMEOUT)
         return html.fromstring(response.content)
 
     def get_html(self, url, headers=None, params=None, header=None, language=None):
@@ -163,12 +195,12 @@ class Requests:
             logger.error(str(response.content))
             raise
 
-    @retry(stop=stop_after_attempt(6), wait=wait_fixed(10))
+    @retry(stop=stop_after_attempt(6), wait=wait_exponential(multiplier=1, min=1, max=10))
     def get(self, url, json=None, headers=None, params=None, header=None, language=None):
-        return self.session.get(url, json=json, headers=get_header(headers, header, language), params=params)
+        return self.session.get(url, json=json, headers=get_header(headers, header, language), params=params, timeout=DEFAULT_TIMEOUT)
 
     def get_image_encoded(self, url):
-        return base64.b64encode(self.get(url).content).decode('utf-8')
+        return base64.b64encode(self.get(url).content).decode("utf-8")
 
     def post_html(self, url, data=None, json=None, headers=None, header=None, language=None):
         return html.fromstring(self.post(url, data=data, json=json, headers=headers, header=header, language=language).content)
@@ -181,9 +213,9 @@ class Requests:
             logger.error(str(response.content))
             raise
 
-    @retry(stop=stop_after_attempt(6), wait=wait_fixed(10))
+    @retry(stop=stop_after_attempt(6), wait=wait_exponential(multiplier=1, min=1, max=10))
     def post(self, url, data=None, json=None, headers=None, header=None, language=None):
-        return self.session.post(url, data=data, json=json, headers=get_header(headers, header, language))
+        return self.session.post(url, data=data, json=json, headers=get_header(headers, header, language), timeout=DEFAULT_TIMEOUT)
 
     def has_new_version(self):
         return self.local and self.latest and self.local.main != self.latest.main or (self.local.build and self.local.build < self.latest.build)
@@ -262,20 +294,23 @@ class YAML:
             if input_data:
                 self.data = self.yaml.load(input_data)
             else:
+                if not self.path:
+                    raise Failed("YAML Error: Either path or input_data must be provided")
                 if start_empty or (create and not os.path.exists(self.path)):
-                    with open(self.path, 'w'):
+                    with open(self.path, "w"):
                         pass
                     self.data = {}
                 else:
                     with open(self.path, encoding="utf-8") as fp:
                         self.data = self.yaml.load(fp)
-        except ruamel.yaml.error.YAMLError as e:
-            if "found character '\\t' that cannot start any token" in e.problem:
+        except ruamel.yaml.YAMLError as e:
+            problem = getattr(e, "problem", None)
+            if problem and "found character '\\t' that cannot start any token" in problem:
                 location = f"{e.args[3].name}; line {e.args[3].line + 1} column {e.args[3].column + 1}"
                 e = f"Tabs are not allowed in YAML files; only spaces are allowed.\nfirst tab character found at:\n{location}"
             else:
                 e = str(e).replace("\n", "\n      ")
-            
+
             raise Failed(f"YAML Error: {e}")
         except Exception as e:
             raise Failed(f"YAML Error: {e}")
@@ -286,5 +321,5 @@ class YAML:
 
     def save(self):
         if self.path:
-            with open(self.path, 'w', encoding="utf-8") as fp:
+            with open(self.path, "w", encoding="utf-8") as fp:
                 self.yaml.dump(self.data, fp)

@@ -14,6 +14,8 @@ external_templates:
 templates:
   commonsense:
     mdblist_list: https://mdblist.com/lists/k0meta/cssfamilies<<library_type>>s
+  metacritic:
+    mdblist_list: https://mdblist.com/lists/k0meta/metacriticmustsee<<library_type>>s
 
 collections:
   Common Sense Selection:
@@ -24,6 +26,7 @@ collections:
       - name: commonsense
       - name: shared
         translation_key: commonsense_selection
+        url_logo: https://raw.githubusercontent.com/Kometa-Team/Default-Images/master/chart/logos/css.png
       - name: arr
       - name: custom
 
@@ -36,6 +39,7 @@ collections:
       - name: shared
         allowed_libraries: movie
         translation_key:  stevenlu_popular
+        url_logo: https://raw.githubusercontent.com/Kometa-Team/Default-Images/master/chart/logos/StevenLu.png
       - name: arr
       - name: custom
 
@@ -48,6 +52,7 @@ collections:
       - name: shared
         allowed_libraries: movie
         translation_key: pirated_popular
+        url_logo: https://raw.githubusercontent.com/Kometa-Team/Default-Images/master/chart/logos/Pirated.png
       - name: arr
       - name: custom
 
@@ -55,10 +60,10 @@ collections:
     variables:
       style: color
       key: metacritic
-    mdblist_list: https://mdblist.com/lists/k0meta/metacriticmustseemovies
     template:
+      - name: metacritic
       - name: shared
-        allowed_libraries: movie
         translation_key: metacritic_must_see
+        url_logo: https://raw.githubusercontent.com/Kometa-Team/Default-Images/master/chart/logos/Metacritic.png
       - name: arr
       - name: custom

@@ -32,7 +32,7 @@ The available setting attributes which can be set at each level are outlined bel
 
     <div id="asset-depth" />Specify how many folder levels to scan for an item within the asset directory.
 
-    At each asset level, Kometa will look for either `medianame.ext` [such as Star Wars.png] or a dedicated folder containing `poster.ext`.
+    At each asset level, Kometa will look for either `medianame.ext` [such as `Star Wars.png`] or a dedicated folder containing supported asset names such as `poster.ext`, `background.ext`, `logo.ext`, and `square.ext`.
 
     For example, if your asset directory is `/path/to/assets/`, and your `asset_depth` is 2, then Kometa will look for an asset match in any of these locations:
 
@@ -118,6 +118,8 @@ The available setting attributes which can be set at each level are outlined bel
     <div id="asset-folders" />While `true`, Kometa will search the `asset_directory` for a dedicated folder per item vs while false will look for an image.
 
     i.e. When `true` the example path would be `<asset_directory_path>/Star Wars/poster.png` instead of `<asset_directory_path>/Star Wars.png`.
+
+    See the [Image Asset Directory Guide](../kometa/guides/assets.md#asset-naming) for the full list of accepted poster, background, logo, and square art names, including Plex-compatible names such as `cover.ext`, `fanart.ext`, `clearlogo.ext`, and `backgroundSquare.ext`.
 
     <hr style="margin: 0px;">
 
@@ -333,6 +335,34 @@ The available setting attributes which can be set at each level are outlined bel
         settings:
         settings:
           delete_not_scheduled: true
+        ```
+
+
+??? blank "`auto_sort_hubs` - Used to sort Recommendation Hub rows on the Plex home screen.<a class="headerlink" href="#auto-sort-hubs" title="Permanent link">¶</a>"
+
+    <div id="auto-sort-hubs" />After all collections have been processed, sort the Recommendation Hub rows for this library on the Plex home screen and/or library Recommended tab. Only collections promoted to a hub (`visible_home` or `visible_shared`) are affected. Built-in Plex section hubs (Recently Added, Top Unwatched, Continue Watching, etc.) are not touched. Use `hub_priority` on individual collections to pin them to the front of the sorted list.
+
+    Hub sorting is skipped entirely on a targeted [`--run-collections`](../kometa/environmental.md#run-collections) or [`--run-files`](../kometa/environmental.md#run-files) run, since only the requested collections' `hub_priority` values are known that run; run without either flag to re-apply the full sort.
+
+    ???+ tip "Plex Pass Required"
+
+        Promoting collections to Recommendation Hubs requires an active [Plex Pass](https://www.plex.tv/plex-pass/) subscription.
+
+    <hr style="margin: 0px;">
+
+    **Attribute:** `auto_sort_hubs`
+
+    **Levels with this Attribute:** Global/Library
+
+    **Accepted Values:** `sort_title`, `sort_title.desc`, `alpha`, `alpha.desc`, `configured`, `configured.desc`, `random`
+
+    **Default Value:** `None`
+
+    ???+ example "Example"
+
+        ```yaml
+        settings:
+          auto_sort_hubs: sort_title
         ```
 
 

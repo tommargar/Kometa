@@ -29,6 +29,10 @@ tags:
   - tmdb_background
   - tvdb_background
   - file_background
+  - url_logo
+  - file_logo
+  - url_square_art
+  - file_square_art
 ---
 
 # Collection/Playlist Metadata Updates
@@ -81,8 +85,8 @@ All the following attributes update the poster of the collection/playlist from v
 **All of these details work with Playlists.**
 
 If no poster is specified the script will look in the library's [Image Asset Directories](../kometa/guides/assets.md) for a
-folder named either the collection/playlist name or the `name_mapping` if specified and look for a `poster.ext` file in 
-that folder (replacing .ext with the image extension).
+folder named either the collection/playlist name or the `name_mapping` if specified and look for a supported poster asset
+such as `poster.ext`, `cover.ext`, `default.ext`, `folder.ext`, or `movie.ext` in that folder.
 
 | Attribute          | Description & Values                                                                                                                                                            |
 |:-------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -122,7 +126,7 @@ All the following attributes update the background of the collection/playlist fr
 
 If no background is specified the script will look in the library's [Image Asset Directories](../kometa/guides/assets.md) 
 for a folder named either the collection/playlist name or the `name_mapping` if specified and look for a 
-`background.ext` file in that folder (replacing .ext with the image extension).
+supported background asset such as `background.ext`, `art.ext`, `backdrop.ext`, or `fanart.ext` in that folder.
 
 | Attribute         | Description & Values                                                                                                                                                                        |
 |:------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -142,5 +146,55 @@ Standard priority is as follows [lower numbers take precedence]:
 4. tvdb_background
 
 5. asset_directory
+
+You can use the `prioritize_assets` setting to push the asset_directory to the top of this priority list.
+
+## Logo Collection/Playlist Metadata Updates
+
+All the following attributes update the logo of the collection/playlist from various sources.
+
+**All of these details work with Playlists.**
+
+If no logo is specified the script will look in the library's [Image Asset Directories](../kometa/guides/assets.md)
+for a folder named either the collection/playlist name or the `name_mapping` if specified and look for a supported
+logo asset such as `logo.ext` or `clearlogo.ext` in that folder.
+
+| Attribute   | Description & Values                                                                                           |
+|:------------|:---------------------------------------------------------------------------------------------------------------|
+| `file_logo` | **Description:** Changes logo to the image in the file system<br>**Values:** Path to image in the file system |
+| `url_logo`  | **Description:** Changes logo to the URL<br>**Values:** URL of image publicly available on the internet       |
+
+Standard priority is as follows [lower numbers take precedence]:
+
+1. url_logo
+
+2. file_logo
+
+3. asset_directory
+
+You can use the `prioritize_assets` setting to push the asset_directory to the top of this priority list.
+
+## Square Art Collection/Playlist Metadata Updates
+
+All the following attributes update the square art (used by some Plex clients) of the collection/playlist from various sources.
+
+**All of these details work with Playlists.**
+
+If no square art is specified the script will look in the library's [Image Asset Directories](../kometa/guides/assets.md) for a
+folder named either the collection/playlist name or the `name_mapping` if specified and look for a supported square art asset
+such as `square.ext`, `square_art.ext`, `squareArt.ext`, or `backgroundSquare.ext` in that folder.
+
+| Attribute         | Description & Values                                                                                                   |
+|:------------------|:-----------------------------------------------------------------------------------------------------------------------|
+| `file_square_art` | **Description:** Changes square art to the image in the file system<br>**Values:** Path to image in the file system   |
+| `url_square_art`  | **Description:** Changes square art to the URL<br>**Values:** URL of image publicly available on the internet         |
+
+Standard priority is as follows [lower numbers take precedence]:
+
+1. url_square_art
+
+2. file_square_art
+
+3. asset_directory
 
 You can use the `prioritize_assets` setting to push the asset_directory to the top of this priority list.

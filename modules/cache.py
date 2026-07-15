@@ -1,6 +1,7 @@
 import json
 import os
 import random
+import re
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timedelta
@@ -9,13 +10,22 @@ from modules import util
 
 logger = util.logger
 
+SQL_IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def sql_identifier(name):
+    """Guard for table/column names interpolated into SQL, where ? placeholders can't be used."""
+    if not SQL_IDENTIFIER_RE.fullmatch(str(name)):
+        raise ValueError(f"Cache Error: invalid SQL identifier: {name!r}")
+    return str(name)
+
 
 class Cache:
     def __init__(self, config_path, expiration):
         self.cache_path = f"{os.path.splitext(config_path)[0]}.cache"
         self.expiration = expiration
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        self._connection = None
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("SELECT count(name) FROM sqlite_master WHERE type='table' AND name='guid_map'")
                 if cursor.fetchone()[0] == 0:
@@ -51,53 +61,40 @@ class Cache:
                     "tmdb_episode_data",
                 ]:
                     cursor.execute(f"DROP TABLE IF EXISTS {old_table}")
-                cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS guids_map (
+                cursor.execute("""CREATE TABLE IF NOT EXISTS guids_map (
                     key INTEGER PRIMARY KEY,
                     plex_guid TEXT UNIQUE,
                     t_id TEXT,
                     imdb_id TEXT,
                     media_type TEXT,
-                    expiration_date TEXT)"""
-                )
-                cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS imdb_to_tmdb_map (
+                    expiration_date TEXT)""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS imdb_to_tmdb_map (
                     key INTEGER PRIMARY KEY,
                     imdb_id TEXT UNIQUE,
                     tmdb_id TEXT,
                     media_type TEXT,
-                    expiration_date TEXT)"""
-                )
-                cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS imdb_to_tvdb_map2 (
+                    expiration_date TEXT)""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS imdb_to_tvdb_map2 (
                     key INTEGER PRIMARY KEY,
                     imdb_id TEXT UNIQUE,
                     tvdb_id TEXT,
-                    expiration_date TEXT)"""
-                )
-                cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS tmdb_to_tvdb_map2 (
+                    expiration_date TEXT)""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS tmdb_to_tvdb_map2 (
                     key INTEGER PRIMARY KEY,
                     tmdb_id TEXT UNIQUE,
                     tvdb_id TEXT,
-                    expiration_date TEXT)"""
-                )
-                cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS letterboxd_map (
+                    expiration_date TEXT)""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS letterboxd_map (
                     key INTEGER PRIMARY KEY,
                     letterboxd_id TEXT UNIQUE,
                     tmdb_id TEXT,
-                    expiration_date TEXT)"""
-                )
-                cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS mojo_map (
+                    expiration_date TEXT)""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS mojo_map (
                     key INTEGER PRIMARY KEY,
                     mojo_url TEXT UNIQUE,
                     imdb_id TEXT,
-                    expiration_date TEXT)"""
-                )
-                cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS omdb_data3 (
+                    expiration_date TEXT)""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS omdb_data3 (
                     key INTEGER PRIMARY KEY,
                     imdb_id TEXT UNIQUE,
                     title TEXT,
@@ -112,10 +109,8 @@ class Cache:
                     series_id TEXT,
                     season_num INTEGER,
                     episode_num INTEGER,
-                    expiration_date TEXT)"""
-                )
-                cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS mdb_data5 (
+                    expiration_date TEXT)""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS mdb_data5 (
                     key INTEGER PRIMARY KEY,
                     key_id TEXT UNIQUE,
                     title TEXT,
@@ -140,10 +135,8 @@ class Cache:
                     certification TEXT,
                     commonsense TEXT,
                     age_rating TEXT,
-                    expiration_date TEXT)"""
-                )
-                cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS anidb_data4 (
+                    expiration_date TEXT)""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS anidb_data4 (
                     key INTEGER PRIMARY KEY,
                     anidb_id INTEGER UNIQUE,
                     main_title TEXT,
@@ -158,10 +151,8 @@ class Cache:
                     imdb_id TEXT,
                     tmdb_id INTEGER,
                     tmdb_type TEXT,
-                    expiration_date TEXT)"""
-                )
-                cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS mal_data4 (
+                    expiration_date TEXT)""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS mal_data4 (
                     key INTEGER PRIMARY KEY,
                     mal_id INTEGER UNIQUE,
                     title TEXT,
@@ -179,10 +170,8 @@ class Cache:
                     expiration_date TEXT,
                     explicit_genres TEXT,
                     themes TEXT,
-                    demographics TEXT)"""
-                )
-                cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS tmdb_movie_data2 (
+                    demographics TEXT)""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS tmdb_movie_data2 (
                     key INTEGER PRIMARY KEY,
                     tmdb_id INTEGER,
                     language TEXT,
@@ -204,10 +193,8 @@ class Cache:
                     collection_id INTEGER,
                     collection_name TEXT,
                     expiration_date TEXT,
-                    UNIQUE(tmdb_id, language))"""
-                )
-                cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS tmdb_show_data4 (
+                    UNIQUE(tmdb_id, language))""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS tmdb_show_data4 (
                     key INTEGER PRIMARY KEY,
                     tmdb_id INTEGER,
                     language TEXT,
@@ -233,10 +220,8 @@ class Cache:
                     countries TEXT,
                     seasons TEXT,
                     expiration_date TEXT,
-                    UNIQUE(tmdb_id, language))"""
-                )
-                cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS tmdb_episode_data2 (
+                    UNIQUE(tmdb_id, language))""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS tmdb_episode_data2 (
                     key INTEGER PRIMARY KEY,
                     tmdb_id INTEGER,
                     season_number INTEGER,
@@ -251,10 +236,8 @@ class Cache:
                     imdb_id TEXT,
                     tvdb_id INTEGER,
                     expiration_date TEXT,
-                    UNIQUE(tmdb_id, season_number, episode_number, language))"""
-                )
-                cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS tvdb_data4 (
+                    UNIQUE(tmdb_id, season_number, episode_number, language))""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS tvdb_data5 (
                     key INTEGER PRIMARY KEY,
                     tvdb_id INTEGER UNIQUE,
                     type TEXT,
@@ -263,76 +246,58 @@ class Cache:
                     summary TEXT,
                     poster_url TEXT,
                     background_url TEXT,
+                    logo_url TEXT,
+                    icon_url TEXT,
                     release_date TEXT,
                     genres TEXT,
-                    expiration_date TEXT)"""
-                )
-                cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS tvdb_map (
+                    expiration_date TEXT)""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS tvdb_map (
                     key INTEGER PRIMARY KEY,
                     tvdb_url TEXT UNIQUE,
                     tvdb_id INTEGER,
-                    expiration_date TEXT)"""
-                )
-                cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS anime_map (
+                    expiration_date TEXT)""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS anime_map (
                     key INTEGER PRIMARY KEY,
                     anidb TEXT UNIQUE,
                     anilist TEXT,
                     myanimelist TEXT,
                     kitsu TEXT,
-                    expiration_date TEXT)"""
-                )
-                cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS image_maps (
+                    expiration_date TEXT)""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS image_maps (
                     key INTEGER PRIMARY KEY,
-                    library TEXT UNIQUE)"""
-                )
-                cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS radarr_adds (
+                    library TEXT UNIQUE)""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS radarr_adds (
                     key INTEGER PRIMARY KEY,
                     tmdb_id TEXT,
-                    library TEXT)"""
-                )
-                cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS sonarr_adds (
+                    library TEXT)""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS sonarr_adds (
                     key INTEGER PRIMARY KEY,
                     tvdb_id TEXT,
-                    library TEXT)"""
-                )
-                cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS list_cache (
+                    library TEXT)""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS list_cache (
                     key INTEGER PRIMARY KEY,
                     list_type TEXT,
                     list_data TEXT,
-                    expiration_date TEXT)"""
-                )
-                cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS list_ids (
+                    expiration_date TEXT)""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS list_ids (
                     key INTEGER PRIMARY KEY,
                     list_key TEXT,
                     media_id TEXT,
-                    media_type TEXT)"""
-                )
-                cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS letterboxd_incremental_state (
+                    media_type TEXT)""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS letterboxd_incremental_state (
                     key INTEGER PRIMARY KEY,
                     username TEXT,
                     page_type TEXT,
                     last_timestamp TEXT,
                     last_item_ids TEXT,
                     last_updated TEXT,
-                    UNIQUE(username, page_type))"""
-                )
-                cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS imdb_keywords (
+                    UNIQUE(username, page_type))""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS imdb_keywords (
                     key INTEGER PRIMARY KEY,
                     imdb_id TEXT,
                     keywords TEXT,
-                    expiration_date TEXT)"""
-                )
-                cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS imdb_parental (
+                    expiration_date TEXT)""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS imdb_parental (
                     key INTEGER PRIMARY KEY,
                     imdb_id TEXT,
                     nudity TEXT,
@@ -340,73 +305,116 @@ class Cache:
                     profanity TEXT,
                     alcohol TEXT,
                     frightening TEXT,
-                    expiration_date TEXT)"""
-                )
-                cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS ergast_race (
+                    expiration_date TEXT)""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS ergast_race (
                     key INTEGER PRIMARY KEY,
                     season INTEGER,
                     round INTEGER,
                     name TEXT,
                     date TEXT,
-                    expiration_date TEXT)"""
-                )
-                cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS overlay_special_text2 (
+                    expiration_date TEXT)""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS overlay_value_cache (
                     key INTEGER PRIMARY KEY,
                     rating_key TEXT,
                     type TEXT,
-                    text TEXT)"""
-                )
-                cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS testing (
+                    value TEXT,
+                    expiration_date TEXT,
+                    UNIQUE(rating_key, type))""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS testing (
                     key INTEGER PRIMARY KEY,
                     name TEXT,
                     value1 TEXT,
                     value2 TEXT,
-                    success TEXT)"""
-                )
-                cursor.execute(
-                    """CREATE TABLE IF NOT EXISTS plex_people_cache (
+                    success TEXT)""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS plex_people_cache (
                     key INTEGER PRIMARY KEY,
                     item_id TEXT,
                     people_type TEXT,
                     people_data TEXT,
                     expiration_date TEXT,
-                    UNIQUE(item_id, people_type))"""
-                )
+                    UNIQUE(item_id, people_type))""")
                 cursor.execute("PRAGMA table_info(plex_people_cache)")
                 plex_people_columns = [row[1] for row in cursor.fetchall()]
                 if "item_id" not in plex_people_columns:
                     cursor.execute("DROP TABLE IF EXISTS plex_people_cache")
-                    cursor.execute(
-                        """CREATE TABLE IF NOT EXISTS plex_people_cache (
+                    cursor.execute("""CREATE TABLE IF NOT EXISTS plex_people_cache (
                         key INTEGER PRIMARY KEY,
                         item_id TEXT,
                         people_type TEXT,
                         people_data TEXT,
                         expiration_date TEXT,
-                        UNIQUE(item_id, people_type))"""
-                    )
+                        UNIQUE(item_id, people_type))""")
                 cursor.execute("SELECT count(name) FROM sqlite_master WHERE type='table' AND name='image_map'")
                 if cursor.fetchone()[0] > 0:
                     cursor.execute("SELECT DISTINCT library FROM image_map")
                     for library in cursor.fetchall():
                         table_name = self.get_image_table_name(library["library"])
-                        cursor.execute(f"SELECT DISTINCT * FROM image_map WHERE library='{library['library']}'")
+                        cursor.execute("SELECT DISTINCT * FROM image_map WHERE library=?", (library["library"],))
                         for row in cursor.fetchall():
                             if row["type"] == "poster":
                                 final_table = table_name if row["type"] == "poster" else f"{table_name}_backgrounds"
                                 self.update_image_map(row["rating_key"], final_table, row["location"], row["compare"], overlay=row["overlay"])
                     cursor.execute("DROP TABLE IF EXISTS image_map")
+        self.migrate_overlay_value_cache()
+
+    @property
+    def connection(self):
+        # One shared connection for the life of the run; opening a fresh one per
+        # query costs a file open + schema parse and previously was never closed.
+        # `with self.connection:` still commits per block exactly as before.
+        if self._connection is None:
+            connection = sqlite3.connect(self.cache_path, check_same_thread=False)
+            connection.row_factory = sqlite3.Row
+            try:
+                connection.execute("PRAGMA journal_mode=WAL")
+            except sqlite3.Error:
+                pass
+            self._connection = connection
+        return self._connection
+
+    def close(self):
+        """Close database connection and clean up WAL/SHM files."""
+        if self._connection is not None:
+            try:
+                # Disable WAL mode to trigger cleanup of .wal and .shm files
+                self._connection.execute("PRAGMA journal_mode=DELETE")
+                self._connection.close()
+            except sqlite3.Error:
+                pass
+            finally:
+                self._connection = None
+
+    def migrate_overlay_value_cache(self):
+        # Upgrade legacy overlay_special_text2 to overlay_value_cache; its presence is the one-time upgrade signal (not created on fresh installs, dropped once migrated), and runs regardless of cache_expiration.
+        with self.connection as connection:
+            with closing(connection.cursor()) as cursor:
+                cursor.execute("SELECT count(name) FROM sqlite_master WHERE type='table' AND name='overlay_special_text2'")
+                if cursor.fetchone()[0] == 0:
+                    return
+                # 1. Migrate values, deduplicating on (rating_key, type) via the UNIQUE constraint.
+                expiration_date = (datetime.now() - timedelta(days=random.randint(1, self.expiration))).strftime("%Y-%m-%d")
+                cursor.execute("SELECT rating_key, type, text FROM overlay_special_text2")
+                for row in cursor.fetchall():
+                    cursor.execute("INSERT OR IGNORE INTO overlay_value_cache(rating_key, type) VALUES(?, ?)", (str(row["rating_key"]), row["type"]))
+                    cursor.execute("UPDATE overlay_value_cache SET value = ?, expiration_date = ? WHERE rating_key = ? AND type = ?", (row["text"], expiration_date, str(row["rating_key"]), row["type"]))
+                # 2. Drop the legacy table.
+                cursor.execute("DROP TABLE IF EXISTS overlay_special_text2")
+                # 3. Reset overlay application state for every library so all overlays reapply once.
+                cursor.execute("SELECT library, key FROM image_maps")
+                for lib in cursor.fetchall():
+                    for suffix in ["_overlays", "_square_arts"]:
+                        table = sql_identifier(f"image_map_{lib['key']}{suffix}")
+                        cursor.execute("SELECT count(name) FROM sqlite_master WHERE type='table' AND name=?", (table,))
+                        if cursor.fetchone()[0] > 0:
+                            cursor.execute(f"DELETE FROM {table}")  # nosec B608 - identifiers validated by sql_identifier()
+        logger.separator("Overlay Cache Upgraded\n" "The overlay cache format has been updated.\n" "All overlay states have been reset.\n" "This run will reapply all overlays and may take longer than usual.\n" "This will only happen once.")
 
     def query_guid_map(self, plex_guid):
         id_to_return = None
         imdb_id = None
         media_type = None
         expired = None
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("SELECT * FROM guids_map WHERE plex_guid = ?", (plex_guid,))
                 row = cursor.fetchone()
@@ -420,8 +428,7 @@ class Cache:
 
     def update_guid_map(self, plex_guid, t_id, imdb_id, expired, media_type):
         expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, self.expiration)))
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("INSERT OR IGNORE INTO guids_map(plex_guid) VALUES(?)", (plex_guid,))
                 if media_type is None:
@@ -468,16 +475,16 @@ class Cache:
         self._update_map("mojo_map", "mojo_url", mojo_url, "imdb_id", imdb_id, expired)
 
     def _query_map(self, map_name, _id, from_id, to_id, media_type=None, return_type=False):
+        map_name, from_id = sql_identifier(map_name), sql_identifier(from_id)
         id_to_return = None
         expired = None
         out_type = None
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 if media_type is None:
-                    cursor.execute(f"SELECT * FROM {map_name} WHERE {from_id} = ?", (_id,))
+                    cursor.execute(f"SELECT * FROM {map_name} WHERE {from_id} = ?", (_id,))  # nosec B608 - identifiers validated by sql_identifier()
                 else:
-                    cursor.execute(f"SELECT * FROM {map_name} WHERE {from_id} = ? AND media_type = ?", (_id, media_type))
+                    cursor.execute(f"SELECT * FROM {map_name} WHERE {from_id} = ? AND media_type = ?", (_id, media_type))  # nosec B608 - identifiers validated by sql_identifier()
                 row = cursor.fetchone()
                 if row and row[to_id]:
                     datetime_object = datetime.strptime(row["expiration_date"], "%Y-%m-%d")
@@ -497,23 +504,22 @@ class Cache:
             return id_to_return, expired
 
     def _update_map(self, map_name, val1_name, val1, val2_name, val2, expired, media_type=None):
+        map_name, val1_name, val2_name = sql_identifier(map_name), sql_identifier(val1_name), sql_identifier(val2_name)
         expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, self.expiration)))
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute(f"INSERT OR IGNORE INTO {map_name}({val1_name}) VALUES(?)", (val1,))
                 if media_type is None:
-                    sql = f"UPDATE {map_name} SET {val2_name} = ?, expiration_date = ? WHERE {val1_name} = ?"
+                    sql = f"UPDATE {map_name} SET {val2_name} = ?, expiration_date = ? WHERE {val1_name} = ?"  # nosec B608 - identifiers validated by sql_identifier()
                     cursor.execute(sql, (val2, expiration_date.strftime("%Y-%m-%d"), val1))
                 else:
-                    sql = f"UPDATE {map_name} SET {val2_name} = ?, expiration_date = ?, media_type = ? WHERE {val1_name} = ?"
+                    sql = f"UPDATE {map_name} SET {val2_name} = ?, expiration_date = ?, media_type = ? WHERE {val1_name} = ?"  # nosec B608 - identifiers validated by sql_identifier()
                     cursor.execute(sql, (val2, expiration_date.strftime("%Y-%m-%d"), media_type, val1))
 
     def query_omdb(self, imdb_id, expiration):
         omdb_dict = {}
         expired = None
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("SELECT * FROM omdb_data3 WHERE imdb_id = ?", (imdb_id,))
                 row = cursor.fetchone()
@@ -539,8 +545,7 @@ class Cache:
 
     def update_omdb(self, expired, omdb, expiration):
         expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, expiration)))
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("INSERT OR IGNORE INTO omdb_data3(imdb_id) VALUES(?)", (omdb.imdb_id,))
                 update_sql = (
@@ -571,8 +576,7 @@ class Cache:
     def query_mdb(self, key_id, expiration):
         mdb_dict = {}
         expired = None
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("SELECT * FROM mdb_data5 WHERE key_id = ?", (key_id,))
                 row = cursor.fetchone()
@@ -608,8 +612,7 @@ class Cache:
 
     def update_mdb(self, expired, key_id, mdb, expiration):
         expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, expiration)))
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("INSERT OR IGNORE INTO mdb_data5(key_id) VALUES(?)", (key_id,))
                 update_sql = (
@@ -651,8 +654,7 @@ class Cache:
     def query_anidb(self, anidb_id, expiration):
         anidb_dict = {}
         expired = None
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("SELECT * FROM anidb_data4 WHERE anidb_id = ?", (anidb_id,))
                 row = cursor.fetchone()
@@ -676,8 +678,7 @@ class Cache:
 
     def update_anidb(self, expired, anidb_id, anidb, expiration):
         expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, expiration)))
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("INSERT OR IGNORE INTO anidb_data4(anidb_id) VALUES(?)", (anidb_id,))
                 update_sql = "UPDATE anidb_data4 SET main_title = ?, titles = ?, studio = ?, rating = ?, average = ?, score = ?, " "released = ?, tags = ?, mal_id = ?, imdb_id = ?, tmdb_id = ?, tmdb_type = ?, expiration_date = ? WHERE anidb_id = ?"
@@ -704,8 +705,7 @@ class Cache:
     def query_mal(self, mal_id, expiration):
         mal_dict = {}
         expired = None
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("SELECT * FROM mal_data4 WHERE mal_id = ?", (mal_id,))
                 row = cursor.fetchone()
@@ -732,8 +732,7 @@ class Cache:
 
     def update_mal(self, expired, mal_id, mal, expiration):
         expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, expiration)))
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("INSERT OR IGNORE INTO mal_data4(mal_id) VALUES(?)", (mal_id,))
                 update_sql = (
@@ -766,8 +765,7 @@ class Cache:
     def query_tmdb_movie(self, tmdb_id, language, expiration):
         tmdb_dict = {}
         expired = None
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("SELECT * FROM tmdb_movie_data2 WHERE tmdb_id = ? AND language = ?", (tmdb_id, language))
                 row = cursor.fetchone()
@@ -796,8 +794,7 @@ class Cache:
 
     def update_tmdb_movie(self, expired, obj, language, expiration):
         expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, expiration)))
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("INSERT OR IGNORE INTO tmdb_movie_data2(tmdb_id, language) VALUES(?, ?)", (obj.tmdb_id, language))
                 update_sql = (
@@ -835,8 +832,7 @@ class Cache:
     def query_tmdb_show(self, tmdb_id, language, expiration):
         tmdb_dict = {}
         expired = None
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("SELECT * FROM tmdb_show_data4 WHERE tmdb_id = ? AND language = ?", (tmdb_id, language))
                 row = cursor.fetchone()
@@ -869,8 +865,7 @@ class Cache:
 
     def update_tmdb_show(self, expired, obj, language, expiration):
         expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, expiration)))
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("INSERT OR IGNORE INTO tmdb_show_data4(tmdb_id, language) VALUES(?, ?)", (obj.tmdb_id, language))
                 update_sql = (
@@ -912,8 +907,7 @@ class Cache:
     def query_tmdb_episode(self, tmdb_id, season_number, episode_number, language, expiration):
         tmdb_dict = {}
         expired = None
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("SELECT * FROM tmdb_episode_data2 WHERE tmdb_id = ? AND season_number = ? AND episode_number = ? AND language = ?", (tmdb_id, season_number, episode_number, language))
                 row = cursor.fetchone()
@@ -933,8 +927,7 @@ class Cache:
 
     def update_tmdb_episode(self, expired, obj, language, expiration):
         expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, expiration)))
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("INSERT OR IGNORE INTO tmdb_episode_data2(tmdb_id, season_number, episode_number, language) VALUES(?, ?, ?, ?)", (obj.tmdb_id, obj.season_number, obj.episode_number, language))
                 update_sql = (
@@ -964,10 +957,9 @@ class Cache:
     def query_tvdb(self, tvdb_id, is_movie, expiration):
         tvdb_dict = {}
         expired = None
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
-                cursor.execute("SELECT * FROM tvdb_data4 WHERE tvdb_id = ? and type = ?", (tvdb_id, "movie" if is_movie else "show"))
+                cursor.execute("SELECT * FROM tvdb_data5 WHERE tvdb_id = ? and type = ?", (tvdb_id, "movie" if is_movie else "show"))
                 row = cursor.fetchone()
                 if row:
                     tvdb_dict["tvdb_id"] = int(row["tvdb_id"]) if row["tvdb_id"] else 0
@@ -977,6 +969,8 @@ class Cache:
                     tvdb_dict["summary"] = row["summary"] if row["summary"] else ""
                     tvdb_dict["poster_url"] = row["poster_url"] if row["poster_url"] else ""
                     tvdb_dict["background_url"] = row["background_url"] if row["background_url"] else ""
+                    tvdb_dict["logo_url"] = row["logo_url"] if row["logo_url"] else ""
+                    tvdb_dict["icon_url"] = row["icon_url"] if row["icon_url"] else ""
                     tvdb_dict["release_date"] = datetime.strptime(row["release_date"], "%Y-%m-%d") if row["release_date"] else None
                     tvdb_dict["genres"] = row["genres"] if row["genres"] else ""
                     datetime_object = datetime.strptime(row["expiration_date"], "%Y-%m-%d")
@@ -986,19 +980,19 @@ class Cache:
 
     def update_tvdb(self, expired, obj, expiration):
         expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, expiration)))
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
-                cursor.execute("INSERT OR IGNORE INTO tvdb_data4(tvdb_id, type) VALUES(?, ?)", (obj.tvdb_id, "movie" if obj.is_movie else "show"))
-                update_sql = "UPDATE tvdb_data4 SET title = ?, status = ?, summary = ?, poster_url = ?, background_url = ?, " "release_date = ?, genres = ?, expiration_date = ? WHERE tvdb_id = ? AND type = ?"
+                cursor.execute("INSERT OR IGNORE INTO tvdb_data5(tvdb_id, type) VALUES(?, ?)", (obj.tvdb_id, "movie" if obj.is_movie else "show"))
+                update_sql = "UPDATE tvdb_data5 SET title = ?, status = ?, summary = ?, poster_url = ?, background_url = ?, logo_url = ?, icon_url = ?, " "release_date = ?, genres = ?, expiration_date = ? WHERE tvdb_id = ? AND type = ?"
                 tvdb_date = f"{str(obj.release_date.year).zfill(4)}-{str(obj.release_date.month).zfill(2)}-{str(obj.release_date.day).zfill(2)}" if obj.release_date else None
-                cursor.execute(update_sql, (obj.title, obj.status, obj.summary, obj.poster_url, obj.background_url, tvdb_date, "|".join(obj.genres), expiration_date.strftime("%Y-%m-%d"), obj.tvdb_id, "movie" if obj.is_movie else "show"))
+                cursor.execute(
+                    update_sql, (obj.title, obj.status, obj.summary, obj.poster_url, obj.background_url, obj.logo_url, obj.icon_url, tvdb_date, "|".join(obj.genres), expiration_date.strftime("%Y-%m-%d"), obj.tvdb_id, "movie" if obj.is_movie else "show")
+                )
 
     def query_tvdb_map(self, tvdb_url, expiration):
         tvdb_id = None
         expired = None
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("SELECT * FROM tvdb_map WHERE tvdb_url = ?", (tvdb_url,))
                 row = cursor.fetchone()
@@ -1011,19 +1005,18 @@ class Cache:
 
     def update_tvdb_map(self, expired, tvdb_url, tvdb_id, expiration):
         expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, expiration)))
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("INSERT OR IGNORE INTO tvdb_map(tvdb_url) VALUES(?)", (tvdb_url,))
                 cursor.execute("UPDATE tvdb_map SET tvdb_id = ?, expiration_date = ? WHERE tvdb_url = ?", (tvdb_id, expiration_date.strftime("%Y-%m-%d"), tvdb_url))
 
     def query_anime_map(self, anime_id, id_type):
+        id_type = sql_identifier(id_type)
         ids = None
         expired = None
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
-                cursor.execute(f"SELECT * FROM anime_map WHERE {id_type} = ?", (anime_id,))
+                cursor.execute(f"SELECT * FROM anime_map WHERE {id_type} = ?", (anime_id,))  # nosec B608 - identifiers validated by sql_identifier()
                 row = cursor.fetchone()
                 if row and row["anidb"]:
                     datetime_object = datetime.strptime(row["expiration_date"], "%Y-%m-%d")
@@ -1039,87 +1032,154 @@ class Cache:
 
     def update_anime_map(self, expired, anime_ids):
         expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, self.expiration)))
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("INSERT OR IGNORE INTO anime_map(anidb) VALUES(?)", (anime_ids["anidb"],))
                 cursor.execute(
-                    "UPDATE anime_map SET anilist = ?, myanimelist = ?, kitsu = ?, expiration_date = ? WHERE anidb = ?", (anime_ids["anidb"], anime_ids["myanimelist"], anime_ids["kitsu"], expiration_date.strftime("%Y-%m-%d"), anime_ids["anidb"])
+                    "UPDATE anime_map SET anilist = ?, myanimelist = ?, kitsu = ?, expiration_date = ? WHERE anidb = ?", (anime_ids["anilist"], anime_ids["myanimelist"], anime_ids["kitsu"], expiration_date.strftime("%Y-%m-%d"), anime_ids["anidb"])
                 )
 
     def get_image_table_name(self, library):
         table_name = None
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("SELECT * FROM image_maps WHERE library = ?", (library,))
                 row = cursor.fetchone()
                 if row and row["key"]:
-                    table_name = f"image_map_{row['key']}"
-                    cursor.execute(
-                        f"""CREATE TABLE IF NOT EXISTS {table_name}_overlays (
-                        key INTEGER PRIMARY KEY,
-                        rating_key TEXT UNIQUE,
-                        overlay TEXT,
-                        compare TEXT,
-                        location TEXT)"""
-                    )
+                    table_name = sql_identifier(f"image_map_{row['key']}")
                 else:
                     cursor.execute("INSERT OR IGNORE INTO image_maps(library) VALUES(?)", (library,))
                     cursor.execute("SELECT * FROM image_maps WHERE library = ?", (library,))
                     row = cursor.fetchone()
                     if row and row["key"]:
-                        table_name = f"image_map_{row['key']}"
-                        cursor.execute(
-                            f"""CREATE TABLE IF NOT EXISTS {table_name} (
+                        table_name = sql_identifier(f"image_map_{row['key']}")
+                        cursor.execute(f"""CREATE TABLE IF NOT EXISTS {table_name} (
                             key INTEGER PRIMARY KEY,
                             rating_key TEXT UNIQUE,
                             overlay TEXT,
                             compare TEXT,
-                            location TEXT)"""
-                        )
-                        cursor.execute(
-                            f"""CREATE TABLE IF NOT EXISTS {table_name}_backgrounds (
-                            key INTEGER PRIMARY KEY,
-                            rating_key TEXT UNIQUE,
-                            overlay TEXT,
-                            compare TEXT,
-                            location TEXT)"""
-                        )
-                        cursor.execute(
-                            f"""CREATE TABLE IF NOT EXISTS {table_name}_logos (
-                            key INTEGER PRIMARY KEY,
-                            rating_key TEXT UNIQUE,
-                            overlay TEXT,
-                            compare TEXT,
-                            location TEXT)"""
-                        )
-                        cursor.execute(
-                            f"""CREATE TABLE IF NOT EXISTS {table_name}_overlays (
-                            key INTEGER PRIMARY KEY,
-                            rating_key TEXT UNIQUE,
-                            overlay TEXT,
-                            compare TEXT,
-                            location TEXT)"""
-                        )
+                            location TEXT)""")
+                if table_name:
+                    # Created unconditionally so caches predating these tables self-heal on next run
+                    cursor.execute(f"""CREATE TABLE IF NOT EXISTS {table_name}_backgrounds (
+                        key INTEGER PRIMARY KEY,
+                        rating_key TEXT UNIQUE,
+                        overlay TEXT,
+                        compare TEXT,
+                        location TEXT)""")
+                    cursor.execute(f"""CREATE TABLE IF NOT EXISTS {table_name}_logos (
+                        key INTEGER PRIMARY KEY,
+                        rating_key TEXT UNIQUE,
+                        overlay TEXT,
+                        compare TEXT,
+                        location TEXT)""")
+                    cursor.execute("SELECT count(name) FROM sqlite_master WHERE type='table' AND name=?", (f"{table_name}_overlays",))
+                    if cursor.fetchone()[0] > 0:
+                        cursor.execute(f"PRAGMA table_info({table_name}_overlays)")
+                        if "overlay" in [col[1] for col in cursor.fetchall()]:
+                            cursor.execute(f"DROP TABLE {table_name}_overlays")
+                    cursor.execute(f"""CREATE TABLE IF NOT EXISTS {table_name}_overlays (
+                        key INTEGER PRIMARY KEY,
+                        rating_key TEXT UNIQUE,
+                        compare TEXT,
+                        location TEXT)""")
+                    cursor.execute(f"""CREATE TABLE IF NOT EXISTS {table_name}_square_arts (
+                        key INTEGER PRIMARY KEY,
+                        rating_key TEXT UNIQUE,
+                        overlay TEXT,
+                        compare TEXT,
+                        location TEXT)""")
+                    cursor.execute(f"""CREATE TABLE IF NOT EXISTS {table_name}_overlay_state (
+                        key INTEGER PRIMARY KEY,
+                        rating_key TEXT,
+                        overlay_key TEXT,
+                        definition_hash TEXT,
+                        resolved_value TEXT,
+                        UNIQUE(rating_key, overlay_key))""")
+                    cursor.execute(f"""CREATE TABLE IF NOT EXISTS {table_name}_overlay_images (
+                        key INTEGER PRIMARY KEY,
+                        overlay_key TEXT UNIQUE,
+                        compare TEXT)""")
         return table_name
 
     def query_image_map(self, rating_key, table_name):
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        table_name = sql_identifier(table_name)
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
-                cursor.execute(f"SELECT * FROM {table_name} WHERE rating_key = ?", (rating_key,))
+                cursor.execute(f"SELECT * FROM {table_name} WHERE rating_key = ?", (rating_key,))  # nosec B608 - identifiers validated by sql_identifier()
                 row = cursor.fetchone()
                 if row:
                     return row["location"], row["compare"], row["overlay"]
         return None, None, None
 
     def update_image_map(self, rating_key, table_name, location, compare, overlay=""):
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        table_name = sql_identifier(table_name)
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute(f"INSERT OR IGNORE INTO {table_name}(rating_key) VALUES(?)", (rating_key,))
-                cursor.execute(f"UPDATE {table_name} SET location = ?, compare = ?, overlay = ? WHERE rating_key = ?", (location, compare, overlay, rating_key))
+                cursor.execute(f"UPDATE {table_name} SET location = ?, compare = ?, overlay = ? WHERE rating_key = ?", (location, compare, overlay, rating_key))  # nosec B608 - identifiers validated by sql_identifier()
+
+    def query_overlay_poster(self, rating_key, table_name):
+        table_name = sql_identifier(table_name)
+        with self.connection as connection:
+            with closing(connection.cursor()) as cursor:
+                cursor.execute(f"SELECT * FROM {table_name} WHERE rating_key = ?", (rating_key,))  # nosec B608 - identifiers validated by sql_identifier()
+                row = cursor.fetchone()
+                if row:
+                    return row["location"], row["compare"]
+        return None, None
+
+    def update_overlay_poster(self, rating_key, table_name, location, compare):
+        table_name = sql_identifier(table_name)
+        with self.connection as connection:
+            with closing(connection.cursor()) as cursor:
+                cursor.execute(f"INSERT OR IGNORE INTO {table_name}(rating_key) VALUES(?)", (rating_key,))
+                cursor.execute(f"UPDATE {table_name} SET location = ?, compare = ? WHERE rating_key = ?", (location, compare, rating_key))  # nosec B608 - identifiers validated by sql_identifier()
+
+    def query_overlay_state(self, rating_key, table_name):
+        table_name = sql_identifier(table_name)
+        states = {}
+        with self.connection as connection:
+            with closing(connection.cursor()) as cursor:
+                cursor.execute(f"SELECT * FROM {table_name} WHERE rating_key = ?", (str(rating_key),))  # nosec B608 - identifiers validated by sql_identifier()
+                for row in cursor.fetchall():
+                    if row:
+                        states[row["overlay_key"]] = (row["definition_hash"], row["resolved_value"])
+        return states
+
+    def update_overlay_state(self, rating_key, overlay_key, table_name, definition_hash, resolved_value=None):
+        table_name = sql_identifier(table_name)
+        with self.connection as connection:
+            with closing(connection.cursor()) as cursor:
+                cursor.execute(f"INSERT OR IGNORE INTO {table_name}(rating_key, overlay_key) VALUES(?, ?)", (str(rating_key), overlay_key))
+                cursor.execute(
+                    f"UPDATE {table_name} SET definition_hash = ?, resolved_value = ? WHERE rating_key = ? AND overlay_key = ?",  # nosec B608 - identifiers validated by sql_identifier()
+                    (definition_hash, resolved_value, str(rating_key), overlay_key),
+                )
+
+    def delete_overlay_state(self, rating_key, table_name):
+        table_name = sql_identifier(table_name)
+        with self.connection as connection:
+            with closing(connection.cursor()) as cursor:
+                cursor.execute(f"DELETE FROM {table_name} WHERE rating_key = ?", (str(rating_key),))  # nosec B608 - identifiers validated by sql_identifier()
+
+    def query_overlay_image(self, overlay_key, table_name):
+        table_name = sql_identifier(table_name)
+        compare = None
+        with self.connection as connection:
+            with closing(connection.cursor()) as cursor:
+                cursor.execute(f"SELECT * FROM {table_name} WHERE overlay_key = ?", (overlay_key,))  # nosec B608 - identifiers validated by sql_identifier()
+                row = cursor.fetchone()
+                if row:
+                    compare = row["compare"]
+        return compare
+
+    def update_overlay_image(self, overlay_key, table_name, compare):
+        table_name = sql_identifier(table_name)
+        with self.connection as connection:
+            with closing(connection.cursor()) as cursor:
+                cursor.execute(f"INSERT OR IGNORE INTO {table_name}(overlay_key) VALUES(?)", (overlay_key,))
+                cursor.execute(f"UPDATE {table_name} SET compare = ? WHERE overlay_key = ?", (compare, overlay_key))  # nosec B608 - identifiers validated by sql_identifier()
 
     def query_radarr_adds(self, tmdb_id, library):
         return self.query_arr_adds(tmdb_id, library, "radarr", "tmdb_id")
@@ -1128,10 +1188,10 @@ class Cache:
         return self.query_arr_adds(tvdb_id, library, "sonarr", "tvdb_id")
 
     def query_arr_adds(self, t_id, library, arr, id_type):
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        arr, id_type = sql_identifier(arr), sql_identifier(id_type)
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
-                cursor.execute(f"SELECT * FROM {arr}_adds WHERE {id_type} = ? AND library = ?", (t_id, library))
+                cursor.execute(f"SELECT * FROM {arr}_adds WHERE {id_type} = ? AND library = ?", (t_id, library))  # nosec B608 - identifiers validated by sql_identifier()
                 row = cursor.fetchone()
                 if row and row[id_type]:
                     return int(row[id_type])
@@ -1144,16 +1204,15 @@ class Cache:
         return self.update_arr_adds(tvdb_id, library, "sonarr", "tvdb_id")
 
     def update_arr_adds(self, t_id, library, arr, id_type):
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        arr, id_type = sql_identifier(arr), sql_identifier(id_type)
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute(f"INSERT OR IGNORE INTO {arr}_adds({id_type}, library) VALUES(?, ?)", (t_id, library))
 
     def update_list_cache(self, list_type, list_data, expired, expiration):
         list_key = None
         expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=expiration))
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("INSERT OR IGNORE INTO list_cache(list_type, list_data) VALUES(?, ?)", (list_type, list_data))
                 cursor.execute("UPDATE list_cache SET expiration_date = ? WHERE list_type = ? AND list_data = ?", (expiration_date.strftime("%Y-%m-%d"), list_type, list_data))
@@ -1166,8 +1225,7 @@ class Cache:
     def query_list_cache(self, list_type, list_data, expiration):
         list_key = None
         expired = None
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("SELECT * FROM list_cache WHERE list_type = ? AND list_data = ?", (list_type, list_data))
                 row = cursor.fetchone()
@@ -1182,15 +1240,13 @@ class Cache:
         final_ids = []
         for media_id, media_type in media_ids:
             final_ids.append((list_key, media_id, media_type))
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.executemany("INSERT OR IGNORE INTO list_ids(list_key, media_id, media_type) VALUES(?, ?, ?)", final_ids)
 
     def query_list_ids(self, list_key):
         ids = []
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("SELECT * FROM list_ids WHERE list_key = ?", (list_key,))
                 for row in cursor:
@@ -1198,16 +1254,14 @@ class Cache:
         return ids
 
     def delete_list_ids(self, list_key):
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("DELETE FROM list_ids WHERE list_key = ?", (list_key,))
 
     def query_imdb_keywords(self, imdb_id, expiration):
         imdb_dict = {}
         expired = None
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("SELECT * FROM imdb_keywords WHERE imdb_id = ?", (imdb_id,))
                 row = cursor.fetchone()
@@ -1221,8 +1275,7 @@ class Cache:
 
     def update_imdb_keywords(self, expired, imdb_id, keywords, expiration):
         expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, expiration)))
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("INSERT OR IGNORE INTO imdb_keywords(imdb_id) VALUES(?)", (imdb_id,))
                 update_sql = "UPDATE imdb_keywords SET keywords = ?, expiration_date = ? WHERE imdb_id = ?"
@@ -1231,8 +1284,7 @@ class Cache:
     def query_imdb_parental(self, imdb_id, expiration):
         imdb_dict = {}
         expired = None
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("SELECT * FROM imdb_parental WHERE imdb_id = ?", (imdb_id,))
                 row = cursor.fetchone()
@@ -1249,8 +1301,7 @@ class Cache:
 
     def update_imdb_parental(self, expired, imdb_id, parental, expiration):
         expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, expiration)))
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("INSERT OR IGNORE INTO imdb_parental(imdb_id) VALUES(?)", (imdb_id,))
                 update_sql = "UPDATE imdb_parental SET nudity = ?, violence = ?, profanity = ?, alcohol = ?, " "frightening = ?, expiration_date = ? WHERE imdb_id = ?"
@@ -1259,8 +1310,7 @@ class Cache:
     def query_ergast(self, year, expiration):
         ergast_list = []
         expired = None
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("SELECT * FROM ergast_race WHERE season = ?", (year,))
                 for row in cursor.fetchall():
@@ -1274,8 +1324,7 @@ class Cache:
 
     def update_ergast(self, expired, season, races, expiration):
         expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, expiration)))
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("DELETE FROM ergast_race WHERE season = ?", (season,))
                 cursor.executemany("INSERT OR IGNORE INTO ergast_race(season, round) VALUES(?, ?)", [(r.season, r.round) for r in races])
@@ -1285,8 +1334,7 @@ class Cache:
 
     def query_overlay_special_text(self, rating_key):
         attrs = {}
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("SELECT * FROM overlay_special_text2 WHERE rating_key = ?", (str(rating_key),))
                 for row in cursor.fetchall():
@@ -1295,18 +1343,48 @@ class Cache:
         return attrs
 
     def update_overlay_special_text(self, rating_key, data_type, text):
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("INSERT OR IGNORE INTO overlay_special_text2(rating_key, type) VALUES(?, ?)", (str(rating_key), data_type))
                 cursor.execute("UPDATE overlay_special_text2 SET text = ? WHERE rating_key = ? AND type = ?", (text, str(rating_key), data_type))
+
+    def query_overlay_value_cache(self, rating_key, data_type):
+        value = None
+        expired = None
+        with self.connection as connection:
+            with closing(connection.cursor()) as cursor:
+                cursor.execute("SELECT * FROM overlay_value_cache WHERE rating_key = ? AND type = ?", (str(rating_key), data_type))
+                row = cursor.fetchone()
+                if row:
+                    value = row["value"]
+                    if row["expiration_date"]:
+                        datetime_object = datetime.strptime(row["expiration_date"], "%Y-%m-%d")
+                        time_between_insertion = datetime.now() - datetime_object
+                        expired = time_between_insertion.days > self.expiration
+        return value, expired
+
+    def query_overlay_value_cache_all(self, rating_key):
+        values = {}
+        with self.connection as connection:
+            with closing(connection.cursor()) as cursor:
+                cursor.execute("SELECT * FROM overlay_value_cache WHERE rating_key = ?", (str(rating_key),))
+                for row in cursor.fetchall():
+                    if row:
+                        values[row["type"]] = row["value"]
+        return values
+
+    def update_overlay_value_cache(self, expired, rating_key, data_type, value):
+        expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, self.expiration)))
+        with self.connection as connection:
+            with closing(connection.cursor()) as cursor:
+                cursor.execute("INSERT OR IGNORE INTO overlay_value_cache(rating_key, type) VALUES(?, ?)", (str(rating_key), data_type))
+                cursor.execute("UPDATE overlay_value_cache SET value = ?, expiration_date = ? WHERE rating_key = ? AND type = ?", (value, expiration_date.strftime("%Y-%m-%d"), str(rating_key), data_type))
 
     def query_testing(self, name):
         value1 = None
         value2 = None
         success = None
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("SELECT * FROM testing WHERE name = ?", (name,))
                 row = cursor.fetchone()
@@ -1317,8 +1395,7 @@ class Cache:
         return value1, value2, success
 
     def update_testing(self, name, value1, value2, success):
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("INSERT OR IGNORE INTO testing(name) VALUES(?)", (name,))
                 sql = "UPDATE testing SET value1 = ?, value2 = ?, success = ? WHERE name = ?"
@@ -1327,8 +1404,7 @@ class Cache:
     def query_letterboxd_incremental_state(self, username, page_type):
         last_timestamp = None
         last_item_ids = []
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("SELECT * FROM letterboxd_incremental_state WHERE username = ? AND page_type = ?", (username, page_type))
                 row = cursor.fetchone()
@@ -1345,8 +1421,7 @@ class Cache:
 
         last_updated = datetime.now().isoformat()
         item_ids_json = json.dumps(last_item_ids) if last_item_ids else None
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("INSERT OR IGNORE INTO letterboxd_incremental_state(username, page_type) VALUES(?, ?)", (username, page_type))
                 cursor.execute("UPDATE letterboxd_incremental_state SET last_timestamp = ?, last_item_ids = ?, last_updated = ? WHERE username = ? AND page_type = ?", (last_timestamp, item_ids_json, last_updated, username, page_type))
@@ -1354,8 +1429,7 @@ class Cache:
     def query_plex_people(self, item_id, people_type):
         people_list = None
         expired = None
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("SELECT * FROM plex_people_cache WHERE item_id = ? AND people_type = ?", (item_id, people_type))
                 row = cursor.fetchone()
@@ -1367,8 +1441,7 @@ class Cache:
 
     def update_plex_people(self, item_id, people_type, people_list, expired):
         expiration_date = datetime.now() if expired is True else (datetime.now() - timedelta(days=random.randint(1, self.expiration)))
-        with sqlite3.connect(self.cache_path) as connection:
-            connection.row_factory = sqlite3.Row
+        with self.connection as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("INSERT OR IGNORE INTO plex_people_cache(item_id, people_type) VALUES(?, ?)", (item_id, people_type))
                 cursor.execute("UPDATE plex_people_cache SET people_data = ?, expiration_date = ? WHERE item_id = ? AND people_type = ?", (json.dumps(people_list), expiration_date.strftime("%Y-%m-%d"), item_id, people_type))

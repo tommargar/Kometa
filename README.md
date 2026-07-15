@@ -63,16 +63,16 @@ It is also easy to move your customizations between servers if you need to.
 
 To get started with Kometa, follow these simple steps:
 
-1.  Install Kometa on your device. You can find the installation instructions for a variety of platforms [here](https://kometa.wiki/en/latest/kometa/install/overview/).
+1. Install Kometa on your device. You can find the installation instructions for a variety of platforms on the[Kometa Wiki](https://kometa.wiki/en/latest/kometa/install/overview/).
 
-2.  Once you have installed Kometa, create your [Configuration File](https://kometa.wiki/en/latest/config/overview/). 
+2. Once you have installed Kometa, create your [Configuration File](https://kometa.wiki/en/latest/config/overview/). 
      file contains important information such as URLs and credentials needed to connect to services like Plex and TMDb.
 
-3.  After creating the Configuration File, you can start updating Metadata and building automatic Collections by creating a 
+3. After creating the Configuration File, you can start updating Metadata and building automatic Collections by creating a 
     [Collection File](https://kometa.wiki/en/latest/files/collections/) for each Library you want to work with. 
     If you'd rather use some of our pre-made Collection Files, take a look at the [Kometa Defaults](https://kometa.wiki/en/latest/defaults/guide/).
 
-4.  Finally, check out the [Wiki](https://kometa.wiki), you'll find new and exciting ways to truly unlock the potential of your libraries.
+4. Finally, check out the [Wiki](https://kometa.wiki), you'll find new and exciting ways to truly unlock the potential of your libraries.
 
 ## Step-by-Step Guides
 
@@ -81,19 +81,18 @@ started. These guides will take you through the process of installing Kometa, cr
 
 For those who need full installation walkthroughs, please refer to the following walkthrough guides:
 
-  * [Local Walkthrough](https://kometa.wiki/en/latest/kometa/install/walkthroughs/local/) - follow this if you are running the script directly on Windows, OS X, or Linux.
-  * [Docker Walkthrough](https://kometa.wiki/en/latest/kometa/install/walkthroughs/docker/) - this discusses using Docker at the command line.
+* [Local Walkthrough](https://kometa.wiki/en/latest/kometa/install/walkthroughs/local/) - follow this if you are running the script directly on Windows, OS X, or Linux.
+* [Docker Walkthrough](https://kometa.wiki/en/latest/kometa/install/walkthroughs/docker/) - this discusses using Docker at the command line.
 
 If you are using unRAID, Kubernetes, QNAP, or Synology refer to the following basic guide to Docker container setup for each system:
 
 **This doesn't cover the Kometa setup specifics found in the guides above with regard to creating the config file and collection file, so you may want to go through the 
 [Docker Walkthrough](https://kometa.wiki/en/latest/kometa/install/walkthroughs/docker/) first on your computer to gain that understanding.**
 
-  * [unRAID Walkthrough](https://kometa.wiki/en/latest/kometa/install/walkthroughs/unraid/)
-  * [Kubernetes Walkthrough](https://kometa.wiki/en/latest/kometa/install/walkthroughs/kubernetes/)
-  * [QNAP Walkthrough](https://kometa.wiki/en/latest/kometa/install/walkthroughs/qnap/)
-  * [Synology Walkthrough](https://kometa.wiki/en/latest/kometa/install/walkthroughs/synology/)
-
+* [unRAID Walkthrough](https://kometa.wiki/en/latest/kometa/install/walkthroughs/unraid/)
+* [Kubernetes Walkthrough](https://kometa.wiki/en/latest/kometa/install/walkthroughs/kubernetes/)
+* [QNAP Walkthrough](https://kometa.wiki/en/latest/kometa/install/walkthroughs/qnap/)
+* [Synology Walkthrough](https://kometa.wiki/en/latest/kometa/install/walkthroughs/synology/)
 
 ## Example Usage
 
@@ -102,13 +101,13 @@ With powerful search and filtering options, you can build Collections based on p
 
 Imagine having Collections like these at your fingertips:
 
-  * Trending and Popular (based on TMDb, IMDb, Trakt, etc.)
-  * Streaming Services (like Netflix, Disney+, and more)
-  * Networks
-  * Studios
-  * Genres
-  * Actors
-  * Decades
+* Trending and Popular (based on TMDb, IMDb, Trakt, etc.)
+* Streaming Services (like Netflix, Disney+, and more)
+* Networks
+* Studios
+* Genres
+* Actors
+* Decades
 
 Kometa gives you endless possibilities to curate and organize your media library any way you want. Create custom 
 Collections and Overlays that fit your unique preferences and make discovering your content effortless.
@@ -141,7 +140,8 @@ Switching to `develop`:
 
 <!--develop-docker-start-->
 Add ":develop" to the image name in your run command or configuration:
-```
+
+```text
 kometateam/kometa:develop
 ```
 <!--develop-docker-end-->
@@ -153,10 +153,13 @@ kometateam/kometa:develop
 
 <!--develop-host-start-->
 In the directory where you cloned Kometa:
+
 ```bash
 git checkout develop
 ```
+
 To switch back:
+
 ```bash
 git checkout master
 ```
@@ -182,13 +185,13 @@ there is no guarantee that it even works, and any new features will not be docum
 Switching to `nightly`:
 <!--nightly-end-->
 
-
 <details>
   <summary>Running in Docker (click to expand)</summary>
 
 <!--nightly-docker-start-->
 Add ":nightly" to the image name in your run command or configuration:
-```
+
+```text
 kometateam/kometa:nightly
 ```
 <!--nightly-docker-end-->
@@ -200,10 +203,13 @@ kometateam/kometa:nightly
 
 <!--nightly-host-start-->
 In the directory where you cloned Kometa:
+
 ```bash
 git checkout nightly
 ```
+
 To switch back:
+
 ```bash
 git checkout master
 ```
@@ -243,8 +249,10 @@ and seeking support there. If that isn't possible for you, here's what you can d
 
 For support on any of the above, visit the [Discord server](https://kometa.wiki/en/latest/discord/).
 <!--outro-end-->
+
 ## Contributing
-* Pull Requests are greatly encouraged, please submit all Pull Requests to the nightly branch.
+
+Pull Requests are greatly encouraged. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR — it covers branching, versioning, code style, and the changelog process.
 
 <!--sponsor-start-->
 ## GitHub Sponsors
@@ -254,19 +262,19 @@ Maintenance of this project is made possible by all the <a href="https://github.
 <h2 align="center">Gold Sponsors</h2>
 
 <p align="center">
-<!--gold-sponsors--><a href="https://github.com/merci45k"><img src="https://github.com/merci45k.png" width="120px" alt="User avatar: merci45k" /></a>&nbsp;&nbsp;<a href="https://github.com/strcrzy"><img src="https://github.com/strcrzy.png" width="120px" alt="User avatar: strcrzy" /></a>&nbsp;&nbsp;<a href="https://github.com/ndkid1986"><img src="https://github.com/ndkid1986.png" width="120px" alt="User avatar: ndkid1986" /></a>&nbsp;&nbsp;<a href="https://github.com/genomez"><img src="https://github.com/genomez.png" width="120px" alt="User avatar: genomez" /></a>&nbsp;&nbsp;<a href="https://github.com/Injuku"><img src="https://github.com/Injuku.png" width="120px" alt="User avatar: Injuku" /></a>&nbsp;&nbsp;<a href="https://github.com/Anarchy27"><img src="https://github.com/Anarchy27.png" width="120px" alt="User avatar: Anarchy27" /></a>&nbsp;&nbsp;<a href="https://github.com/axsuul"><img src="https://github.com/axsuul.png" width="120px" alt="User avatar: axsuul" /></a>&nbsp;&nbsp;<a href="https://github.com/RayBishopTN"><img src="https://github.com/RayBishopTN.png" width="120px" alt="User avatar: RayBishopTN" /></a>
+<!--gold-sponsors--><a href="https://github.com/merci45k"><img src="https://github.com/merci45k.png" width="120px" alt="User avatar: merci45k" /></a>&nbsp;&nbsp;<a href="https://github.com/strcrzy"><img src="https://github.com/strcrzy.png" width="120px" alt="User avatar: strcrzy" /></a>&nbsp;&nbsp;<a href="https://github.com/Joed1986"><img src="https://github.com/Joed1986.png" width="120px" alt="User avatar: Joed1986" /></a>&nbsp;&nbsp;<a href="https://github.com/genomez"><img src="https://github.com/genomez.png" width="120px" alt="User avatar: genomez" /></a>&nbsp;&nbsp;<a href="https://github.com/Injuku"><img src="https://github.com/Injuku.png" width="120px" alt="User avatar: Injuku" /></a>&nbsp;&nbsp;<a href="https://github.com/Anarchy27"><img src="https://github.com/Anarchy27.png" width="120px" alt="User avatar: Anarchy27" /></a>&nbsp;&nbsp;<a href="https://github.com/axsuul"><img src="https://github.com/axsuul.png" width="120px" alt="User avatar: axsuul" /></a>&nbsp;&nbsp;<a href="https://github.com/RayBishopTN"><img src="https://github.com/RayBishopTN.png" width="120px" alt="User avatar: RayBishopTN" /></a>
 </p>
 
 <h2 align="center">Silver Sponsors</h2>
 
 <p align="center">
-<!--silver-sponsors--><a href="https://github.com/chazlarson"><img src="https://github.com/chazlarson.png" width="80px" alt="User avatar: chazlarson" /></a>&nbsp;&nbsp;<a href="https://github.com/Ramshackles"><img src="https://github.com/Ramshackles.png" width="80px" alt="User avatar: Ramshackles" /></a>&nbsp;&nbsp;<a href="https://github.com/Ackthbpt"><img src="https://github.com/Ackthbpt.png" width="80px" alt="User avatar: Ackthbpt" /></a>&nbsp;&nbsp;<a href="https://github.com/Quick104"><img src="https://github.com/Quick104.png" width="80px" alt="User avatar: Quick104" /></a>&nbsp;&nbsp;<a href="https://github.com/aschillingchi"><img src="https://github.com/aschillingchi.png" width="80px" alt="User avatar: aschillingchi" /></a>&nbsp;&nbsp;<a href="https://github.com/TheWatcherOfPlex"><img src="https://github.com/TheWatcherOfPlex.png" width="80px" alt="User avatar: TheWatcherOfPlex" /></a>&nbsp;&nbsp;<a href="https://github.com/tecnobrat"><img src="https://github.com/tecnobrat.png" width="80px" alt="User avatar: tecnobrat" /></a>&nbsp;&nbsp;<a href="https://github.com/darthShadow"><img src="https://github.com/darthShadow.png" width="80px" alt="User avatar: darthShadow" /></a>&nbsp;&nbsp;<a href="https://github.com/jarodaustin"><img src="https://github.com/jarodaustin.png" width="80px" alt="User avatar: jarodaustin" /></a>&nbsp;&nbsp;<a href="https://github.com/wellingssimon"><img src="https://github.com/wellingssimon.png" width="80px" alt="User avatar: wellingssimon" /></a>&nbsp;&nbsp;<a href="https://github.com/Eagle1337"><img src="https://github.com/Eagle1337.png" width="80px" alt="User avatar: Eagle1337" /></a>&nbsp;&nbsp;<a href="https://github.com/kevbentz"><img src="https://github.com/kevbentz.png" width="80px" alt="User avatar: kevbentz" /></a>&nbsp;&nbsp;<a href="https://github.com/sw4rl3y79"><img src="https://github.com/sw4rl3y79.png" width="80px" alt="User avatar: sw4rl3y79" /></a>&nbsp;&nbsp;<a href="https://github.com/mrbuckwheet"><img src="https://github.com/mrbuckwheet.png" width="80px" alt="User avatar: mrbuckwheet" /></a>&nbsp;&nbsp;<a href="https://github.com/htlcalbbs"><img src="https://github.com/htlcalbbs.png" width="80px" alt="User avatar: htlcalbbs" /></a>&nbsp;&nbsp;<a href="https://github.com/industrial64"><img src="https://github.com/industrial64.png" width="80px" alt="User avatar: industrial64" /></a>&nbsp;&nbsp;<a href="https://github.com/nichols89ben"><img src="https://github.com/nichols89ben.png" width="80px" alt="User avatar: nichols89ben" /></a>
+<!--silver-sponsors--><a href="https://github.com/Ackthbpt"><img src="https://github.com/Ackthbpt.png" width="80px" alt="User avatar: Ackthbpt" /></a>&nbsp;&nbsp;<a href="https://github.com/chazlarson"><img src="https://github.com/chazlarson.png" width="80px" alt="User avatar: chazlarson" /></a>&nbsp;&nbsp;<a href="https://github.com/Ramshackles"><img src="https://github.com/Ramshackles.png" width="80px" alt="User avatar: Ramshackles" /></a>&nbsp;&nbsp;<a href="https://github.com/aschillingchi"><img src="https://github.com/aschillingchi.png" width="80px" alt="User avatar: aschillingchi" /></a>&nbsp;&nbsp;<a href="https://github.com/tecnobrat"><img src="https://github.com/tecnobrat.png" width="80px" alt="User avatar: tecnobrat" /></a>&nbsp;&nbsp;<a href="https://github.com/Quick104"><img src="https://github.com/Quick104.png" width="80px" alt="User avatar: Quick104" /></a>&nbsp;&nbsp;<a href="https://github.com/TheWatcherOfPlex"><img src="https://github.com/TheWatcherOfPlex.png" width="80px" alt="User avatar: TheWatcherOfPlex" /></a>&nbsp;&nbsp;<a href="https://github.com/jarodaustin"><img src="https://github.com/jarodaustin.png" width="80px" alt="User avatar: jarodaustin" /></a>&nbsp;&nbsp;<a href="https://github.com/wellingssimon"><img src="https://github.com/wellingssimon.png" width="80px" alt="User avatar: wellingssimon" /></a>&nbsp;&nbsp;<a href="https://github.com/kevbentz"><img src="https://github.com/kevbentz.png" width="80px" alt="User avatar: kevbentz" /></a>&nbsp;&nbsp;<a href="https://github.com/Eagle1337"><img src="https://github.com/Eagle1337.png" width="80px" alt="User avatar: Eagle1337" /></a>&nbsp;&nbsp;<a href="https://github.com/darthShadow"><img src="https://github.com/darthShadow.png" width="80px" alt="User avatar: darthShadow" /></a>&nbsp;&nbsp;<a href="https://github.com/mrbuckwheet"><img src="https://github.com/mrbuckwheet.png" width="80px" alt="User avatar: mrbuckwheet" /></a>&nbsp;&nbsp;<a href="https://github.com/sw4rl3y79"><img src="https://github.com/sw4rl3y79.png" width="80px" alt="User avatar: sw4rl3y79" /></a>&nbsp;&nbsp;<a href="https://github.com/htlcalbbs"><img src="https://github.com/htlcalbbs.png" width="80px" alt="User avatar: htlcalbbs" /></a>&nbsp;&nbsp;<a href="https://github.com/industrial64"><img src="https://github.com/industrial64.png" width="80px" alt="User avatar: industrial64" /></a>&nbsp;&nbsp;<a href="https://github.com/nichols89ben"><img src="https://github.com/nichols89ben.png" width="80px" alt="User avatar: nichols89ben" /></a>
 </p>
 
 <h2 align="center">Bronze Sponsors</h2>
 
 <p align="center">
-<!--bronze-sponsors--><a href="https://github.com/TheSpoon98"><img src="https://github.com/TheSpoon98.png" width="50px" alt="User avatar: TheSpoon98" /></a>&nbsp;&nbsp;<a href="https://github.com/Kha-kis"><img src="https://github.com/Kha-kis.png" width="50px" alt="User avatar: Kha-kis" /></a>&nbsp;&nbsp;<a href="https://github.com/RobertDoc"><img src="https://github.com/RobertDoc.png" width="50px" alt="User avatar: RobertDoc" /></a>&nbsp;&nbsp;<a href="https://github.com/VulgarBoatman"><img src="https://github.com/VulgarBoatman.png" width="50px" alt="User avatar: VulgarBoatman" /></a>&nbsp;&nbsp;<a href="https://github.com/DaddyDarkan"><img src="https://github.com/DaddyDarkan.png" width="50px" alt="User avatar: DaddyDarkan" /></a>&nbsp;&nbsp;<a href="https://github.com/paterson37"><img src="https://github.com/paterson37.png" width="50px" alt="User avatar: paterson37" /></a>&nbsp;&nbsp;<a href="https://github.com/Arial-Z"><img src="https://github.com/Arial-Z.png" width="50px" alt="User avatar: Arial-Z" /></a>&nbsp;&nbsp;<a href="https://github.com/erwintwr2"><img src="https://github.com/erwintwr2.png" width="50px" alt="User avatar: erwintwr2" /></a>&nbsp;&nbsp;<a href="https://github.com/kokuragari"><img src="https://github.com/kokuragari.png" width="50px" alt="User avatar: kokuragari" /></a>&nbsp;&nbsp;<a href="https://github.com/msorelle"><img src="https://github.com/msorelle.png" width="50px" alt="User avatar: msorelle" /></a>&nbsp;&nbsp;<a href="https://github.com/owine"><img src="https://github.com/owine.png" width="50px" alt="User avatar: owine" /></a>&nbsp;&nbsp;<a href="https://github.com/TR3JACK"><img src="https://github.com/TR3JACK.png" width="50px" alt="User avatar: TR3JACK" /></a>&nbsp;&nbsp;<a href="https://github.com/LunarVigilante"><img src="https://github.com/LunarVigilante.png" width="50px" alt="User avatar: LunarVigilante" /></a>&nbsp;&nbsp;<a href="https://github.com/qazero"><img src="https://github.com/qazero.png" width="50px" alt="User avatar: qazero" /></a>&nbsp;&nbsp;<a href="https://github.com/Drazzilb08"><img src="https://github.com/Drazzilb08.png" width="50px" alt="User avatar: Drazzilb08" /></a>&nbsp;&nbsp;<a href="https://github.com/bullmoose20"><img src="https://github.com/bullmoose20.png" width="50px" alt="User avatar: bullmoose20" /></a>&nbsp;&nbsp;<a href="https://github.com/TownyMontana"><img src="https://github.com/TownyMontana.png" width="50px" alt="User avatar: TownyMontana" /></a>&nbsp;&nbsp;<a href="https://github.com/Alaksin"><img src="https://github.com/Alaksin.png" width="50px" alt="User avatar: Alaksin" /></a>&nbsp;&nbsp;<a href="https://github.com/michaelkahn"><img src="https://github.com/michaelkahn.png" width="50px" alt="User avatar: michaelkahn" /></a>&nbsp;&nbsp;<a href="https://github.com/AwesomeAustn"><img src="https://github.com/AwesomeAustn.png" width="50px" alt="User avatar: AwesomeAustn" /></a>&nbsp;&nbsp;<a href="https://github.com/wcbutler"><img src="https://github.com/wcbutler.png" width="50px" alt="User avatar: wcbutler" /></a>&nbsp;&nbsp;<a href="https://github.com/andrewmcd7"><img src="https://github.com/andrewmcd7.png" width="50px" alt="User avatar: andrewmcd7" /></a>&nbsp;&nbsp;<a href="https://github.com/rg9400"><img src="https://github.com/rg9400.png" width="50px" alt="User avatar: rg9400" /></a>&nbsp;&nbsp;<a href="https://github.com/Steezy33"><img src="https://github.com/Steezy33.png" width="50px" alt="User avatar: Steezy33" /></a>&nbsp;&nbsp;<a href="https://github.com/CountofNotreDame"><img src="https://github.com/CountofNotreDame.png" width="50px" alt="User avatar: CountofNotreDame" /></a>&nbsp;&nbsp;<a href="https://github.com/alexandercraen"><img src="https://github.com/alexandercraen.png" width="50px" alt="User avatar: alexandercraen" /></a>&nbsp;&nbsp;<a href="https://github.com/Iyagovos"><img src="https://github.com/Iyagovos.png" width="50px" alt="User avatar: Iyagovos" /></a>&nbsp;&nbsp;<a href="https://github.com/theimmortal68"><img src="https://github.com/theimmortal68.png" width="50px" alt="User avatar: theimmortal68" /></a>
+<!--bronze-sponsors--><a href="https://github.com/TheSpoon98"><img src="https://github.com/TheSpoon98.png" width="50px" alt="User avatar: TheSpoon98" /></a>&nbsp;&nbsp;<a href="https://github.com/Kha-kis"><img src="https://github.com/Kha-kis.png" width="50px" alt="User avatar: Kha-kis" /></a>&nbsp;&nbsp;<a href="https://github.com/VulgarBoatman"><img src="https://github.com/VulgarBoatman.png" width="50px" alt="User avatar: VulgarBoatman" /></a>&nbsp;&nbsp;<a href="https://github.com/DaddyDarkan"><img src="https://github.com/DaddyDarkan.png" width="50px" alt="User avatar: DaddyDarkan" /></a>&nbsp;&nbsp;<a href="https://github.com/RobertDoc"><img src="https://github.com/RobertDoc.png" width="50px" alt="User avatar: RobertDoc" /></a>&nbsp;&nbsp;<a href="https://github.com/paterson37"><img src="https://github.com/paterson37.png" width="50px" alt="User avatar: paterson37" /></a>&nbsp;&nbsp;<a href="https://github.com/erwintwr2"><img src="https://github.com/erwintwr2.png" width="50px" alt="User avatar: erwintwr2" /></a>&nbsp;&nbsp;<a href="https://github.com/Arial-Z"><img src="https://github.com/Arial-Z.png" width="50px" alt="User avatar: Arial-Z" /></a>&nbsp;&nbsp;<a href="https://github.com/msorelle"><img src="https://github.com/msorelle.png" width="50px" alt="User avatar: msorelle" /></a>&nbsp;&nbsp;<a href="https://github.com/kokuragari"><img src="https://github.com/kokuragari.png" width="50px" alt="User avatar: kokuragari" /></a>&nbsp;&nbsp;<a href="https://github.com/owine"><img src="https://github.com/owine.png" width="50px" alt="User avatar: owine" /></a>&nbsp;&nbsp;<a href="https://github.com/jaredhocutt"><img src="https://github.com/jaredhocutt.png" width="50px" alt="User avatar: jaredhocutt" /></a>&nbsp;&nbsp;<a href="https://github.com/TR3JACK"><img src="https://github.com/TR3JACK.png" width="50px" alt="User avatar: TR3JACK" /></a>&nbsp;&nbsp;<a href="https://github.com/LunarVigilante"><img src="https://github.com/LunarVigilante.png" width="50px" alt="User avatar: LunarVigilante" /></a>&nbsp;&nbsp;<a href="https://github.com/Drazzilb08"><img src="https://github.com/Drazzilb08.png" width="50px" alt="User avatar: Drazzilb08" /></a>&nbsp;&nbsp;<a href="https://github.com/alexandercraen"><img src="https://github.com/alexandercraen.png" width="50px" alt="User avatar: alexandercraen" /></a>&nbsp;&nbsp;<a href="https://github.com/qazero"><img src="https://github.com/qazero.png" width="50px" alt="User avatar: qazero" /></a>&nbsp;&nbsp;<a href="https://github.com/Iyagovos"><img src="https://github.com/Iyagovos.png" width="50px" alt="User avatar: Iyagovos" /></a>&nbsp;&nbsp;<a href="https://github.com/TownyMontana"><img src="https://github.com/TownyMontana.png" width="50px" alt="User avatar: TownyMontana" /></a>&nbsp;&nbsp;<a href="https://github.com/Alaksin"><img src="https://github.com/Alaksin.png" width="50px" alt="User avatar: Alaksin" /></a>&nbsp;&nbsp;<a href="https://github.com/michaelkahn"><img src="https://github.com/michaelkahn.png" width="50px" alt="User avatar: michaelkahn" /></a>&nbsp;&nbsp;<a href="https://github.com/AwesomeAustn"><img src="https://github.com/AwesomeAustn.png" width="50px" alt="User avatar: AwesomeAustn" /></a>&nbsp;&nbsp;<a href="https://github.com/wcbutler"><img src="https://github.com/wcbutler.png" width="50px" alt="User avatar: wcbutler" /></a>&nbsp;&nbsp;<a href="https://github.com/andrewmcd7"><img src="https://github.com/andrewmcd7.png" width="50px" alt="User avatar: andrewmcd7" /></a>&nbsp;&nbsp;<a href="https://github.com/rg9400"><img src="https://github.com/rg9400.png" width="50px" alt="User avatar: rg9400" /></a>&nbsp;&nbsp;<a href="https://github.com/bullmoose20"><img src="https://github.com/bullmoose20.png" width="50px" alt="User avatar: bullmoose20" /></a>&nbsp;&nbsp;<a href="https://github.com/smh51"><img src="https://github.com/smh51.png" width="50px" alt="User avatar: smh51" /></a>&nbsp;&nbsp;<a href="https://github.com/CountofNotreDame"><img src="https://github.com/CountofNotreDame.png" width="50px" alt="User avatar: CountofNotreDame" /></a>&nbsp;&nbsp;<a href="https://github.com/Steezy33"><img src="https://github.com/Steezy33.png" width="50px" alt="User avatar: Steezy33" /></a>&nbsp;&nbsp;<a href="https://github.com/theimmortal68"><img src="https://github.com/theimmortal68.png" width="50px" alt="User avatar: theimmortal68" /></a>
 </p>
 
 Thank you so much for everyone's past and continued support!

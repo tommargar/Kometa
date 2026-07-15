@@ -31,6 +31,9 @@ jobs:
       - name: Set up Docker Buildx
         id: buildx
         uses: docker/setup-buildx-action@v4
+        with:
+          driver-opts: |
+            image=moby/buildkit:v0.20.0
 
       - name: Get the version
         id: get_version
@@ -38,16 +41,13 @@ jobs:
 
       - name: Build and Push
         id: docker_build
-        uses: docker/build-push-action@v7
-        with:
-          context: ./
-          file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
-          push: true
-          tags: ${{ vars.DOCKER_TEAM }}/${{ vars.DOCKER_REPO }}:${{ steps.get_version.outputs.VERSION }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
+        run: |
+          docker buildx build \
+            --file ./Dockerfile \
+            --platform linux/amd64,linux/arm64,linux/arm/v7 \
+            --tag ${{ vars.DOCKER_TEAM }}/${{ vars.DOCKER_REPO }}:${{ steps.get_version.outputs.VERSION }} \
+            --push \
+            .
       - name: Discord Success Notification
         uses: Kometa-Team/discord-notifications@master
         if: success()
@@ -88,10 +88,17 @@ jobs:
           git tag ${{ steps.get_version.outputs.VERSION }}
           git push origin ${{ steps.get_version.outputs.VERSION }}
 
+      - name: Get Changelog Entry
+        id: changelog_reader
+        uses: mindsers/changelog-reader-action@v2
+        with:
+          version: ${{ steps.get_version.outputs.VERSION }}
+          path: ./CHANGELOG.md
+
       - name: Create release
         id: create_release
         uses: softprops/action-gh-release@v3
         with:
-          body_path: CHANGELOG
+          body: ${{ steps.changelog_reader.outputs.changes }}
           token: ${{ secrets.PAT }}
           tag_name: ${{ steps.get_version.outputs.VERSION }}

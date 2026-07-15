@@ -1,0 +1,267 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+
+- Add `value_filter` overlay-file attribute to filter items at selection time based on a runtime-fetched numeric value; supports comparators `gte`, `gt`, `lt`, `lte` on any `rating_sources` variable using the normalised 0–10 scale.
+- Add `overlay_value_cache` table (replaces `overlay_special_text2`) with a `UNIQUE(rating_key, type)` constraint and an `expiration_date` column; values refresh automatically after `cache_expiration` days.
+- Add `_overlay_state` and `_overlay_images` per-library tables replacing the dual-use `overlay TEXT` column in `_overlays`; one row per overlay per item, written only on successful resolution.
+- Add one-time migration that moves rows from `overlay_special_text2` into `overlay_value_cache` (deduped), resets overlay application state for a full reprocess, and logs a visible "Overlay Cache Upgraded" separator.
+- Rework `defaults/overlays/ratings.yml` to fetch ratings directly during the overlay run; Mass Rating Update operations are no longer required for fetched sources. Adds auto image-pick, Fresh/Rotten filtering via `value_filter`, a `Direct` image level for tomatoes/tomatoesaudience, and new image assets under `defaults/overlays/images/rating/`.
+- Accept HTTP(S) URLs anywhere a `text_file` builder used to require a local file path. Kometa first tries to parse the response as JSON (matching today's behaviour) and falls back to a plain-text line-by-line parse on parse failure. Gzip-compressed responses are auto-decompressed. Mixed local/URL lists in a single `text_file` builder are supported.
+- Add `logo` and `square`/`square_art` asset detection and setting via `url_` and `file_` methods for Collection builders, as well as Defaults via `url_*_<<key>>` template variables.
+- Add Plex-compatible local asset names for posters, backgrounds, logos, and square art, including `.tbn` files and numbered variants such as `poster-2.png`; exact filenames such as `poster.jpg` take priority over numbered variants.
+- Add `trakt` as a source for posters, backgrounds, and logos. Square art remains unsupported.
+- Add `tvdb` as a source for posters, backgrounds, logos and square art.
+- Add `mass_metadata_update`, a grouped Library Operation for genre, content rating, title, studio, date, rating, artwork, mapper, and backup updates. Existing mass metadata operations move under their matching sub-attributes..
+- Add YamTrack connector support with `yamtrack_list` and `yamtrack_list_details` builders.
+- Add `yamtrack_tracked` builder to collect YamTrack profile movie, TV, and anime items by tracked status.
+- Add Plex show edition support wherever movie editions are supported, including edition filters, metadata matching/editing, overlays, dynamic collections, and `item_edition`.
+
+### Fixed
+- `modules/request.py`/`modules/plex.py`: fix `get_image()` and `delete_user_playlist()` crashing a collection or playlist sync outright on a transient network failure (connection reset, timeout, plex.tv DNS resolution). Both now catch the underlying `requests` exception and raise `Failed`, matching how every other network-facing call in these modules already degrades.
+- `modules/tvdb.py`: add a distinct `Unavailable` exception for TVDb requests that exhaust their retry budget without ever returning usable content (e.g. repeated HTTP 202/empty-body "still generating" responses), separate from `NotFound`'s definitive 4xx. Previously both were re-raised with the identical "No Series/Movie found" message, so a confirmed-dead TVDb ID and a transient TVDb hiccup were indistinguishable in the log. All `get_tvdb_obj()` call sites (`modules/builder.py`, `modules/operations.py`) now log `NotFound` at debug (unchanged), `Unavailable` at warning (previously logged at error via the generic `Failed` handler), and any other `Failed` at error (unchanged).
+- Fix custom `rating<n>_file` (and `git`/`repo`/`url`) overlay images being silently replaced by a built-in `default`/`pmm` asset.
+- Prevent Kometa from creating duplicate collections when Plex search misses an existing same-named collection by falling back to the full collection inventory before creating.
+- Refine the run summary output: group repeated overlay, Letterboxd/TMDb, Plex resolution-regex, and Trakt TVDb-miss messages; normalize logo warning summaries; print overlay and convert summaries in the same `Count | Message` format as warning/error summaries; add a visual divider before the summary intro text; rename the overlay section to `Overlay Summary`; and keep the run-status table hidden when there is no status data to show.
+- Fix overlay cache poisoning where application state was written for unresolved overlays (e.g. no IMDb rating), causing the item to be permanently skipped even after a rating became available.
+- Fix duplicate rows accumulating in `overlay_special_text2` on every run due to a missing `UNIQUE(rating_key, type)` constraint.
+- Ignore episode logo and square-art files during asset-directory discovery because Plex episodes only support poster and background artwork.
+- `modules/textfile.py`: fix `tmdb:` entries in playlist/mixed mode (where `is_movie=None`) being silently dropped. The old `is_movie is not False` check treated `None` as `True`, tagging TV show TMDb IDs as `"tmdb"` type which only checks `movie_map`. Now returns both `(id, "tmdb")` and `(id, "tmdb_show")` so the builder resolves against both movie and show maps. Also updates `mdblist` and `simkl` three-state contract comments and docs.
+- `modules/poster.py`: fix 18 Optional-member-access errors flagged by pyright. The `ImageData.__init__` triple-nested-ternary is unwound into an explicit `if`/`elif`/`else` (also skips a redundant `os.stat()` call when `compare=` is provided explicitly). `apply_vars` and `adjust_text_width` early-return on `self.text is None` (matches the callers' existing `if component.text:` guard). `get_generated_layer` raises `Failed` with a descriptive message instead of crashing with `'NoneType' object is not subscriptable` when `Image.load()` or text-dimension computation returns unexpectedly. Baseline drops 1223 → 1205.
+- `modules/letterboxd.py`: fix 9 Optional-call/iterable errors flagged by pyright by removing dead defensive code. `letterboxdpy` is a pinned hard dependency in `requirements.txt`, so the speculative `try/except ImportError` (and the runtime `_require_library()` guard it required) was never reachable in any supported install. Imports are now unconditional, matching every other integration module (`plex.py`, `tmdb.py`, etc.). The two `util.get_list(...)` for-loops in `validate_letterboxd_lists` / `validate_letterboxd_user_pages` now pass `return_none=False` and fall back to `[]`, so they never try to iterate `None`. Net diff: -19 lines, no behavioural change for any real install. Baseline drops 1205 → 1196 (and `modules/letterboxd.py` falls out of the per-file table entirely).
+- `modules/anidb.py`: switch `from lxml import etree` to `import lxml.etree as etree` so pyright can resolve the symbol. `lxml.etree` is a C extension (no Python wrapper module), and the `from X import Y` form trips pyright's `reportAttributeAccessIssue` while the equivalent `import X.Y as Y` form does not. Identical runtime behaviour. Baseline drops 1196 → 1195.
+- `modules/convert.py`: fix 7 Optional-cluster errors flagged by pyright and harden two real latent bugs in the process. Extracted the thrice-repeated `re.search("-(.*)", check_id).group(1)` pattern into a `_hama_suffix()` static helper that raises `MappingConvertError("Malformed Hama ID ...")` if the regex doesn't match, instead of letting an `AttributeError` escape from `.group(1)` on `None`. Restructured the `int(self.tmdb_to_tvdb(tmdb_id, fail=True))` call to extract the result first and check for `None` (the surrounding `except Failed: pass` only catches the documented failure mode; `int(None)` would have been an `AttributeError` slipping past it). The two `util.get_list(...)` for-loops now pass `return_none=False` and fall back to `[]` so they never try to iterate `None` (matches the fix already used in `modules/letterboxd.py`). Added 2 new tests covering the helper's happy path + malformed-input behaviour. Baseline drops 1140 → 1067.
+- `modules/imdb.py`: fix 7 pyright errors spanning four patterns and harden two latent bugs. (1) `validate_imdb` iterates `util.get_list(...)` with the now-familiar `return_none=False or []` belt-and-suspenders. (2) `main_data = imdb_dict[X].strip()` becomes `str(imdb_dict[X]).strip()` so a non-string YAML value (e.g. a bare numeric id) doesn't crash with `AttributeError`. (3) In `_graphql_json.check_constraint`, the `if range_data:` block reads `range_name[i]` — but `range_name` defaults to `None`, and pyright noticed the invariant 'range_data only populates when range_name is not None' isn't visible across loop iterations. Made the invariant explicit: `if range_data and range_name is not None:`. (4) `re.search(r"(\d+) of (\d+).*", relevant).group(...)` in `_imdb_keywords` now guards on `if result is not None`, falling back to `(0, 0)` (matches the `else` branch already used for inputs without `"of"`). Also added `@overload` signatures to `IMDb._interface(interface)` so `"ratings"`/`"basics"` return `dict` and `"episode"` returns `list[list[str]]`, fixing the `self.ratings[imdb_id]` type-mismatch at the cached-property layer. Baseline drops 1188 → 1181 (and `modules/imdb.py` falls out of the per-file table entirely).
+- Bundle: fix 9 pyright errors across four small files — all the same `util.get_list(...)` iterable + `.strip()`-on-possibly-non-str pattern that's been fixed in `letterboxd.py`, `convert.py`, `imdb.py`, `anilist.py`. Touched files: `modules/mdblist.py` (2 errors — `validate_mdblist_lists`), `modules/icheckmovies.py` (3 errors — `validate_icheckmovies_lists`), `modules/textfile.py` (3 errors — `validate_file` + `get_ids`; the `or []` belt-and-suspenders was the missing piece since `return_none=False` alone isn't visible to pyright through the untyped helper), `modules/config.py` (1 of 2 errors — `notify`; the other 'Code too complex to analyze' error needs a refactor). All three small files fall out of the per-file error table. Baseline drops 1181 → 1172.
+- `modules/validator.py`: switch `except ryaml.error.YAMLError` to `except ryaml.YAMLError` at both call sites (lines 144 and 291). Same C-extension import-form trap as `modules/anidb.py` and `modules/request.py`: pyright resolves the top-level `ruamel.yaml.YAMLError` alias but not the `.error.YAMLError` chain. Identical runtime behaviour — `ruamel.yaml` re-exports `YAMLError` from `ruamel.yaml.error`. Baseline drops 1181 → 1179 (and `modules/validator.py` falls out of the per-file table entirely).
+- `modules/anilist.py`: fix 7 pyright errors across three patterns and harden one latent bug. (1) `int(util.validate_date(value, return_as="%Y%m%d"))` becomes `int(str(...))` to satisfy pyright's `int(str | datetime)` complaint — `validate_date` returns `str` when `return_as` is provided but the helper is not typed to reflect that. (2) The `mod == "gte"`/`"lte"` blocks did `value -= 1` / `value += 1` where pyright saw `value` as `int | LiteralString | Unknown`. The invariant '`gte`/`lte` modifiers only apply to numeric attributes (`start`/`end`/`episodes`/`duration`/`score`/`popularity`)' is true at runtime but not visible across the dispatch table. Cast with `int(value)` to make the contract explicit. (3) `validate(name, data)` iterated `util.get_list(data)` (possibly None) and called `d.lower()` on items pyright saw as `dict | int | str`. Added `return_none=False or []` + wrapped `d` in `str(...)`. Added 1 test (numeric input doesn't `AttributeError`). Baseline drops 1181 → 1174.
+- `modules/request.py`: fix 7 pyright errors across three patterns and harden three latent bugs. (1) `get_stream` did `dl / total_length * 100` inside the per-chunk log line, but `total_length` is `None` when the server doesn't send a `Content-Length` header — division would `TypeError`. Added an `if total_length:` branch that falls back to a bytes-only progress line. (2) `get_header` had an implicit `return None` path that the `get_cloudscrape_html` caller would crash on with `cloud_headers.pop("User-Agent")`. Made the fallback `return {}` so callers always get a dict (semantically identical to `None` for `requests.get(headers=...)`). (3) The `YAML` class let `self.path=None` silently flow into `os.path.exists()` / `open()` when the caller forgot to pass either `path` or `input_data`. Added an explicit `raise Failed("Either path or input_data must be provided")` guard at the start of the no-input-data branch. Also rewrote the `except ruamel.yaml.error.YAMLError` clause to use `ruamel.yaml.YAMLError` (which pyright can resolve) and replaced `e.problem` direct access with `getattr(e, "problem", None)` since `problem` only exists on `MarkedYAMLError` (a bare `YAMLError` would have crashed the error handler with `AttributeError`). Added 4 tests (`get_header` matrix + `YAML()` failure path). Baseline drops 1181 → 1174 (and `modules/request.py` falls out of the per-file table entirely).
+- `modules/logs.py`: fix 5 pyright errors across two clusters. (1) `remove_main_handler` and `remove_playlists_handler` called `self._logger.removeHandler(self.main_handler)` directly, but `main_handler` / `playlists_handler` are initialised to `None` in `__init__` and only assigned in the corresponding `add_*` method. Calling `remove_*` before `add_*` would crash with a type error from `logging.removeHandler(None)`. Added explicit `if self.main_handler is not None:` guards. (2) `MyLogger.findCaller` used `while hasattr(f, "f_code"):` to walk the frame chain — semantically correct (every non-`None` frame has `f_code`) but pyright doesn't narrow `Optional[FrameType]` through `hasattr`. Switched to the equivalent `while f is not None:` which is both clearer and pyright-friendly. Baseline drops 1156 → 1151 (and `modules/logs.py` falls out of the per-file table entirely).
+- Singles bundle: fix 4 pyright errors across three small files (one error each in `modules/ntfy.py` and `modules/tvdb.py`, two in `modules/ergast.py`). (a) `modules/ntfy.py`: change `title: str = None` to `title: str | None = None` — classic PEP 484 Optional-default annotation. (b) `modules/tvdb.py`: wrap `released` in `str(...)` before `datetime.strptime` — the local `parse_page` helper returns `list | str | None` and the existing `if released else released` ternary handles None, but pyright can't see the str-only branch. (c) `modules/ergast.py`: `Race.session_info` subtracted `timedelta` from `self.date` unconditionally, but `self.date` is set to `None` when the API returns a malformed/missing date string (existing `except (ValueError, TypeError): self.date = None`). Added an explicit `if self.date is None: video_date = None` early branch — real latent bug that would crash with `TypeError` rather than gracefully degrade. Added 1 regression test in `tests/test_ergast.py`. Three files drop off the per-file error table. Baseline drops 1151 → 1147.
+- `modules/library.py`: fix 7 pyright errors across three patterns. (1) Added missing `@abstractmethod def get_ids(self, item) -> tuple: ...` to the `Library(ABC)` base — the method is concrete on `Plex` but wasn't declared abstract, so pyright saw `self.get_ids(item)` as an attribute access on `Library*` (the unbound subclass type) and flagged it. (2) Added `-> list` return annotations to the existing `@abstractmethod` declarations for `get_all` and `item_labels` and replaced their `pass` bodies with `...` — the implicit `None` return type was being propagated to call-sites like `for la in self.item_labels(item)` and `for item in items` which then crashed `reportOptionalIterable`. (3) Matched the existing `poster.compare if poster else ""` defensive ternary for the parallel `background`, `logo`, and `square_art` cache-update calls in `image_update` — the `X_uploaded` flag guarantees `X` is non-`None` at runtime but pyright can't follow that invariant across the dispatch chain. Baseline drops 1147 → 1140 (and `modules/library.py` falls out of the per-file table entirely).
+- `modules/util.py`: high-leverage fix — chip 26 pyright errors out of the file itself AND cascade-fix 56 more errors across other files for a total **−82 baseline reduction** in one PR. Three patterns: (1) Added `@overload` declarations to `util.get_list` so pyright knows `return_none=False` guarantees `list` (never `None`). This single change fixed errors in 8 caller modules (kometa.py, anilist, builder, icheckmovies, imdb, mdblist, **meta.py dropped 59 → 25**, `textfile.py` dropped off). (2) The module-level `logger: MyLogger = None` was lying — the runtime default is None but the annotation said `MyLogger`. Switched to a `TYPE_CHECKING` split (`logger: MyLogger` for pyright, `logger = None` for runtime) so consumers can still call `logger.info(...)` without an Optional guard. (3) Hardened two real latent bugs in the process: `HTTPError.response` is `Response | None` per `requests` typing, but the `retry_if_http_429_error` predicate and `wait_for_retry_after_header.__call__` both used it unconditionally — added explicit `is not None` checks. And `parse()`'s error-message branch did `for o in options` when `options` could be `None` (the `elif` condition allowed entry via the `translation` clause without `options` being set) — now falls back to `translation` keys. Added 4 regression tests. Baseline drops 1181 → 1100 across 9 files; util.py and `textfile.py` drop off the per-file table entirely.
+- `modules/radarr.py` + `modules/sonarr.py` + `stubs/arrapi/`: eliminate 108 pyright errors across `radarr.py` and `sonarr.py` (54 each) with a **local stub package** for `arrapi`. Root cause and fix are identical to the `tmdbapis` stubs in the same PR: `BaseObj._parse()` in the `arrapi` library (also Kometa-maintained, `Kometa-Team/ArrAPI`) has no return-type annotation, producing the same ~N-member union explosion on every attribute of every `Movie`, `Series`, and `Tag` object. Stub files created: `stubs/arrapi/{__init__,exceptions}.pyi`, `stubs/arrapi/apis/{__init__,base,radarr,sonarr}.pyi`, `stubs/arrapi/objs/{__init__,base,reload,simple}.pyi`. `RadarrAPI.add_multiple_movies` and `SonarrAPI.add_multiple_series` are fully annotated with their actual positional parameter lists (they had 8 and 11 positional params respectively); `_raw: Any` is declared as an instance attribute on `SonarrAPI` (it's an internal raw-API object with `.v3`/`.v4`/`.new_codebase` attributes, not a method). Four remaining `Optional.id/name` errors in each file (`qp: QualityProfile | None` loop-assigned variable used without a None guard) are pre-existing real bugs and left for a separate PR. Baseline drops 397 → 297 (`radarr.py` and `sonarr.py` each drop 54 → 4).
+- `modules/tmdb.py` + `stubs/tmdbapis/`: eliminate all 670 pyright errors in `modules/tmdb.py` with a **local stub package** for `tmdbapis`. The root cause: `TMDbObj._parse()` in the `tmdbapis` library has no return-type annotation, so pyright infers a ~49-member union from all its `elif` branches (every TMDb object type — `Movie`, `TVShow`, `Credit`, `Episode`, `int`, `float`, `str`, `datetime`, etc.). Every attribute assigned via `self._parse(...)` then carries that union, and any subscript or iteration on such an attribute emits one error *per union member* — hence 49 errors on a single `results.tv_results[0]` subscript and 40 errors on each `for i in person.movie_cast` comprehension. Fix: `stubs/tmdbapis/` directory (new) with `pyproject.toml: stubPath = "stubs"`. The stub declares `_parse() -> Any` on `TMDbObj`, which collapses all attribute union explosions. Critical attributes that Kometa actually uses are typed precisely — `FindResults.{movie_results,tv_results,tv_episode_results}: list[Movie|TVShow|Episode]`, `Person.{movie_cast,tv_cast,movie_crew,tv_crew}: list[Credit]`, `Credit.{movie,tv_show}: Movie|TVShow`, `TMDbPagination.total_results: int` + `__iter__` — so code that reads those attributes gets the right narrow type. `__getattr__ -> Any` on every class serves as the safe fallback for the hundreds of other attributes Kometa doesn't use. One small code fix in `modules/tmdb.py`: added `self.tvdb_id: None = None` to `TMDbMovie.__init__` (the attribute is only meaningful on `TMDbShow`, but `convert_from()` accesses `item.tvdb_id` on the union type — pyright correctly flagged the missing attribute on the movie branch). Baseline drops 1067 → 397 (`modules/tmdb.py` falls off the per-file table entirely). `tmdbapis` is maintained by the Kometa team; a follow-up PR to add `py.typed` + inline annotations upstream would eliminate the need for these stubs.
+- Add a 3-strike retry around Plex `saveMultiEdits()` read/connect timeouts: retry after 2 seconds on attempt 1, retry after 5 seconds on attempt 2, and fail gracefully on attempt 3 while preserving the traceback in `meta.log`.
+- Update the Sight & Sound Letterboxd default collection to use the correct `sightsoundmag` owner for the list.
+- Fix mixed-library playlist `plex_search` by building the Plex search per library type while logging the criteria once.
+- Fix asset-directory logos being ignored during metadata image updates.
+- Skip episode rating operations for movie libraries.
+- Show the configured assets directory in missing-asset warnings instead of `'None'` when no matching flat asset file is found.
+- Suppress full stack traces for a small set of known, non-critical logger patterns so expected Plex not-found noise prints as a warning instead of a stack trace.
+- Preserve Plex batch multi-edit state across timeout retries so a transient `saveMultiEdits()` timeout no longer raises `Batch multi-editing mode not enabled` on retry.
+- Create the per-library `_backgrounds` and `_logos` image-map tables unconditionally so caches created before those tables existed self-heal on the next run, instead of raising `no such table: image_map_<n>_logos` and failing every collection that sets a logo.
+- Report transient TMDb network failures as a warning and a timeout-style error instead of dumping the raw connection traceback into the run summary.
+- Asset folder would be reported as `None` when `asset_folders` was set to false
+- Skip Recommendation Hub sorting on a targeted `--run-collections` run instead of resorting every pinned collection; a partial run only knows the `hub_priority` values of the collections it rebuilt, so treating the rest as unprioritised pushed them out of position. Also log the configured `hub_priority` value during attribute validation, matching other methods like `collection_order`.
+- Extend the `--run-collections` Recommendation Hub sort skip to also cover `--run-files`, which has the same partial-run limitation.
+- Warn and skip `item_edition` edits when Plex Pass is unavailable instead of attempting the edit and surfacing a Plex 403 Forbidden error.
+- Fix the default AU content-rating overlay so the MA15+ badge matches both Plex rating spellings: canonical `au/MA 15+` from explicit TMDb Australian certifications and Plex-derived `au/MA15+` for titles without an AU certification.
+
+### Changed
+
+- Playlist `libraries` is now optional; when omitted, playlists use every library processed as part of the run. Defining `libraries` on a playlist still overrides that default.
+- `modules/request.py`: every outbound HTTP request now sends a 30-second per-socket timeout (`DEFAULT_TIMEOUT`), so a stalled external server can no longer hang a run indefinitely. Retries on `Requests.get`/`post` switch from a fixed 10-second wait (up to 50s of sleeping per failing URL) to exponential backoff capped at 10 seconds (~25s worst case, much less for transient blips).
+- `modules/request.py`: `get_stream` throttles its download-progress log updates to ~4 per second (plus a final 100% line) instead of logging once per 8 KB chunk.
+- `modules/cache.py`: the cache now holds one shared SQLite connection (WAL journal mode) for the life of the run instead of opening a new connection for every query — previously each of the ~60 cache methods opened a connection per call and never closed it, which added measurable overhead on large overlay runs. Transaction-per-block commit behaviour is unchanged.
+- Updated assets to accept all filenames and filetype extensions that Plex allows as per https://support.plex.tv/articles/200220677-local-media-assets-movies/
+- Update requirements
+
+### Security
+
+- `modules/cache.py`: dynamic table/column names interpolated into SQL are now validated by a `sql_identifier()` guard at every method that accepts them. All current callers pass internal identifiers, so this hardens against future misuse rather than fixing an exploitable path (and addresses bandit B608).
+- `modules/request.py`: a per-library `verify_ssl: false` (e.g. on a Plex connection) no longer disables `InsecureRequestWarning` process-wide; only the config-level global SSL opt-out does.
+- `modules/letterboxd.py`: short `boxd.it` URLs must use http/https; other schemes now fail with a clear error before any network call.
+- `modules/logs.py`: registered secrets are also redacted in their URL-encoded (`quote`/`quote_plus`) forms, so tokens embedded in logged query strings no longer slip past redaction.
+- Internal: replace `mypy` (which was running with `continue-on-error: true` and producing output nobody read) with `pyright` using a ratcheting baseline. `.pyright-baseline.json` pins the current per-file error counts; the new `pyright` CI job (powered by `scripts/pyright_baseline.py --check`) fails any PR that introduces new errors in a file but lets maintainers chip away at existing errors at their own pace. Today's baseline: 1223 errors across `modules/` + `kometa.py`. See `scripts/README.md` for the `--update` workflow.
+
+### Changed
+
+- `modules/request.py`: every outbound HTTP request now sends a 30-second per-socket timeout (`DEFAULT_TIMEOUT`), so a stalled external server can no longer hang a run indefinitely. Retries on `Requests.get`/`post` switch from a fixed 10-second wait (up to 50s of sleeping per failing URL) to exponential backoff capped at 10 seconds (~25s worst case, much less for transient blips).
+- `modules/request.py`: `get_stream` throttles its download-progress log updates to ~4 per second (plus a final 100% line) instead of logging once per 8 KB chunk.
+- `modules/cache.py`: the cache now holds one shared SQLite connection (WAL journal mode) for the life of the run instead of opening a new connection for every query — previously each of the ~60 cache methods opened a connection per call and never closed it, which added measurable overhead on large overlay runs. Transaction-per-block commit behaviour is unchanged.
+- Updated assets to accept all filenames and filetype extensions that Plex allows as per https://support.plex.tv/articles/200220677-local-media-assets-movies/
+- Internal: replace `mypy` (which was running with `continue-on-error: true` and producing output nobody read) with `pyright` using a ratcheting baseline. `.pyright-baseline.json` pins the current per-file error counts; the new `pyright` CI job (powered by `scripts/pyright_baseline.py --check`) fails any PR that introduces new errors in a file but lets maintainers chip away at existing errors at their own pace. Today's baseline: 1223 errors across `modules/` + `kometa.py`. See `scripts/README.md` for the `--update` workflow.
+
+### Security
+
+- `modules/cache.py`: dynamic table/column names interpolated into SQL are now validated by a `sql_identifier()` guard at every method that accepts them. All current callers pass internal identifiers, so this hardens against future misuse rather than fixing an exploitable path (and addresses bandit B608).
+- `modules/request.py`: a per-library `verify_ssl: false` (e.g. on a Plex connection) no longer disables `InsecureRequestWarning` process-wide; only the config-level global SSL opt-out does.
+- `modules/letterboxd.py`: short `boxd.it` URLs must use http/https; other schemes now fail with a clear error before any network call.
+- `modules/logs.py`: registered secrets are also redacted in their URL-encoded (`quote`/`quote_plus`) forms, so tokens embedded in logged query strings no longer slip past redaction.
+
+## [v2.4.4] - 2026-06-25
+
+### Fixed
+
+- Fixed CI: downgrade `actions/checkout` from `v7` to `v6` across all workflows to restore PR validation for fork pull requests (still an upgrade over Kometa 2.3.1)
+- Downgrade "Skipping `<name>`: Item not found" log message from `ERROR` to `WARNING` in metadata file processing when a mapped item cannot be found in the Plex library.
+- Allow `builder_level` to work with playlists. Fixes #2267
+- Consolidate repeated warning messages in the warning summary, including asset folder and poster/background/square-art lookup warnings, builder/overlay validation noise, and Trakt list warnings; keep convert-summary ID lists hidden unless trace or request-logging is enabled, and suppress duplicate raw TMDb collection lookup noise outside trace.
+- Fix `ModuleNotFoundError: No module named 'resource'` crash on Windows at startup. The file-descriptor limit fix introduced in #3235 used the POSIX-only `resource` module unconditionally. Now wrapped in a `try`/`except ImportError` so the bump is applied on POSIX systems and skipped cleanly on Windows. (#3244)
+- Fix `kometa.py` crashing with `TypeError: HEAD is a detached symbolic reference` when run from a detached-HEAD checkout (release-tag checkouts, CI runners that check out by SHA, etc.). (#3232)
+- Fix `cache.update_anime_map()` writing the AniDB id into the AniList column on UPDATE. The original `anime_map` row was written correctly on INSERT but each subsequent update would clobber `anilist_id` with the AniDB value. (#3232)
+- Defer cache eviction until all batched Plex edits complete so genre updates (or other non-batched updates) no longer evict items before later rating and originally available date, etc writes run.
+- Remove TMDb ID `717095` from the Ice Age franchise default after TMDb no longer returns the collection.
+
+### Changed
+
+- Internal: add a comprehensive pytest test suite (580 tests, up from 203) covering most of `modules/`, plus a regression-test convention (`test_issue_NNNN_*`) for documented bugs. (#3232)
+- Internal: add a GitHub Actions test workflow with separate jobs for `lint` (black + isort + flake8), `test` (pytest with 20% coverage gate), `regression` (regression-only suite), `schema` (JSON Schema validation of `json-schema/*.json` + kitchen-sink config), `imports` (auto-discovered import smoke check across all 40 modules), `perf` (slow-test reporting via `pytest --durations-min`), and `smoke` (`kometa.py --help` + minimal-config dry-run). (#3232)
+- Internal: add `.gitattributes` to normalize line endings to LF on commit for all text sources, flag image/font/PSD files as binary so Git won't try to diff them, and add `linguist-vendored`/`linguist-generated` hints for cleaner GitHub language stats. Renormalized `defaults/overlays/languages.yml` which had been checked in with CRLF endings since a 2025 community PR. Also adds `export-ignore` entries so `git archive` source tarballs no longer ship `tests/`, `.github/`, or other dev-only files.
+- Internal: extend the `test`, `imports`, and `smoke` CI jobs to a Linux + Windows OS matrix so POSIX-only regressions (the class of bug that produced #3244) get caught before merge instead of at user launch. Adds an AST-based regression test (`test_issue_3244_*`) that statically pins the `try/except ImportError` guard around `import resource` in `kometa.py` and asserts every `resource.<attr>` reference at module scope sits inside an `if resource is not None:` block.
+- Prevent Kometa from creating duplicate collections when Plex search misses an existing same-named collection by falling back to the full collection inventory before creating.
+- Add an end-of-run warning when duplicate collection titles are detected in a Plex library and suggest checking Plex DBRepair if the duplicates are unexpected.
+
+## [v2.4.3] - 2026-06-22
+
+### Fixed
+
+- Fix image size validation during metadata uploads so local poster/background/square art files are checked using their actual file size instead of the string `compare` field, avoiding a `TypeError` in operations.
+
+## [v2.4.2] - 2026-06-22
+
+### Added
+
+- Add jsonschema 4.23.0.
+- Add letterboxdpy 6.5.0.
+- Report deactivated Trakt accounts [Trakt returns a 410].
+- Add E4 to network overlay and show network collection. #2975
+- Adds new `text_file` builder.
+- Initial support for SIMKL.com; trending lists and dvd-releases list.
+- Add Apprise as a webhook notification provider.
+- Added `language` parameter to `mass_poster_update` and `mass_background_update` operations to override TMDb language for image fetching (e.g. `xx` for textless posters).
+- Added `plex_csm` and `plex_csm0` sources to `mass_content_rating_update` (reads CSM age rating from Plex's own cached `commonSenseMedia.ageRatings`, no external API key required).
+- Add Plex square art support: upload `square.ext` assets for movies, shows, seasons, albums, and playlists via `find_and_upload_assets`. Extends metadata file items and library operations.
+- Add comprehensive config validation with `--validate`, `--validate-level`, `--validate-schema`, and `--schema-path` CLI flags. Supports syntax, structure, full, and schema-level validation with a gap report showing missing/extra fields.
+- Add `--validate-file` and `--validate-dir` CLI flags for standalone and batch YAML validation against auto-detected schema types (config, collection, metadata, overlay, playlist). Output written to `validate.log`.
+- Add `modules/validator.py` with `ConfigValidator` (multi-level config validation) and `FileSetValidator` (standalone/batch YAML validation with schema type detection).
+- Expand `json-schema/config-schema.json` with full coverage and add per-type schemas: `collection-schema.json`, `metadata-schema.json`, `overlay-schema.json`, `playlist-schema.json`.
+- Add `apprise` and `schedule_overlays` to the config JSON schema.
+- Add `auto_sort_hubs` global/library setting to sort Recommendation Hub rows on the Plex home screen after all collections are processed. Accepts `sort_title`, `sort_title.desc`, `alpha`, `alpha.desc`, `configured`, `configured.desc`, or `random`.
+- Add `hub_priority` per-collection attribute to pin a collection's hub row to a specific position (lower number = higher up). Collections with `hub_priority` are sorted first; the remainder follow in `auto_sort_hubs` order.
+- Add `monthly(last)` schedule option: fires on the last day of every month regardless of its length (Feb 28/29, Apr/Jun/Sep/Nov 30, or the 31st in 31-day months).
+- Add `hub_priority` and `hub_priority_<<key>>` template variables to the shared default templates so collections can set hub row priority from templates.
+- Add `hub_priority` to the collection config schema so the new template variable validates correctly.
+- Add support for boxd.it urls, used for letterboxd share lists.
+- Allow metadata updates to proceed on existing collections even if the builder returns 0 items.
+- Add new operations attributes `respect_ignore_ids` to skip operations processing items in `ignore_ids` or `ignore_imdb_ids`, and `ignore_labels` to skip operations processing items with the specified label(s).
+- Add new TMDb release date types for `mass_originally_available_update` and `mass_added_at_update` operations: `tmdb_premiere`, `tmdb_theatrical`, `tmdb_theatricallimited`, `tmdb_digital`, `tmdb_physical`, `tmdb_tv`.
+
+### Changed
+
+- Bump lxml to 6.0.4.
+- Bump packaging to 26.1.
+- Bump gitpython to 3.1.50.
+- Bump letterboxdpy to 6.5.7.
+- Bump lxml to 6.1.1.
+- Bump packaging to 26.2.
+- Bump plexapi to 4.18.1.
+- Bump python-dotenv to 1.2.2.
+- Bump pillow to 12.2.0.
+- Bump pywin32 to 312.
+- Bump requests to 2.34.2.
+- Bump setuptools to 82.0.1.
+- Bump prek to 0.4.5.
+- Switch to GraphQL for IMDb charts retrieval, with a fallback to the old method if the GraphQL request fails. #3006
+- Replace Kometa's internal Letterboxd scraping with a letterboxdpy-backed adapter while preserving existing Letterboxd builder names.
+- Process collection alterations [add/remove] in batches of 100 to avoid "400 Bad Request" on mile-long URLs.
+- Exit early if more than one of the `--SOMETHING-only` flags are set.
+- Cache people data for media items since it's unlikely to change.
+- The `tmdb_discover` YAML validator now enforces: unknown keys are rejected, value types are checked, `certification_country`/`certification` must co-occur, `watch_region` must accompany any watch-provider or monetization key, and movie-only and TV-only parameters are mutually exclusive. Note: `with_watch_providers` and `without_watch_providers` now require `watch_region` at validation time (the TMDb Discover API requires this), which is stricter than the runtime check in `builder.py`.
+- `--validate` now implies immediate run (like `--run-libraries`).
+- Use the SQLite cache for TMDb queries in `check_filters` and `check_missing_filters` instead of bypassing it with `ignore_cache=True`.
+- Only force-reload Plex items in the overlay loop when `reapply_overlays` is set; reuse the session cache on normal runs.
+- Use set lookup instead of list scan when checking collection membership in `add_to_collection` and `run_collections_again`, reducing complexity from O(n×m) to O(n).
+- Extend default "Metacritic Must See" collection to work with TV.
+- Improve JSON schemas and add prototype YAML configuration files for all builders.
+- Add translations for Genre Defaults posters.
+- Updates to Quickstart docs about limitations.
+- Updates to Trakt and MAL flow pages.
+- Update Letterboxd builder docs to reflect letterboxdpy-backed filtering, ordering, and incremental behavior.
+- Document the valid `font_style` values for the default Inter font and note that valid styles are font-specific. #2925
+- Call out the schema file as supporting only `config.yml` explicitly.
+- Sync `pyproject.toml` pinned dependencies to match `requirements.txt` (lxml, requests, pillow, packaging, gitpython, pywin32; add letterboxdpy).
+- Align Black `target-version` to `["py312"]` in `pyproject.toml` to match the project's existing `requires-python = ">=3.12"`.
+- Standardise GitHub Actions checkout version to `@v6` in `spellcheck.yml` and `lint.yml`.
+- Fix `lint.yml` target paths from `src/` to `modules/` to reflect actual codebase structure.
+- Sync `.pre-commit-config.yaml` hook revisions to match `dev-requirements.txt` (black 26.5.1, isort 8.0.1, flake8 7.3.0).
+- Fix `.dockerignore` entry `CHANGELOG` → `CHANGELOG.md` after changelog file rename.
+- Normalise `AGENTS.md` and `.dockerignore` line endings from CRLF to LF.
+- Remove stale `Dockerfile.lxml` entry from `.dockerignore` (file was removed from the repo long ago).
+- Update `CLAUDE.md` test file list to reflect all current test files in `tests/`.
+- Add "Chore" PR type option to pull request template to match the project's existing `chore/` branch convention.
+- Remove `reciperr_list` from `collection-schema.json` (Reciperr builder was removed).
+- Update spellcheck configuration: exclude `docs/kometa/acknowledgements.md` (credits file) and update wordlist.
+- Add spellcheck to pre-commit configuration.
+
+### Removed
+
+- Reciperr builder removed; the Reciperr site has been unresponsive for an extended period.
+
+### Fixed
+
+- Dynamic collection titles with unresolved template variables in `title_format` (e.g. `<<limit>>` from a template `default:` block, or `<<key>>` from per-key dynamic variables) no longer cause `delete_collections: configured: true` to incorrectly treat those collections as unconfigured and delete them. #1904
+- When `run_order` places `operations` before `collections`, configured collections are no longer incorrectly reported as unconfigured by `show_unconfigured` or targeted by `delete_collections: configured: true`. #1968
+- Fix "Movies Removed" report entries missing release year; titles now match the "Movies Missing" format e.g. `The Grapes of Wrath (1939)`. Fixes #2028
+- Invalidate cached Plex items after each batch edit in operations so that the overlay phase reads post-operations values (e.g. updated ratings) rather than stale pre-operations values. Fixes rating overlays not updating when `mass_critic_rating_update` (or audience/user equivalents) runs before overlays in the same Kometa pass. #2357
+- Overlay backdrops with `back_line_color` set but no `back_line_width` no longer crash; `back_line_width` now defaults to 1 in that case. #2645
+- Fix `monthly(N)` schedule: values greater than the current month's last day (e.g. `monthly(31)` in November) no longer fire on the last day of the month as a fallback. `monthly(N)` now only triggers when today is exactly day N. A warning is logged when a configured day does not exist in the current month, directing users to the new `monthly(last)` option. Fixes #2884
+- Streaming default's `run_definition` now honors `use_all: false`; previously dynamic keys without an explicit `use_<key>` ran regardless. #2922
+- Catch KeyError on Plex NFO build.
+- Fixing "list index out of range" error when processing IMDb charts. #3006
+- TMDB language now reflected in `mass_poster_update`; cache extension.
+- Reduce size of FILMIN logo.
+- Reduce size of FILMIN white logo.
+- Replace top-ten-pirated default list with an updated, Kometa-controlled one.
+- Align Kometa's AniList season translation from `current` to match AniList.
+- Fix an issue where `tvdb_to_imdb` writes the wrong IMDb ID when a TVDb movie ID collides with a TVDb series ID.
+- Update Letterboxd list/watchlist parser for the React-based `LazyPoster` markup, which replaced the `data-film-id` nodes the `letterboxd_list`, `letterboxd_user_films`, and `letterboxd_user_reviews` builders relied on.
+- Update Letterboxd URL parsing to handle unlisted lists and shuffle argument in the URL.
+- Restore support for Letterboxd `/detail/` list views and `/USERNAME/films/reviews/` URLs.
+- Update Letterboxd Top 100 Western to use official list.
+- Fix `imdb_awards` failing when any one of the `award_filters` or `category_filters` does not exist; this now produces a warning and the builder will only fail if all of the `award_filters` or all of the `category_filters` do not exist.
+- Fix `imdb_watchlist` rejecting the new IMDb user ID format (`p.xxxxxxx`). Now accepts both `ur########` (legacy) and `p.xxxxxxx` formats, as a bare ID or full watchlist URL.
+- TVDb 4xx responses (series/movie removed or merged on TVDb) now raise a dedicated `tvdb.NotFound` so the missing-show iteration and TVDb-filter paths log them at debug instead of error. Stale TVDb IDs returned by TMDb `external_ids` no longer spam logs or trigger webhook failure notifications. #3047
+- Replace `mass_imdb_parental_labels` HTML scrape of `/parentalguide` with IMDb's GraphQL API, which is not WAF-gated and returns structured parental guide data directly. Fixes silent label failures caused by IMDb's CloudFront WAF returning HTTP 202 (empty body) to scraper requests. #3053
+- Fix trakt_chart watched/collected URLs to use `/movies(shows)/watched(collected)/{period}` and default period to "weekly"; fix recommended to use `/recommendations/movies(shows)`. #3057
+- TMDb collection requests that 404 (collection deleted upstream — TMDb now only permits collections for true movie sequels) now raise a dedicated `tmdb.NotFound`. When the ID was auto-discovered by a default (e.g. the `franchise` default scanning `tmdb_collection` IDs from the library), the collection is skipped as "Ignored" instead of failing with a critical error and webhook notification. IDs in user-authored config files still raise as before.
+- TMDb collection, movie, and show 404 responses now raise a dedicated `tmdb.NotFound` (mirroring the existing `tvdb.NotFound` pattern); `validate_tmdb_ids` logs an actionable hint for stale collection IDs pointing franchise-default users to the `exclude` template variable.
+- Fix MDBList Sync Progress percentage overflowing for lists over 1000 items (e.g. `6378/378 (1687%)`). Fetch list metadata upfront to get the true total item count. #3157
+- Fix `ZeroDivisionError` crash in `plex_update_in_batches` when running `mass_genre_update` or `mass_imdb_parental_labels` (and any operation producing multiple label/genre groups per item). Cache eviction introduced by #3156 is now scoped to rating updates only via an `evict_cache` parameter; a defensive guard prevents any future empty-list crash. #3163
+- Guard against `_graph_request` returning `None` for items with no IMDb record (e.g. `Looney Tunes`); previously the unguarded `.get()` call raised an `AttributeError` that escaped the `except Failed` handler in `operations.py` and aborted processing for the entire library. #3165
+- Fix `mass_imdb_parental_labels` crash when IMDb GraphQL returns `null` for the title node (e.g. items whose only Plex GUIDs are `tmdb://` or `tvdb://`, such as `Looney Tunes`); `.get("title", {})` returns `None` when the key exists with a null value, causing `AttributeError` on the next `.get()` call. Replaced the chained one-liner with explicit variable extraction using `or {}` at each level. Added a pre-call guard in `operations.py` to skip items with no IMDb ID entirely. #3165
+- `delete_collections: configured: false` no longer incorrectly deletes configured Kometa-managed collections when `run_order` places `operations` before `collections`. The check previously relied on `library.collections` (populated during the collection run), which is always empty when operations executes first — so every managed collection appeared unconfigured and was deleted. The fix uses `collection_names` (pre-populated from config before the run-order loop) expanded with English-translated titles, so default collections whose YAML key differs from their Plex title (e.g. `award/spirit` → `Spirit Best Feature Winners`) are also correctly recognised as configured. #3168
+- Addresses edge case where missing `settings:minimum_items` would make Kometa redact `1` in the log.
+- Hide some traceback errors for "known good" errors that don't require a full trace.
+- Fix an issue where collections would not be recognised as configured if they were not scheduled to run.
+- Fix an issue where Plex would fail to update collections if the casing of the collection name did not match the YAML (e.g. "Dogs And Cats" vs "Dogs and Cats").
+- Fix shared `ignore_ids` and `ignore_imdb_ids` template variables for builders that resolve Plex `ratingKey`s first.
+- Fix dynamic collection sync loop when `translation_key` and `title_format`/`name_format` are both set — `meta.py` sync key now follows the same name-resolution priority as `builder.py` (`name_format` → translation → `title_format`), eliminating the orphan-delete loop on every run. If the translation name still contains unresolvable library-context variables (e.g. `<<library_translationU>>`), `meta.py` falls back to `title_format` (which has `<<library_typeU>>` pre-resolved) to ensure the sync key matches what `builder.py` writes to Plex. #3189
+- Fix `title_format` fallback value in `award/sag.yml` to match its translation name (`Screen Actors Guild Awards <<key_name>>`); fix accent typo in `award/cesar.yml` (`César <<key_name>>`). #3189
+- Fix inconsistent asset poster selection and overlay cache invalidation when replacing local asset files. #3196
+- Fix `audio_language`/`subtitle_language` `plex_search` on show libraries returning fewer results than expected when Plex returns regional language codes (e.g. `en-US`) instead of base codes (`en`). #2777
+- Sanitize PR branch names in CI workflows (`validate-pull.yml`, `increment-build.yml`, `tag-cleanup.yml`) by replacing non-Docker-safe characters with `-`; branch names containing `/` (e.g. `feature/my-fix`) previously caused Docker Hub tag pushes and deletes to fail. #3207
+- Fix `tag-cleanup.yml` output key mismatch (`tag_name` vs `tag-name`) that caused the Docker Hub tag DELETE to always target an empty tag name, leaving stale tester tags behind. #3207
+- Fix sync-based collections with `minimum_items: 1` and `delete_below_minimum: true` so they remove the last stale item and delete the collection when the source list drops to zero items. #3209
+- Invalidate cached Plex items after batched edits in operations so metadata files can override values in the same run instead of flip-flopping on later runs. #3211
+- Fix `other_name` in dynamic collections: `<<library_type>>` and `<<library_typeU>>` placeholders are now resolved (they were applied to `title_format` but not to `other_name`). Also fix a long-standing copy-paste bug where `other_name` supplied via `template_variables` was read from `self.temp_vars["remove_suffix"]` instead of `self.temp_vars["other_name"]`. #3215
+- Fix an issue with AniList search date modifiers not working. #3220
+- Fix Studio Defaults capitalization issues. #3221
+
+## [v2.3.1] - 2026-04-01
+
+Prior history is captured in [GitHub Releases](https://github.com/Kometa-Team/Kometa/releases).
+
+[unreleased]: https://github.com/Kometa-Team/Kometa/compare/v2.4.4...HEAD
+[v2.4.4]: https://github.com/Kometa-Team/Kometa/compare/v2.4.3...v2.4.4
+[v2.4.3]: https://github.com/Kometa-Team/Kometa/compare/v2.4.2...v2.4.3
+[v2.4.2]: https://github.com/Kometa-Team/Kometa/compare/v2.3.1...v2.4.2
+[v2.3.1]: https://github.com/Kometa-Team/Kometa/releases/tag/v2.3.1

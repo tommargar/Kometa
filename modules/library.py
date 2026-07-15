@@ -52,6 +52,7 @@ class Library(ABC):
         self.name = params["name"]
         self.original_mapping_name = params["mapping_name"]
         self.scanned_collection_files = params["collection_files"]
+        self.configured_collection_files = params.get("configured_collection_files", params["collection_files"])
         self.scanned_metadata_files = params["metadata_files"]
         self.scanned_overlay_files = params["overlay_files"]
         self.scanned_image_files = params["image_files"]
@@ -80,6 +81,10 @@ class Library(ABC):
         self.item_refresh_delay = params["item_refresh_delay"]
         self.delete_below_minimum = params["delete_below_minimum"]
         self.delete_not_scheduled = params["delete_not_scheduled"]
+        self.auto_sort_hubs = params["auto_sort_hubs"]
+        self.hub_priorities = {}
+        self.hub_config_order = {}
+        self.hub_title_sorts = {}
         self.missing_only_released = params["missing_only_released"]
         self.show_unmanaged = params["show_unmanaged"]
         self.show_unconfigured = params["show_unconfigured"]
@@ -92,6 +97,8 @@ class Library(ABC):
         self.only_filter_missing = params["only_filter_missing"]
         self.ignore_ids = params["ignore_ids"]
         self.ignore_imdb_ids = params["ignore_imdb_ids"]
+        self.ignore_labels = params["ignore_labels"]
+        self.respect_ignore_ids = bool(params["respect_ignore_ids"])
         self.overlay_artwork_quality = params["overlay_artwork_quality"]
         self.overlay_artwork_filetype = params["overlay_artwork_filetype"]
         self.assets_for_all = params["assets_for_all"]
@@ -112,6 +119,8 @@ class Library(ABC):
         self.mass_imdb_parental_labels = params["mass_imdb_parental_labels"]
         self.mass_poster_update = params["mass_poster_update"]
         self.mass_background_update = params["mass_background_update"]
+        self.mass_logo_update = params["mass_logo_update"]
+        self.mass_square_art_update = params["mass_square_art_update"]
         self.radarr_add_all_existing = params["radarr_add_all_existing"]
         self.radarr_remove_by_tag = params["radarr_remove_by_tag"]
         self.sonarr_add_all_existing = params["sonarr_add_all_existing"]
@@ -164,6 +173,8 @@ class Library(ABC):
             or self.sonarr_add_all_existing
             or self.mass_poster_update
             or self.mass_background_update
+            or self.mass_logo_update
+            or self.mass_square_art_update
             else False
         )
         self.library_operation = (
@@ -179,7 +190,7 @@ class Library(ABC):
             or self.update_blank_track_titles
             else False
         )
-        self.label_operations = True if self.assets_for_all or self.mass_imdb_parental_labels else False
+        self.label_operations = True if self.assets_for_all or self.mass_imdb_parental_labels or self.ignore_labels else False
 
         if self.asset_directory:
             logger.info("")
@@ -190,7 +201,42 @@ class Library(ABC):
             logger.info("")
             logger.info(output)
 
+    def item_is_ignored(self, item, tmdb_id=None, tvdb_id=None, imdb_id=None):
+        if not self.ignore_ids and not self.ignore_imdb_ids:
+            return False
+        ignored_ids = {str(ignore_id) for ignore_id in self.ignore_ids}
+        if any(item_id is not None and str(item_id) in ignored_ids for item_id in [tmdb_id, tvdb_id]):
+            return True
+        if tmdb_id is None and tvdb_id is None and imdb_id is None:
+            try:
+                tmdb_id, tvdb_id, imdb_id = self.get_ids(item)
+            except Failed:
+                tmdb_id = None
+                tvdb_id = None
+                imdb_id = None
+        if any(item_id is not None and str(item_id) in ignored_ids for item_id in [tmdb_id, tvdb_id]):
+            return True
+        return imdb_id is not None and str(imdb_id).lower() in self.ignore_imdb_ids
+
+    def item_has_ignore_label(self, item, current_labels=None):
+        if not self.ignore_labels:
+            return False
+        labels = current_labels if current_labels is not None else [la.tag for la in self.item_labels(item)]
+        return any(label in labels for label in self.ignore_labels)
+
+    def scan_configured_collection_names(self):
+        for file_type, metadata_file, temp_vars, asset_directory in self.configured_collection_files:
+            try:
+                meta_obj = MetadataFile(self.config, self, file_type, metadata_file, temp_vars, asset_directory, "collection", configured_names_only=True)
+                if meta_obj.collections:
+                    self.collection_names.extend([c for c in meta_obj.collections if c not in self.collection_names])
+            except NotScheduled:
+                pass
+            except Failed as e:
+                logger.debug(f"Configured collection names failed to load from {metadata_file}: {e}")
+
     def scan_files(self, operations_only, overlays_only, collection_only, metadata_only):
+        self.scan_configured_collection_names()
         if not operations_only and not overlays_only and not metadata_only:
             for file_type, metadata_file, temp_vars, asset_directory in self.scanned_collection_files:
                 try:
@@ -243,7 +289,7 @@ class Library(ABC):
                     logger.info("")
                     logger.separator(f"Skipping {e} Image File")
 
-    def upload_images(self, item, poster=None, background=None, logo=None, overlay=False):
+    def upload_images(self, item, poster=None, background=None, logo=None, square_art=None, overlay=False):
         poster_uploaded = False
         if poster is not None:
             try:
@@ -293,15 +339,32 @@ class Library(ABC):
                 logger.stacktrace()
                 logger.error(f"Metadata: {logo.attribute} failed to update {logo.message}")
 
+        square_art_uploaded = False
+        if square_art is not None:
+            try:
+                image_compare = None
+                if self.config.Cache:
+                    _, image_compare, _ = self.config.Cache.query_image_map(item.ratingKey, f"{self.image_table_name}_square_arts")
+                if not image_compare or str(square_art.compare) != str(image_compare):
+                    square_art_uploaded = self._upload_image(item, square_art)
+                    logger.info(f"Metadata: {square_art.attribute} updated {square_art.message}")
+                elif self.show_asset_not_needed:
+                    logger.info(f"Metadata: {square_art.prefix}square art update not needed")
+            except Failed:
+                logger.stacktrace()
+                logger.error(f"Metadata: {square_art.attribute} failed to update {square_art.message}")
+
         if self.config.Cache:
             if poster_uploaded:
                 self.config.Cache.update_image_map(item.ratingKey, self.image_table_name, "", poster.compare if poster else "")
             if background_uploaded:
-                self.config.Cache.update_image_map(item.ratingKey, f"{self.image_table_name}_backgrounds", "", background.compare)
+                self.config.Cache.update_image_map(item.ratingKey, f"{self.image_table_name}_backgrounds", "", background.compare if background else "")
             if logo_uploaded:
-                self.config.Cache.update_image_map(item.ratingKey, f"{self.image_table_name}_logos", "", logo.compare)
+                self.config.Cache.update_image_map(item.ratingKey, f"{self.image_table_name}_logos", "", logo.compare if logo else "")
+            if square_art_uploaded:
+                self.config.Cache.update_image_map(item.ratingKey, f"{self.image_table_name}_square_arts", "", square_art.compare if square_art else "")
 
-        return poster_uploaded, background_uploaded, logo_uploaded
+        return poster_uploaded, background_uploaded, logo_uploaded, square_art_uploaded
 
     def get_id_from_maps(self, key):
         key = int(key)
@@ -360,8 +423,14 @@ class Library(ABC):
     def background_update(self, item, image, tmdb=None, title=None):
         return self.image_update(item, image, tmdb=tmdb, title=title, poster=False)
 
+    def logo_update(self, item, image, tmdb=None, title=None):
+        return self.image_update(item, image, tmdb=tmdb, title=title, poster=False, image_type="logo")
+
+    def square_art_update(self, item, image, tmdb=None, title=None):
+        return self.image_update(item, image, tmdb=tmdb, title=title, poster=False, image_type="square_art")
+
     @abstractmethod
-    def image_update(self, item, image, tmdb=None, title=None, poster=True):
+    def image_update(self, item, image, tmdb=None, title=None, poster=True, image_type=None):
         pass
 
     def pick_image(self, title, images, prioritize_assets, download_url_assets, item_dir, image_type="poster", image_name=None):
@@ -427,8 +496,7 @@ class Library(ABC):
         pass
 
     @abstractmethod
-    def item_labels(self, item):
-        pass
+    def item_labels(self, item) -> list: ...
 
     @abstractmethod
     def find_poster_url(self, item):
@@ -436,8 +504,12 @@ class Library(ABC):
 
     def check_image_for_overlay(self, image_url, image_path, remove=False):
         image_path = self.config.Requests.download_image("", image_url, image_path, session=self.session).location
-        while util.is_locked(image_path):
-            time.sleep(1)
+        # Wait for file to be unlocked (up to 10 seconds)
+        timeout = 10
+        elapsed = 0
+        while util.is_locked(image_path) and elapsed < timeout:
+            time.sleep(0.1)
+            elapsed += 0.1
         with Image.open(image_path) as image:
             exif_tags = image.getexif()
         if 0x04BC in exif_tags and exif_tags[0x04BC] == "overlay":
@@ -453,8 +525,10 @@ class Library(ABC):
         pass
 
     @abstractmethod
-    def get_all(self, builder_level=None, load=False):
-        pass
+    def get_all(self, builder_level=None, load=False) -> list: ...
+
+    @abstractmethod
+    def get_ids(self, item) -> tuple: ...
 
     def add_additions(self, collection, items, is_movie):
         self._add_to_file("Added", collection, items, is_movie)
