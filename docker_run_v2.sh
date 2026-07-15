@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Install Kometa requirements
-pip install -r /kometa/requirements.txt
+pip install -r /requirements.txt
 
 # Define the base path
 BASE_PATH="/kometa"
