@@ -299,7 +299,7 @@ class Convert:
             raise MappingConvertError(f"Mapping Error: Malformed Hama ID '{check_id}'")
         return match.group(1)
 
-    def get_id(self, item, library):
+    def get_id(self, item, library, mydata=None):
         expired = None
         tmdb_id = []
         tvdb_id = []

@@ -1,4 +1,5 @@
 import os
+import random
 import re
 import time
 from datetime import datetime, timedelta
@@ -682,6 +683,57 @@ music_attributes = (
 
 
 class CollectionBuilder:
+    template_cache = {}
+    persistent_cache_path = None
+    persistent_cache_data = None
+
+    @staticmethod
+    def load_persistent_cache(config_path):
+        import json
+
+        config_dir = os.path.dirname(config_path) if config_path.lower().endswith((".yml", ".yaml")) else config_path
+        cache_file = os.path.join(config_dir, ".kometa_template_cache.json")
+        CollectionBuilder.persistent_cache_path = cache_file
+        try:
+            if os.path.exists(cache_file):
+                with open(cache_file, "r", encoding="utf-8") as cache_handle:
+                    CollectionBuilder.persistent_cache_data = json.load(cache_handle)
+                logger.debug(f"Loaded persistent template cache from {cache_file}")
+            else:
+                CollectionBuilder.persistent_cache_data = {}
+        except Exception as e:
+            logger.warning(f"Failed to load persistent cache: {e}")
+            CollectionBuilder.persistent_cache_data = {}
+
+    @staticmethod
+    def save_persistent_cache():
+        import json
+
+        if CollectionBuilder.persistent_cache_path and CollectionBuilder.persistent_cache_data:
+            try:
+                with open(CollectionBuilder.persistent_cache_path, "w", encoding="utf-8") as cache_handle:
+                    json.dump(CollectionBuilder.persistent_cache_data, cache_handle, indent=2, default=str)
+            except Exception as e:
+                logger.warning(f"Failed to save persistent cache: {e}")
+
+    @staticmethod
+    def compute_template_hash(template_data, variables, mapping_name=None):
+        import hashlib
+        import json
+
+        data_str = json.dumps({"mapping_name": mapping_name, "template": template_data, "variables": variables}, sort_keys=True, default=str)
+        return hashlib.md5(data_str.encode()).hexdigest()  # nosec B324 - cache key, not security
+
+    @staticmethod
+    def is_cache_valid(cache_entry):
+        if not cache_entry or "timestamp" not in cache_entry:
+            return False
+        cache_time = datetime.fromisoformat(cache_entry["timestamp"])
+        age_days = (datetime.now() - cache_time).days
+        if "cache_offset_days" not in cache_entry:
+            cache_entry["cache_offset_days"] = random.randint(1, 7)
+        return age_days < 14 + cache_entry["cache_offset_days"]
+
     @staticmethod
     def _playlist_libraries(config, data, methods):
         if "libraries" in methods:

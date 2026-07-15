@@ -807,6 +807,7 @@ def start(attrs):
 
 
 def run_config(config, stats):
+    CollectionBuilder.load_persistent_cache(config.config_path)
     library_status, collections_ran = run_libraries(config)
 
     playlist_status = {}
