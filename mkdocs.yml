@@ -185,11 +185,13 @@ nav:
       - Notifiarr: config/notifiarr.md
       - Gotify: config/gotify.md
       - ntfy: config/ntfy.md
+      - Apprise: config/apprise.md
       - Simkl: config/simkl.md
       - AniDB: config/anidb.md
       - Radarr: config/radarr.md
       - Sonarr: config/sonarr.md
       - Trakt: config/trakt.md
+      - YamTrack: config/yamtrack.md
       - MyAnimeList: config/myanimelist.md
       - Kometa Utilities Authentication: config/authentication.md
       - Webhooks: config/webhooks.md
@@ -393,6 +395,10 @@ nav:
       - MDBList:
         - Overview: files/builders/mdblist/overview.md
         - List: files/builders/mdblist/list.md
+      - YamTrack:
+        - Overview: files/builders/yamtrack/overview.md
+        - List: files/builders/yamtrack/list.md
+        - Tracked: files/builders/yamtrack/tracked.md
       - Letterboxd:
         - Overview: files/builders/letterboxd/overview.md
         - List: files/builders/letterboxd/list.md

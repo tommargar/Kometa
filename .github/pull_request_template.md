@@ -9,7 +9,7 @@
     - ✅ Test your changes locally to prove they work prior to submitting PRs.
     - 👷‍♀️ Create small PRs. In most cases this will be possible.
     - 📝 Use descriptive commit messages.
-    - 📗 Update the CHANGELOG and Documentation where necessary.
+    - 📗 Update the CHANGELOG.md and Documentation where necessary.
 -->
 
 ## What type of PR is this?
@@ -22,7 +22,8 @@
 - [ ] Feature/Tweak (non-breaking change which adds new functionality or enhances existing functionality)
 - [ ] Breaking Change (fix or feature that would break any existing functionality for users)
 - [ ] Documentation Update
-- [ ] Other 
+- [ ] Chore (maintenance, dependency bumps, housekeeping - no functional change)
+- [ ] Other
 
 ## Description
 
@@ -50,12 +51,26 @@ _Please replace this line with a meaningful description of your PR. What does it
 -->
 - [ ] Yes
 - [ ] No
+- [ ] Not Applicable
 
-## Have you updated the CHANGELOG?
+## Have you updated the JSON Schema files (if necessary)?
 
 <!--
-    Any PR that goes beyond a minor tweak (i.e. replacing a value, fixing a typo) should have a CHANGELOG entry.
-    We may ask you to update the CHANGELOG if you haven't done so.
+    This is optional and only necessary when your PR changes supported attributes,
+    accepted values, or structure for Configuration Files, Collection Files,
+    Metadata Files, Overlay Files, Playlist Files, or Defaults template variables.
+    Type X in the brackets of any relevant option, for example:
+    - [X] Yes
+-->
+- [ ] Yes
+- [ ] No
+- [ ] Not Applicable
+
+## Have you updated the CHANGELOG.md?
+
+<!--
+    Any PR that goes beyond a minor tweak (i.e. replacing a value, fixing a typo) should have a CHANGELOG.md entry.
+    We may ask you to update the CHANGELOG.md if you haven't done so.
     Type X in the brackets of any relevant option, for example:
     - [X] Yes
 -->

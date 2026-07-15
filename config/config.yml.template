@@ -90,6 +90,7 @@ settings:
   default_collection_order: release
   delete_below_minimum: true
   delete_not_scheduled: false
+  # auto_sort_hubs: sort_title  # Options: sort_title, sort_title.desc, alpha, alpha.desc, configured, configured.desc, random
   run_again_delay: 2
   missing_only_released: false
   only_filter_missing: false
@@ -132,6 +133,9 @@ omdb:
 mdblist:
   apikey:                          # Enter MDBList API Key (Optional)
   cache_expiration: 60
+simkl:
+  user_token:                      # Enter SIMKL User Token (Optional)
+                                   # Get one at https://utilities.kometa.wiki/simkl-oauth
 notifiarr:
   apikey:                          # Enter Notifiarr API Key (Optional)
 gotify:
@@ -141,6 +145,8 @@ ntfy:
   url: http://192.168.1.12:80      # Enter ntfy server URL (Optional)
   token:                           # Enter ntfy Access Token (Optional)
   topic:                           # Enter ntfy Topic (Optional)
+apprise:
+  config:                          # Enter path or URL to Apprise config file (Optional)
 anidb:
   cache_expiration: 60
   language: en

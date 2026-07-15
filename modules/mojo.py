@@ -1,8 +1,10 @@
 from datetime import datetime
+
+from num2words import num2words
+
 from modules import util
 from modules.request import parse_qs, urlparse
 from modules.util import Failed
-from num2words import num2words
 
 logger = util.logger
 
@@ -119,7 +121,7 @@ holiday_options = {
     "post_thanksgiving_weekend": ("Post-Thanksgiving Weekend", "us_post_thanksgiving_weekend"),
     "christmas_day": ("Christmas Day", "christmas_day"),
     "christmas_weekend": ("Christmas Weekend", "us_christmas_weekend"),
-    "new_years_eve": ("New Year's Eve", "newyearseve")
+    "new_years_eve": ("New Year's Eve", "newyearseve"),
 }
 base_url = "https://www.boxofficemojo.com"
 
@@ -181,7 +183,7 @@ class BoxOfficeMojo:
             output.extend(response.xpath(f"//td[contains(@class, 'mojo-field-type-{field_name}')]/a/@href"))
         if not limit or len(output) < limit:
             limit = len(output)
-        return [i[:i.index("?")] for i in output[:limit]]
+        return [i[: i.index("?")] for i in output[:limit]]
 
     def _imdb(self, url):
         response = self._request(url)
@@ -203,13 +205,13 @@ class BoxOfficeMojo:
                 url = "/chart/top_lifetime_gross/" if data["chart"] == "domestic" else "/chart/ww_top_lifetime_gross/"
             else:
                 text += f" {data['content_rating_filter'].upper()}"
-                url = f"/chart/mpaa_title_lifetime_gross/"
-                params = {"by_mpaa": content_rating_options[data['content_rating_filter']]}
+                url = "/chart/mpaa_title_lifetime_gross/"
+                params = {"by_mpaa": content_rating_options[data["content_rating_filter"]]}
             text += " Grosses"
         elif method == "mojo_never":
             pretty, arg_key = never_in_options[data["never"]]
             text = f"Top-Grossing Movies That Never Hit {pretty} {data['chart'].capitalize()}"
-            url = f"/chart/never_in_top/"
+            url = "/chart/never_in_top/"
             params = {"by_rank_threshold": data["never"]}
             if data["chart"] != "domestic":
                 params["area"] = self.never_options[data["chart"]]
@@ -218,7 +220,7 @@ class BoxOfficeMojo:
 
             if data["range"] == "daily":
                 day = datetime.strptime(data["range_data"], "%Y-%m-%d")
-                day = day.strftime("%b {th}, %Y").replace("{th}", num2words(day.day, to='ordinal_num'))
+                day = day.strftime("%b {th}, %Y").replace("{th}", num2words(day.day, to="ordinal_num"))
                 chart_title = f"{day}"
                 url = f"/date/{data['range_data']}/"
             elif data["range"] == "weekend":

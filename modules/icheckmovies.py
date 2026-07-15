@@ -6,6 +6,7 @@ logger = util.logger
 builders = ["icheckmovies_list", "icheckmovies_list_details"]
 base_url = "https://www.icheckmovies.com/lists/"
 
+
 class ICheckMovies:
     def __init__(self, requests):
         self.requests = requests
@@ -16,7 +17,7 @@ class ICheckMovies:
 
     def _parse_list(self, list_url):
         imdb_urls = self._request(list_url, "//a[@class='optionIcon optionIMDB external']/@href")
-        return [(t[t.find("/tt") + 1:-1], "imdb") for t in imdb_urls]
+        return [(t[t.find("/tt") + 1 : -1], "imdb") for t in imdb_urls]
 
     def get_list_description(self, list_url):
         descriptions = self._request(list_url, "//div[@class='span-19 last']/p/em/text()")
@@ -24,8 +25,8 @@ class ICheckMovies:
 
     def validate_icheckmovies_lists(self, icheckmovies_lists):
         valid_lists = []
-        for icheckmovies_list in util.get_list(icheckmovies_lists, split=False):
-            list_url = icheckmovies_list.strip()
+        for icheckmovies_list in util.get_list(icheckmovies_lists, split=False, return_none=False) or []:
+            list_url = str(icheckmovies_list).strip()
             if not list_url.startswith(base_url):
                 raise Failed(f"ICheckMovies Error: {list_url} must begin with: {base_url}")
             elif len(self._parse_list(list_url)) > 0:

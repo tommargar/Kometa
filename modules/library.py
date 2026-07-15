@@ -14,6 +14,7 @@ logger = util.logger
 MAX_IMAGE_SIZE = 10480000
 
 
+
 class Library(ABC):
     def __init__(self, config, params):
         self.session = None
@@ -53,6 +54,7 @@ class Library(ABC):
         self.name = params["name"]
         self.original_mapping_name = params["mapping_name"]
         self.scanned_collection_files = params["collection_files"]
+        self.configured_collection_files = params.get("configured_collection_files", params["collection_files"])
         self.scanned_metadata_files = params["metadata_files"]
         self.scanned_overlay_files = params["overlay_files"]
         self.scanned_image_files = params["image_files"]
@@ -81,6 +83,10 @@ class Library(ABC):
         self.item_refresh_delay = params["item_refresh_delay"]
         self.delete_below_minimum = params["delete_below_minimum"]
         self.delete_not_scheduled = params["delete_not_scheduled"]
+        self.auto_sort_hubs = params["auto_sort_hubs"]
+        self.hub_priorities = {}
+        self.hub_config_order = {}
+        self.hub_title_sorts = {}
         self.missing_only_released = params["missing_only_released"]
         self.show_unmanaged = params["show_unmanaged"]
         self.show_unconfigured = params["show_unconfigured"]
@@ -93,12 +99,13 @@ class Library(ABC):
         self.only_filter_missing = params["only_filter_missing"]
         self.ignore_ids = params["ignore_ids"]
         self.ignore_imdb_ids = params["ignore_imdb_ids"]
+        self.ignore_labels = params["ignore_labels"]
+        self.respect_ignore_ids = bool(params["respect_ignore_ids"])
         self.overlay_artwork_quality = params["overlay_artwork_quality"]
         self.overlay_artwork_filetype = params["overlay_artwork_filetype"]
         self.overlay_refresh_emby_items = params.get("overlay_refresh_emby_items")
         self.assets_for_all = params["assets_for_all"]
         self.assets_for_all_collections = params["assets_for_all_collections"]
-        self.cache_builders = params["cache_builders"]
         self.delete_collections = params["delete_collections"]
         self.mass_studio_update = params["mass_studio_update"]
         self.mass_genre_update = params["mass_genre_update"]
@@ -174,6 +181,7 @@ class Library(ABC):
         return self.mc_type == "emby"
 
     def scan_files(self, operations_only, overlays_only, collection_only, metadata_only):
+        self.scan_configured_collection_names()
         if not operations_only and not overlays_only and not metadata_only:
             for file_type, metadata_file, temp_vars, asset_directory in self.scanned_collection_files:
                 try:
@@ -226,7 +234,7 @@ class Library(ABC):
                     logger.info("")
                     logger.separator(f"Skipping {e} Image File")
 
-    def upload_images(self, item, poster=None, background=None, logo=None, overlay=False):
+    def upload_images(self, item, poster=None, background=None, logo=None, square_art=None, overlay=False):
         poster_uploaded = False
         if poster is not None:
             try:
@@ -276,15 +284,32 @@ class Library(ABC):
                 logger.stacktrace()
                 logger.error(f"Metadata: {logo.attribute} failed to update {logo.message}")
 
+        square_art_uploaded = False
+        if square_art is not None:
+            try:
+                image_compare = None
+                if self.config.Cache:
+                    _, image_compare, _ = self.config.Cache.query_image_map(item.ratingKey, f"{self.image_table_name}_square_arts")
+                if not image_compare or str(square_art.compare) != str(image_compare):
+                    square_art_uploaded = self._upload_image(item, square_art)
+                    logger.info(f"Metadata: {square_art.attribute} updated {square_art.message}")
+                elif self.show_asset_not_needed:
+                    logger.info(f"Metadata: {square_art.prefix}square art update not needed")
+            except Failed:
+                logger.stacktrace()
+                logger.error(f"Metadata: {square_art.attribute} failed to update {square_art.message}")
+
         if self.config.Cache:
             if poster_uploaded:
                 self.config.Cache.update_image_map(item.ratingKey, self.image_table_name, "", poster.compare if poster else "")
             if background_uploaded:
-                self.config.Cache.update_image_map(item.ratingKey, f"{self.image_table_name}_backgrounds", "", background.compare)
+                self.config.Cache.update_image_map(item.ratingKey, f"{self.image_table_name}_backgrounds", "", background.compare if background else "")
             if logo_uploaded:
-                self.config.Cache.update_image_map(item.ratingKey, f"{self.image_table_name}_logos", "", logo.compare)
+                self.config.Cache.update_image_map(item.ratingKey, f"{self.image_table_name}_logos", "", logo.compare if logo else "")
+            if square_art_uploaded:
+                self.config.Cache.update_image_map(item.ratingKey, f"{self.image_table_name}_square_arts", "", square_art.compare if square_art else "")
 
-        return poster_uploaded, background_uploaded, logo_uploaded
+        return poster_uploaded, background_uploaded, logo_uploaded, square_art_uploaded
 
     def get_id_from_maps(self, key):
         key = int(key)
@@ -337,7 +362,6 @@ class Library(ABC):
     def upload_poster(self, item, image, url=False):
         pass
 
-    @abstractmethod
     def upload_poster_overlay(self, item, image, url=False):
         pass
 
@@ -347,8 +371,14 @@ class Library(ABC):
     def background_update(self, item, image, tmdb=None, title=None):
         return self.image_update(item, image, tmdb=tmdb, title=title, poster=False)
 
+    def logo_update(self, item, image, tmdb=None, title=None):
+        return self.image_update(item, image, tmdb=tmdb, title=title, poster=False, image_type="logo")
+
+    def square_art_update(self, item, image, tmdb=None, title=None):
+        return self.image_update(item, image, tmdb=tmdb, title=title, poster=False, image_type="square_art")
+
     @abstractmethod
-    def image_update(self, item, image, tmdb=None, title=None, poster=True):
+    def image_update(self, item, image, tmdb=None, title=None, poster=True, image_type=None):
         pass
 
     def pick_image(self, title, images, prioritize_assets, download_url_assets, item_dir, image_type="poster", image_name=None):
@@ -360,13 +390,31 @@ class Library(ABC):
                 logger.debug(f"Method: {i} {image_type.capitalize()}: {images[i]}")
             if prioritize_assets and "asset_directory" in images:
                 return images["asset_directory"]
-            for attr in ["style_data", f"url_{image_type}", f"file_{image_type}", f"tmdb_{image_type}", "tmdb_profile",
-                         "tmdb_list_poster", "tvdb_list_poster", f"tvdb_{image_type}", "asset_directory",
-                         f"pmm_{image_type}",
-                         "tmdb_person", "tmdb_collection_details", "tmdb_actor_details", "tmdb_crew_details",
-                         "tmdb_director_details",
-                         "tmdb_producer_details", "tmdb_writer_details", "tmdb_movie_details", "tmdb_list_details",
-                         "tvdb_list_details", "tvdb_movie_details", "tvdb_show_details", "tmdb_show_details"]:
+            for attr in [
+                "style_data",
+                f"url_{image_type}",
+                f"file_{image_type}",
+                f"tmdb_{image_type}",
+                "tmdb_profile",
+                "tmdb_list_poster",
+                "tvdb_list_poster",
+                f"tvdb_{image_type}",
+                "asset_directory",
+                f"pmm_{image_type}",
+                "tmdb_person",
+                "tmdb_collection_details",
+                "tmdb_actor_details",
+                "tmdb_crew_details",
+                "tmdb_director_details",
+                "tmdb_producer_details",
+                "tmdb_writer_details",
+                "tmdb_movie_details",
+                "tmdb_list_details",
+                "tvdb_list_details",
+                "tvdb_movie_details",
+                "tvdb_show_details",
+                "tmdb_show_details",
+            ]:
                 if attr in images:
                     # New code to catch errors for TMDB images
                     ok = True
@@ -387,7 +435,14 @@ class Library(ABC):
                             return images["asset_directory"]
                         else:
                             try:
-                                return self.config.Requests.download_image(title, images[attr], item_dir, session=self.session, image_type=image_type, filename=image_name)
+                                return self.config.Requests.download_image(
+                                    title,
+                                    images[attr],
+                                    item_dir,
+                                    session=self.session,
+                                    image_type=image_type,
+                                    filename=image_name,
+                                )
                             except Failed as e:
                                 logger.error(e)
                     if attr in ["asset_directory", f"pmm_{image_type}"]:
@@ -404,8 +459,7 @@ class Library(ABC):
         pass
 
     @abstractmethod
-    def item_labels(self, item):
-        pass
+    def item_labels(self, item) -> list: ...
 
     @abstractmethod
     def find_poster_url(self, item):
@@ -413,8 +467,12 @@ class Library(ABC):
 
     def check_image_for_overlay(self, image_url, image_path, remove=False):
         image_path = self.config.Requests.download_image("", image_url, image_path, session=self.session).location
-        while util.is_locked(image_path):
-            time.sleep(1)
+        # Wait for file to be unlocked (up to 10 seconds)
+        timeout = 10
+        elapsed = 0
+        while util.is_locked(image_path) and elapsed < timeout:
+            time.sleep(0.1)
+            elapsed += 0.1
         with Image.open(image_path) as image:
             exif_tags = image.getexif()
         if 0x04BC in exif_tags and exif_tags[0x04BC] == "overlay":
@@ -430,21 +488,19 @@ class Library(ABC):
         pass
 
     @abstractmethod
-    def get_all(self, builder_level=None, load=False):
-        pass
+    def get_all(self, builder_level=None, load=False) -> list: ...
 
     @abstractmethod
+    def get_ids(self, item) -> tuple: ...
+
     def get_seasons(self, show):
         pass
 
-    @abstractmethod
     def get_episodes(self, season):
         pass
-    @abstractmethod
     def get_native_item(self, item_id):
         pass
 
-    @abstractmethod
     def get_all_native(self, builder_level=None, load=False):
         pass
 
@@ -452,7 +508,6 @@ class Library(ABC):
     def get_ratings(self, item):
         pass
 
-    @abstractmethod
     def apply_batch_operations(self, *, label_edits, genre_edits, rating_edits,
                                content_edits, studio_edits, date_edits, remove_edits,
                                reset_edits, lock_edits, unlock_edits, ep_rating_edits,
@@ -460,7 +515,6 @@ class Library(ABC):
                                ep_unlock_edits, name_display):
         pass
 
-    @abstractmethod
     def needs_collection_mode_update(self, collection, mode):
         pass
 
@@ -531,7 +585,6 @@ class Library(ABC):
         return self.cache_items()
 
 
-    @abstractmethod
     def get_provider_ids(self, item):
         pass
 
@@ -591,6 +644,7 @@ class Library(ABC):
         self.reverse_mal = {}
         for k, v in self.mal_map.items():
             self.reverse_mal[v] = k
+        self.plex_map_levels.update({self.type, self.type.lower()})
         logger.info("")
         logger.info(f"Processed {len(items)} {self.type}s")
 

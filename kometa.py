@@ -1,21 +1,62 @@
-import argparse, os, platform, re, sys, sysconfig, time, uuid
+import argparse
+import os
+import platform
+import re
+import sys
+import sysconfig
+import time
+import uuid
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
+from typing import TypeAlias
+
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.version import parse
+
 from modules.logs import MyLogger
 from packaging.version import Version, parse
+
+# Increase file descriptor limit to prevent exhaustion with large libraries.
+# The `resource` module is POSIX-only; on Windows the OS manages FD limits
+# differently (and the default 8192 stdio handle cap is already plenty), so
+# we skip this entirely there.
+try:
+    import resource
+except ImportError:
+    resource = None  # type: ignore[assignment]
+
+if resource is not None:
+    try:
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        if soft < 4096:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (min(hard, 4096), hard))
+    except (ValueError, OSError):
+        pass  # If we can't set it, continue anyway
+
 
 if sys.version_info[0] != 3 or sys.version_info[1] < 10:
     print("Python Version %s.%s.%s has been detected and is not supported. Kometa requires a minimum of Python 3.10.0." % (sys.version_info[0], sys.version_info[1], sys.version_info[2]))
     sys.exit(0)
 
 try:
-    import arrapi, lxml, pathvalidate, PIL, plexapi, psutil, dateutil, requests, ruamel.yaml, schedule, setuptools, tmdbapis
-    from dotenv import load_dotenv, version as dotenv_version
+    import arrapi
+    import dateutil
+    import lxml
+    import pathvalidate
+    import PIL
+    import plexapi
+    import plexapi.server  # needed for plexapi.server.TIMEOUT assignment
+    import psutil
+    import requests
+    import ruamel.yaml
+    import schedule
+    import setuptools
+    import tmdbapis
+    from dotenv import load_dotenv
+    from dotenv import version as dotenv_version
     from PIL import ImageFile
-    from plexapi import server
-    from plexapi.exceptions import NotFound
-    from plexapi.video import Show, Season
+    from plexapi.exceptions import BadRequest, NotFound
 except (ModuleNotFoundError, ImportError) as ie:
     print(f"Requirements Error: Requirements are not installed.\nPlease follow the documentation for instructions on installing requirements. ({ie})")
     sys.exit(0)
@@ -30,15 +71,17 @@ system_versions = {
     "PlexAPI": plexapi.__version__,
     "psutil": psutil.__version__,
     "python-dotenv": dotenv_version.__version__,
-    "python-dateutil": dateutil.__version__, # noqa
+    "python-dateutil": dateutil.__version__,  # type: ignore[attr-defined]  # dateutil doesn't declare __version__ in stubs
     "pywin32": None,
-    "requests": requests.__version__,
+    "requests": requests.__version__,  # type: ignore[attr-defined]  # requests declares __version__ as private
     "ruamel.yaml": ruamel.yaml.__version__,
     "schedule": None,
     "setuptools": setuptools.__version__,
     "tenacity": None,
-    "tmdbapis": tmdbapis.__version__
+    "tmdbapis": tmdbapis.__version__,
 }
+
+LibraryRunStatus: TypeAlias = dict[str, dict[str, str]]
 
 default_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config")
 load_dotenv(os.path.join(default_dir, ".env"))
@@ -72,7 +115,13 @@ arguments = {
     "read-only-config": {"args": "ro", "type": "bool", "help": "Run without writing to the config"},
     "divider": {"args": "d", "type": "str", "default": "=", "help": "Character that divides the sections (Default: '=')"},
     "width": {"args": "w", "type": "int", "default": 100, "help": "Screen Width (Default: 100)"},
-    "low-priority": {"args": "lp", "type": "bool", "help": "Run Kometa with lower priority"}
+    "low-priority": {"args": "lp", "type": "bool", "help": "Run Kometa with lower priority"},
+    "validate": {"args": ["va", "validate-config"], "type": "bool", "help": "Validate config.yml and all linked YAML files without running"},
+    "validate-level": {"args": "vl", "type": "str", "default": "structure", "help": "Validation depth: syntax | structure | full (Default: structure)"},
+    "validate-schema": {"args": ["vs", "validate-schemas"], "type": "bool", "help": "Also validate each YAML file against its corresponding JSON schema"},
+    "schema-path": {"args": "sp", "type": "str", "default": None, "help": "Path to the json-schema/ directory (default: ./json-schema/ next to kometa.py)"},
+    "validate-file": {"args": ["vf", "validate-files"], "type": "str", "default": None, "help": "Validate a single YAML file against its auto-detected schema"},
+    "validate-dir": {"args": ["vd", "validate-directory"], "type": "str", "default": None, "help": "Validate all YAML files in a directory against their auto-detected schemas"},
 }
 
 parser = argparse.ArgumentParser()
@@ -82,7 +131,7 @@ for arg_key, arg_data in arguments.items():
     kwargs = {"dest": arg_key.replace("-", "_"), "help": arg_data["help"]}
     if arg_data["type"] == "bool":
         kwargs["action"] = "store_true"
-        kwargs["default"] = False # noqa
+        kwargs["default"] = False  # noqa
     else:
         kwargs["type"] = int if arg_data["type"] == "int" else str
 
@@ -176,12 +225,16 @@ for _, sv in secret_args.items():
         run_arg = run_arg.replace(sv, "(redacted)")
 
 try:
-    import git # noqa
+    import git  # noqa
+
     system_versions["GitPython"] = git.__version__
-    from git import Repo, InvalidGitRepositoryError # noqa
+    from git import InvalidGitRepositoryError, Repo  # noqa
+
     try:
-        git_branch = Repo(path=".").head.ref.name # noqa
-    except InvalidGitRepositoryError:
+        git_branch = Repo(path=".").head.ref.name  # noqa
+    except (InvalidGitRepositoryError, TypeError):
+        # InvalidGitRepositoryError: not running from a git checkout
+        # TypeError: HEAD is detached (e.g. checked out by SHA, common in CI)
         git_branch = None
 except ImportError:
     git_branch = None
@@ -205,63 +258,60 @@ elif not os.path.exists(os.path.join(default_dir, "config.yml")):
     try:
         response = requests.get(github_url, timeout=10)
         if response.status_code == 200:
-            with open(config_path, 'w') as config_file:
+            with open(config_path, "w") as config_file:
                 config_file.write(response.text)
             print(f"Configuration File ('config.yml') has been downloaded from GitHub (Branch: '{git_branch}') and saved as '{config_path}'. Please update this file with your API keys and other required settings.")
             sys.exit(1)
         else:
             raise requests.RequestException
-    except requests.RequestException as e:
+    except requests.RequestException:
         print(f"Config Error: Unable to download the configuration file from GitHub (URL: {github_url}'). Please save it as '{config_path}' before running Kometa again.")
         sys.exit(1)
 
 
-logger = MyLogger("Kometa", default_dir, run_args["width"], run_args["divider"][0], run_args["ignore-ghost"],
-                  run_args["tests"] or run_args["debug"], run_args["trace"], run_args["log-requests"])
+logger = MyLogger("Kometa", default_dir, run_args["width"], run_args["divider"][0], run_args["ignore-ghost"], run_args["tests"] or run_args["debug"], run_args["trace"], run_args["log-requests"])
 
-from modules import util
+from modules import util  # noqa: E402
+
 util.logger = logger
-from modules.builder import CollectionBuilder
-from modules.config import ConfigFile
-from modules.request import Requests
-from modules.util import Failed, FilterFailed, NonExisting, NotScheduled, Deleted
+from modules.builder import CollectionBuilder  # noqa: E402
+from modules.config import ConfigFile  # noqa: E402
+from modules.request import Requests  # noqa: E402
+from modules.util import BuilderValidationError, Deleted, Failed, FilterFailed, MappingConvertError, NonExisting, NotScheduled, OverlayError, ServiceError  # noqa: E402
+
+plex_maintenance_error = "Plex Critical Error: Response 503 (service_unavailable) received. Plex may be running startup or maintenance tasks. Kometa cannot proceed until this is complete"
+
+
+def is_plex_maintenance_error(error):
+    error_text = str(error)
+    return isinstance(error, BadRequest) and "(503) service_unavailable" in error_text and ('title="Maintenance"' in error_text or "startup maintenance tasks" in error_text or "currently running maintenance tasks" in error_text)
+
+
+def get_critical_error_message(error):
+    return plex_maintenance_error if is_plex_maintenance_error(error) else error
+
+
+def log_critical_exception(error):
+    if is_plex_maintenance_error(error):
+        logger.critical(plex_maintenance_error)
+    else:
+        logger.stacktrace()
+        logger.critical(error)
+
 
 def my_except_hook(exctype, value, tb):
     if issubclass(exctype, KeyboardInterrupt):
         sys.__excepthook__(exctype, value, tb)
+    elif is_plex_maintenance_error(value):
+        logger.critical(plex_maintenance_error)
     else:
         logger.critical("Uncaught Exception", exc_info=(exctype, value, tb))
+
 
 sys.excepthook = my_except_hook
 
 old_send = requests.Session.send
 
-# External APIs that we don't want hanging the entire library on a single call.
-# Tighter timeout (connect, read) so a stalled API errors out fast and the
-# per-API circuit breaker in operations.py can pause it for the rest of the run.
-_EXTERNAL_API_HOSTS = (
-    "api.themoviedb.org",
-    "image.tmdb.org",
-    "api4.thetvdb.com",
-    "api.thetvdb.com",
-    "thetvdb.com",
-    "www.imdb.com",
-    "imdb.com",
-    "caching.graphql.imdb.com",
-    "api.graphql.imdb.com",
-    "graphql.imdb.com",
-    "api.mdblist.com",
-    "mdblist.com",
-    "www.omdbapi.com",
-    "omdbapi.com",
-    "api.trakt.tv",
-    "api.myanimelist.net",
-    "api.anidb.net",
-    "anidb.net",
-    "letterboxd.com",
-    "www.letterboxd.com",
-)
-_EXTERNAL_API_TIMEOUT = (10, 20)  # (connect, read) — fail fast so the run keeps moving
 
 def new_send(*send_args, **kwargs):
     # send_args = (self, request)
@@ -281,6 +331,7 @@ def new_send(*send_args, **kwargs):
     elif kwargs.get("timeout", None) is None:
         kwargs["timeout"] = run_args["timeout"]
     return old_send(*send_args, **kwargs)
+
 
 requests.Session.send = new_send
 
@@ -321,7 +372,9 @@ plexapi.BASE_HEADERS["X-Plex-Product"] = "Kometa"
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 if util.windows:
-    import win32api, win32process
+    import win32api
+    import win32process
+
     site_packages = sysconfig.get_paths()["platlib"]
     try:
         with open(os.path.join(site_packages, "pywin32.version.txt")) as v:
@@ -339,12 +392,63 @@ if run_args["low-priority"]:
         logger.stacktrace()
         logger.critical(f"Failed to set priority: {e}")
 
+
 def process(attrs):
     with ProcessPoolExecutor(max_workers=1) as executor:
         executor.submit(start, *[attrs])
 
+
+def should_sync_collection(builder):
+    return builder.sync and builder.build_collection and bool(builder.remove_item_map) and (not builder.found_items or len(builder.found_items) + builder.beginning_count >= builder.minimum)
+
+
+def collection_count_after_run(beginning_count, items_added, items_removed):
+    return max(0, items_added + beginning_count - items_removed)
+
+
+def summarize_duplicate_collections(collections):
+    titles = {}
+    counts = {}
+    for collection in collections:
+        title = str(getattr(collection, "title", "")).strip()
+        if not title:
+            continue
+        key = title.casefold()
+        counts[key] = counts.get(key, 0) + 1
+        titles.setdefault(key, title)
+    return sorted([(titles[key], count) for key, count in counts.items() if count > 1], key=lambda item: (-item[1], item[0].casefold()))
+
+
+def report_duplicate_collections(config):
+    duplicate_libraries = []
+    for library in config.libraries:
+        if getattr(library, "skip_library", False):
+            continue
+        try:
+            duplicate_titles = summarize_duplicate_collections(library.get_all_collections())
+        except Exception as e:
+            logger.warning(f"Plex Warning: Failed to scan duplicate collections in {library.name}: {e}")
+            continue
+        if duplicate_titles:
+            duplicate_libraries.append((library.name, duplicate_titles))
+
+    if duplicate_libraries:
+        logger.separator("Duplicate Collections", space=False, border=False)
+        logger.info("")
+        for library_name, duplicate_titles in duplicate_libraries:
+            logger.warning(f"Plex Warning: Duplicate collection titles detected in {library_name} Library")
+            for title, count in duplicate_titles:
+                logger.warning(f"  {count} instances: {title}")
+            logger.warning("If this is unexpected, consider checking Plex DBRepair.")
+            logger.warning("")
+
+
 def start(attrs):
     try:
+        if run_args["validate-file"] or run_args["validate-dir"]:
+            from modules.logs import VALIDATE_LOG
+
+            logger.main_log = os.path.join(logger.log_dir, VALIDATE_LOG)
         logger.add_main_handler()
         logger.separator()
         logger.info("")
@@ -371,7 +475,20 @@ def start(attrs):
         if not is_docker and not is_linuxserver:
             try:
                 with open(os.path.abspath(os.path.join(os.path.dirname(__file__), "requirements.txt")), "r") as file:
-                    required_versions = {ln.split("==")[0]: ln.split("==")[1].split(";")[0].strip() for ln in file.readlines()}
+                    required_specs = {}
+                    required_versions = {}
+                    for line in file:
+                        line = line.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        try:
+                            requirement = Requirement(line)
+                        except InvalidRequirement:
+                            continue
+                        required_specs[requirement.name] = requirement.specifier
+                        pinned_versions = [spec.version for spec in requirement.specifier if spec.operator == "=="]
+                        if pinned_versions:
+                            required_versions[requirement.name] = pinned_versions[0]
                 v1 = parse("0")
                 v2 = parse("0")
                 for req_name, sys_ver in system_versions.items():
@@ -384,13 +501,20 @@ def start(attrs):
                             logger.info(f"    {req_name} version: {v1} requires an update to: {v2}")
                         if v1 > v2:
                             logger.info(f"    {req_name} version: {v1} does not match expected: {v2}")
+                        if req_name not in required_versions and req_name in required_specs and v1 not in required_specs[req_name]:
+                            logger.info(f"    {req_name} version: {v1} does not satisfy expected: {required_specs[req_name]}")
             except FileNotFoundError:
                 logger.error("    File Error: requirements.txt not found")
-        if "time" in attrs and attrs["time"]:                   start_type = f"{attrs['time']} "
-        elif run_args["tests"]:                                 start_type = "Test "
-        elif "collections" in attrs and attrs["collections"]:   start_type = "Collections "
-        elif "libraries" in attrs and attrs["libraries"]:       start_type = "Libraries "
-        else:                                                   start_type = ""
+        if "time" in attrs and attrs["time"]:
+            start_type = f"{attrs['time']} "
+        elif run_args["tests"]:
+            start_type = "Test "
+        elif "collections" in attrs and attrs["collections"]:
+            start_type = "Collections "
+        elif "libraries" in attrs and attrs["libraries"]:
+            start_type = "Libraries "
+        else:
+            start_type = ""
         start_time = datetime.now()
         if "time" not in attrs:
             attrs["time"] = start_time.strftime("%H:%M")
@@ -407,7 +531,9 @@ def start(attrs):
         attrs["overlays_only"] = run_args["overlays-only"]
         attrs["plex_url"] = plex_url
         attrs["plex_token"] = plex_token
+
         logger.separator(debug=True)
+
         logger.debug(f"Run Command: {run_arg}")
         for akey, adata in arguments.items():
             if isinstance(adata["help"], str):
@@ -419,21 +545,58 @@ def start(attrs):
             for sec in secret_args:
                 logger.debug(f"--kometa-{sec} (KOMETA_{sec.upper().replace('-', '_')}): (redacted)")
             logger.debug("")
+
+        logger.separator(debug=True)
+
+        if run_args["validate"]:
+            level = run_args["validate-level"]
+            if level not in ("syntax", "structure", "full"):
+                logger.error(f"--validate-level must be syntax, structure, or full. Got: {level!r}")
+                sys.exit(1)
+            from modules.validator import ConfigValidator
+
+            schema_dir = run_args["schema-path"] or os.path.join(os.path.dirname(os.path.abspath(__file__)), "json-schema")
+            validator = ConfigValidator(
+                my_requests,
+                default_dir,
+                attrs,
+                secret_args,
+                level=level,
+                validate_schema=run_args["validate-schema"],
+                schema_path=schema_dir,
+            )
+            passed, _errors, _warnings = validator.validate()
+            sys.exit(0 if passed else 1)
+
+        if run_args["validate-file"] or run_args["validate-dir"]:
+            from modules.validator import FileSetValidator, collect_yaml_files
+
+            source = run_args["validate-file"] or run_args["validate-dir"]
+            schema_dir = run_args["schema-path"] or os.path.join(os.path.dirname(os.path.abspath(__file__)), "json-schema")
+            paths = collect_yaml_files(source)
+            if not paths:
+                logger.error(f"No YAML files found at: {source}")
+                sys.exit(1)
+            validator = FileSetValidator(paths, schema_dir)
+            passed, *_ = validator.validate()
+            sys.exit(0 if passed else 1)
+
         logger.separator(f"Starting {start_type}Run")
         config = None
         stats = {"created": 0, "modified": 0, "deleted": 0, "added": 0, "unchanged": 0, "removed": 0, "radarr": 0, "sonarr": 0, "names": []}
         try:
             config = ConfigFile(my_requests, default_dir, attrs, secret_args)
         except Exception as e:
-            logger.stacktrace()
-            logger.critical(e)
+            log_critical_exception(e)
         else:
-            try:
-                stats = run_config(config, stats)
-            except Exception as e:
-                config.notify(e)
-                logger.stacktrace()
-                logger.critical(e)
+            if sum([attrs["collection_only"], attrs["metadata_only"], attrs["playlist_only"], attrs["operations_only"], attrs["overlays_only"]]) > 1:
+                logger.error("Error: Only one of --collections-only, --metadata-only, --playlists-only, --operations-only, or --overlays-only can be specified at a time.")
+            else:
+                try:
+                    stats = run_config(config, stats)
+                except Exception as e:
+                    config.notify(get_critical_error_message(e))
+                    log_critical_exception(e)
         logger.info("")
         end_time = datetime.now()
         run_time = str(end_time - start_time).split(".")[0]
@@ -443,28 +606,98 @@ def start(attrs):
             except Failed as e:
                 logger.stacktrace()
                 logger.error(f"Webhooks Error: {e}")
+            # Close cache connection to clean up WAL/SHM files
+            if config.Cache:
+                config.Cache.close()
         version_line = f"Version: {my_requests.local}"
         if my_requests.newest:
             version_line = f"{version_line}        Newest Version: {my_requests.newest}"
         try:
             log_data = {}
-            no_overlays = []
-            no_overlays_count = 0
-            convert_errors = {}
+            no_overlays = []  # noqa: F841
+            no_overlays_count = 0  # noqa: F841
+            convert_errors = {}  # noqa: F841
 
             other_log_groups = [
                 ("No Items found for", r"No Items found for .* \(\d+\) (.*)"),
-                ("Convert Warning: No TVDb ID or IMDb ID found for AniDB ID:", r"Convert Warning: No TVDb ID or IMDb ID found for AniDB ID: (.*)"),
-                ("Convert Warning: No AniDB ID Found for AniList ID:", r"Convert Warning: No AniDB ID Found for AniList ID: (.*)"),
-                ("Convert Warning: No AniDB ID Found for MyAnimeList ID:", r"Convert Warning: No AniDB ID Found for MyAnimeList ID: (.*)"),
-                ("Convert Warning: No IMDb ID Found for TMDb ID:", r"Convert Warning: No IMDb ID Found for TMDb ID: (.*)"),
-                ("Convert Warning: No TMDb ID Found for IMDb ID:", r"Convert Warning: No TMDb ID Found for IMDb ID: (.*)"),
-                ("Convert Warning: No TVDb ID Found for TMDb ID:", r"Convert Warning: No TVDb ID Found for TMDb ID: (.*)"),
-                ("Convert Warning: No TMDb ID Found for TVDb ID:", r"Convert Warning: No TMDb ID Found for TVDb ID: (.*)"),
-                ("Convert Warning: No IMDb ID Found for TVDb ID:", r"Convert Warning: No IMDb ID Found for TVDb ID: (.*)"),
-                ("Convert Warning: No TVDb ID Found for IMDb ID:", r"Convert Warning: No TVDb ID Found for IMDb ID: (.*)"),
-                ("Convert Warning: No AniDB ID to Convert to MyAnimeList ID for Guid:", r"Convert Warning: No AniDB ID to Convert to MyAnimeList ID for Guid: (.*)"),
+                ("Overlay Warning: No 'anidb_average_rating' found", r"Overlay Warning: No 'anidb_average_rating' found for (.*)"),
+                ("Overlay Warning: No 'anidb_rating' found", r"Overlay Warning: No 'anidb_rating' found for (.*)"),
+                ("Overlay Warning: No 'anidb_score_rating' found", r"Overlay Warning: No 'anidb_score_rating' found for (.*)"),
+                ("Overlay Warning: No 'audience_rating' found", r"Overlay Warning: No 'audience_rating' found for (.*)"),
+                ("Overlay Warning: No 'critic_rating' found", r"Overlay Warning: No 'critic_rating' found for (.*)"),
+                ("Overlay Warning: No 'imdb_rating' found", r"Overlay Warning: No 'imdb_rating' found for (.*)"),
+                ("Overlay Warning: No 'mal_rating' found", r"Overlay Warning: No 'mal_rating' found for (.*)"),
+                ("Overlay Warning: No 'mdb_average_rating' found", r"Overlay Warning: No 'mdb_average_rating' found for (.*)"),
+                ("Overlay Warning: No 'mdb_imdb_rating' found", r"Overlay Warning: No 'mdb_imdb_rating' found for (.*)"),
+                ("Overlay Warning: No 'mdb_letterboxd_rating' found", r"Overlay Warning: No 'mdb_letterboxd_rating' found for (.*)"),
+                ("Overlay Warning: No 'mdb_metacritic_rating' found", r"Overlay Warning: No 'mdb_metacritic_rating' found for (.*)"),
+                ("Overlay Warning: No 'mdb_metacriticuser_rating' found", r"Overlay Warning: No 'mdb_metacriticuser_rating' found for (.*)"),
+                ("Overlay Warning: No 'mdb_myanimelist_rating' found", r"Overlay Warning: No 'mdb_myanimelist_rating' found for (.*)"),
+                ("Overlay Warning: No 'mdb_rating' found", r"Overlay Warning: No 'mdb_rating' found for (.*)"),
+                ("Overlay Warning: No 'mdb_tmdb_rating' found", r"Overlay Warning: No 'mdb_tmdb_rating' found for (.*)"),
+                ("Overlay Warning: No 'mdb_tomatoesaudience_rating' found", r"Overlay Warning: No 'mdb_tomatoesaudience_rating' found for (.*)"),
+                ("Overlay Warning: No 'mdb_tomatoes_rating' found", r"Overlay Warning: No 'mdb_tomatoes_rating' found for (.*)"),
+                ("Overlay Warning: No 'mdb_trakt_rating' found", r"Overlay Warning: No 'mdb_trakt_rating' found for (.*)"),
+                ("Overlay Warning: No 'omdb_imdb_rating' found", r"Overlay Warning: No 'omdb_imdb_rating' found for (.*)"),
+                ("Overlay Warning: No 'omdb_metascore_rating' found", r"Overlay Warning: No 'omdb_metascore_rating' found for (.*)"),
+                ("Overlay Warning: No 'omdb_rating' found", r"Overlay Warning: No 'omdb_rating' found for (.*)"),
+                ("Overlay Warning: No 'omdb_tomatoes_rating' found", r"Overlay Warning: No 'omdb_tomatoes_rating' found for (.*)"),
+                ("Overlay Warning: No 'plex_imdb_rating' found", r"Overlay Warning: No 'plex_imdb_rating' found for (.*)"),
+                ("Overlay Warning: No 'plex_tmdb_rating' found", r"Overlay Warning: No 'plex_tmdb_rating' found for (.*)"),
+                ("Overlay Warning: No 'plex_tomatoesaudience_rating' found", r"Overlay Warning: No 'plex_tomatoesaudience_rating' found for (.*)"),
+                ("Overlay Warning: No 'plex_tomatoes_rating' found", r"Overlay Warning: No 'plex_tomatoes_rating' found for (.*)"),
+                ("Overlay Warning: No 'plex_user_rating' found", r"Overlay Warning: No 'plex_user_rating' found for (.*)"),
+                ("Overlay Warning: No 'tmdb_rating' found", r"Overlay Warning: No 'tmdb_rating' found for (.*)"),
+                ("Overlay Warning: No 'trakt_rating' found", r"Overlay Warning: No 'trakt_rating' found for (.*)"),
+                ("Overlay Warning: No 'trakt_user_rating' found", r"Overlay Warning: No 'trakt_user_rating' found for (.*)"),
+                ("Overlay Warning: No 'user_rating' found", r"Overlay Warning: No 'user_rating' found for (.*)"),
+                ("Overlays Attempted on", r"Overlays Attempted on (.*): .+"),
+                ("Convert Warning: No TVDb ID or IMDb ID found for AniDB ID", r"Convert Warning: No TVDb ID or IMDb ID found for AniDB ID '(.*)'"),
+                ("Convert Warning: No AniDB ID Found for AniList ID", r"Convert Warning: No AniDB ID Found for AniList ID '(.*)'"),
+                ("Convert Warning: No AniDB ID Found for MyAnimeList ID", r"Convert Warning: No AniDB ID Found for MyAnimeList ID '(.*)'"),
+                ("Convert Warning: No IMDb ID found for TMDb ID", r"Convert Warning: No IMDb ID found for TMDb ID '(.*)'"),
+                ("Convert Warning: No TMDb ID found for IMDb ID", r"Convert Warning: No TMDb ID found for IMDb ID '(.*)'"),
+                ("Convert Warning: No TVDb ID found for TMDb ID", r"Convert Warning: No TVDb ID found for TMDb ID '(.*)'"),
+                ("Convert Warning: No TMDb ID found for TVDb ID", r"Convert Warning: No TMDb ID found for TVDb ID '(.*)'"),
+                ("Convert Warning: No IMDb ID found for TVDb ID", r"Convert Warning: No IMDb ID found for TVDb ID '(.*)'"),
+                ("Convert Warning: No TVDb ID found for IMDb ID", r"Convert Warning: No TVDb ID found for IMDb ID '(.*)'"),
+                ("Convert Warning: No AniDB ID to Convert to MyAnimeList ID for Guid", r"Convert Warning: No AniDB ID to Convert to MyAnimeList ID for Guid '(.*)'"),
                 ("Convert Warning: No MyAnimeList Found for AniDB ID:", r"Convert Warning: No MyAnimeList Found for AniDB ID: (.*) of Guid: .*"),
+                ("Convert Error: No AniDB ID found for IMDb ID", r"Convert Error: No AniDB ID found for IMDb ID '(.*)'"),
+                ("Convert Error: No AniDB ID found for TVDb ID", r"Convert Error: No AniDB ID found for TVDb ID '(.*)'"),
+                ("Convert Error: No MyAnimeList ID found for AniDB ID", r"Convert Error: No MyAnimeList ID found for AniDB ID '(.*)'"),
+                ("Convert Error: No AniDB Anime found for AniDB ID", r"Convert Error: No AniDB Anime found for AniDB ID '(.*)'"),
+                ("Convert Error: No AniDB ID found for MyAnimeList ID", r"Convert Error: No AniDB ID found for MyAnimeList ID '(.*)'"),
+                ("Convert Error: No mapping found for AniDB ID", r"Convert Error: No mapping found for AniDB ID '(.*)'"),
+                ("Convert Error: No TVDb ID found for TMDb ID", r"Convert Error: No TVDb ID found for TMDb ID '(.*)'"),
+            ]
+            summary_log_groups = [
+                (r"AniDB Error: No valid AniDB IDs found in input: .+", "AniDB Error: No valid AniDB IDs found in input"),
+                (r"AniList Error: No valid AniList IDs in .+", "AniList Error: No valid AniList IDs"),
+                (r"Asset Warning: Asset Directory Not Found and Created: .+", "Asset Warning: Asset Directory not found and created"),
+                (r"Asset Warning: No poster or background found in the assets folder '.+'", "Asset Warning: No poster or background found in the assets folder"),
+                (r"Asset Warning: No poster found for '.+' in the assets folder '.+'", "Asset Warning: No poster found in the assets folder"),
+                (r"Asset Warning: No poster '.+' found in the assets folders", "Asset Warning: No poster found in the assets folders"),
+                (r"Asset Warning: No poster or background found in an assets folder for '.+'", "Asset Warning: No poster or background found in an assets folder"),
+                (r"Asset Warning: Unable to find asset folder: '.+'", "Asset Warning: Unable to find asset folder"),
+                (r"Collection Error: No valid Plex Collections in .+", "Collection Error: No valid Plex Collections"),
+                (r".+ Error: No builders were found", "Error: No builders were found"),
+                (r".+ Error: No Plex Filter Created", "Error: No Plex Filter Created"),
+                (r".+ Error: No Filter Created", "Error: No Filter Created"),
+                (r"Letterboxd Error: No List Items found in .+", "Letterboxd Error: No List Items found"),
+                (r"Letterboxd Error: TMDb Movie ID not found at .+ item is type .+ with tmdb_id .+\.", "Letterboxd Error: TMDb Movie ID not found"),
+                (r"Letterboxd Warning: TMDb link for .+ is for a TV show, not a movie; ignoring TMDb ID .+ from link\.", "Letterboxd Warning: TMDb link is for a TV show, not a movie"),
+                (r"Mojo Error: No List Items found in .+", "Mojo Error: No List Items found"),
+                (r"Text File Error: No IDs found at .+", "Text File Error: No IDs found"),
+                (r"Text File Error: No supported IDs found in .+", "Text File Error: No supported IDs found"),
+                (r"TMDb Error: No valid TMDb IDs in .+", "TMDb Error: No valid TMDb IDs"),
+                (r"Trakt Error: No TVDb ID found for .+", "Trakt Error: No TVDb ID found"),
+                (r"Trakt Error: No valid Trakt Lists in .+", "Trakt Error: No valid Trakt Lists"),
+                (r"TVDb Error: No TVDb IDs found at .+", "TVDb Error: No TVDb IDs found"),
+                (r".+ Warning: No Background Found at .+", "Warning: No Background Found"),
+                (r".+ Warning: No Logo Found at .+", "Warning: No Logo Found"),
+                (r".+ Warning: No Poster Found at .+", "Warning: No Poster Found"),
+                (r".+ Warning: No Square Art Found at .+", "Warning: No Square Art Found"),
             ]
             other_message = {}
 
@@ -476,33 +709,77 @@ def start(attrs):
                             other = False
                             for key, reg in other_log_groups:
                                 if log_line.startswith(key):
+                                    match = re.match(reg, log_line)
+                                    if not match:
+                                        continue
                                     other = True
-                                    _name = re.match(reg, log_line).group(1)
+                                    _name = match.group(1)
                                     if key not in other_message:
                                         other_message[key] = {"list": [], "count": 0}
                                     other_message[key]["count"] += 1
-                                    if _name not in other_message[key]:
+                                    if _name not in other_message[key]["list"]:
                                         other_message[key]["list"].append(_name)
                             if other is False:
+                                if not (run_args["trace"] or run_args["log-requests"]):
+                                    for reg, replacement in summary_log_groups:
+                                        if re.match(reg, log_line):
+                                            log_line = replacement
+                                            break
                                 if err_type not in log_data:
                                     log_data[err_type] = []
                                 log_data[err_type].append(log_line)
 
-            if "No Items found for" in other_message:
-                logger.separator(f"Overlay Errors Summary", space=False, border=False)
+            if log_data or other_message:
+                logger.separator(space=False)
                 logger.info("")
-                logger.info(f"No Items found for {other_message['No Items found for']['count']} Overlays: {other_message['No Items found for']['list']}")
+                logger.info_center("The following errors and warnings were identified during the run.")
+                logger.info_center("Search your log for any of the messages below to find where they originated.")
+                logger.info("")
+
+            overlay_title = False
+            details = run_args["trace"] or run_args["log-requests"]
+            for key, _ in other_log_groups:
+                if (key == "No Items found for" or key.startswith("Overlay Warning") or key == "Overlays Attempted on") and key in other_message:
+                    if overlay_title is False:
+                        logger.separator("Overlay Summary", space=False, border=False)
+                        logger.info("")
+                        logger.info("Count | Message")
+                        logger.separator(f"{logger.separating_character * 5}|", space=False, border=False, side_space=False, left=True)
+                        overlay_title = True
+                    overlay_count = other_message[key]["count"]
+                    overlay_line = "No Items found" if key == "No Items found for" else key
+                    if details:
+                        logger.info(f"{overlay_count:>5} | {overlay_line}: {other_message[key]['list']}")
+                    else:
+                        logger.info(f"{overlay_count:>5} | {overlay_line}")
+            if overlay_title:
                 logger.info("")
 
             convert_title = False
+
+            def convert_summary_title(key):
+                summary = key.split(": ", 1)[1].rstrip(":")
+                if " for " not in summary:
+                    return summary
+                message, source = summary.rsplit(" for ", 1)
+                source = source.replace(" ID", " IDs").replace(" Guid", " Guids")
+                return f"{message} for {source}"
+
             for key, _ in other_log_groups:
-                if key.startswith("Convert Warning") and key in other_message:
+                if key.startswith(("Convert Warning", "Convert Error")) and key in other_message:
                     if convert_title is False:
                         logger.separator("Convert Summary", space=False, border=False)
                         logger.info("")
+                        logger.info("Count | Message")
+                        logger.separator(f"{logger.separating_character * 5}|", space=False, border=False, side_space=False, left=True)
                         convert_title = True
-                    logger.info(f"{key[17:]}")
-                    logger.info(", ".join(other_message[key]["list"]))
+                    count = other_message[key]["count"]
+                    convert_line = convert_summary_title(key)
+                    if details:
+                        logger.info(f"{count:>5} | {convert_line}:")
+                        logger.info(f"    {', '.join(other_message[key]['list'])}")
+                    else:
+                        logger.info(f"{count:>5} | {convert_line}")
             if convert_title:
                 logger.info("")
 
@@ -521,22 +798,21 @@ def start(attrs):
             logger.stacktrace()
             logger.error(f"Report Error: {e}")
 
-        start_str = start_time.strftime('%H:%M:%S %Y-%m-%d')
-        end_str = end_time.strftime('%H:%M:%S %Y-%m-%d')
+        start_str = start_time.strftime("%H:%M:%S %Y-%m-%d")
+        end_str = end_time.strftime("%H:%M:%S %Y-%m-%d")
         logger.separator(f"Finished {start_type}Run\n{version_line}\nStart Time: {start_str}     Finished: {end_str}     Run Time: {run_time}")
         logger.remove_main_handler()
     except Exception as e:
-        logger.stacktrace()
-        logger.critical(e)
+        log_critical_exception(e)
+
 
 def run_config(config, stats):
-    CollectionBuilder.load_persistent_cache(config.config_path)
-    library_status = run_libraries(config)
+    library_status, collections_ran = run_libraries(config)
 
     playlist_status = {}
     playlist_stats = {}
     if (config.playlist_files or config.general["playlist_report"]) and not run_args["overlays-only"] and not run_args["metadata-only"] and not run_args["operations-only"] and not run_args["collections-only"] and not config.requested_files:
-        #logger.add_playlists_handler()
+        # logger.add_playlists_handler()
         if config.playlist_files:
             playlist_status, playlist_stats = run_playlists(config)
         if config.general["playlist_report"]:
@@ -557,7 +833,7 @@ def run_config(config, stats):
                 logger.separator(f"{logger.separating_character * max_length}|", space=False, border=False, side_space=False, left=True)
                 for playlist_name, users in report.items():
                     logger.info(f"{playlist_name:<{max_length}} | {'all' if len(users) == len(library.users) + 1 else ', '.join(users)}")
-        #logger.remove_playlists_handler()
+        # logger.remove_playlists_handler()
 
     amount_added = 0
     if not run_args["operations-only"] and not run_args["overlays-only"] and not run_args["playlists-only"]:
@@ -578,7 +854,7 @@ def run_config(config, stats):
             for library in config.libraries:
                 if library.run_again:
                     try:
-                        #logger.re_add_library_handler(library.mapping_name)
+                        # logger.re_add_library_handler(library.mapping_name)
                         os.environ["PLEXAPI_PLEXAPI_TIMEOUT"] = str(library.timeout)
                         logger.info("")
                         logger.separator(f"{library.name} Library Run Again")
@@ -594,11 +870,10 @@ def run_config(config, stats):
                                 library.notify(e, collection=builder.name, critical=False)
                                 logger.stacktrace()
                                 logger.error(e)
-                        #logger.remove_library_handler(library.mapping_name)
+                        # logger.remove_library_handler(library.mapping_name)
                     except Exception as e:
-                        library.notify(e)
-                        logger.stacktrace()
-                        logger.critical(e)
+                        library.notify(get_critical_error_message(e))
+                        log_critical_exception(e)
 
     if not run_args["collections-only"] and not run_args["overlays-only"] and not run_args["playlists-only"]:
         used_url = []
@@ -623,6 +898,8 @@ def run_config(config, stats):
                 longest = len(title)
 
     def print_status(status):
+        if not status:
+            return
         logger.info(f"{'Title':^{longest}} |   +   |   =   |   -   | Run Time | {'Status'}")
         breaker = f"{logger.separating_character * longest}|{logger.separating_character * 7}|{logger.separating_character * 7}|{logger.separating_character * 7}|{logger.separating_character * 10}|"
         logger.separator(breaker, space=False, border=False, side_space=False, left=True)
@@ -648,9 +925,12 @@ def run_config(config, stats):
         print_status(library.status)
     if playlist_status:
         logger.info("")
-        logger.separator(f"Playlists Summary", space=False, border=False)
+        logger.separator("Playlists Summary", space=False, border=False)
         logger.info("")
         print_status(playlist_status)
+
+    if collections_ran:
+        report_duplicate_collections(config)
 
     stats["added"] += amount_added
     for library in config.libraries:
@@ -676,8 +956,11 @@ def run_config(config, stats):
     CollectionBuilder.save_persistent_cache()
     return stats
 
-def run_libraries(config):
-    library_status = {}
+
+def run_libraries(config) -> tuple[LibraryRunStatus, bool]:
+    library_status: LibraryRunStatus = {}
+    collections_ran = False
+    config.run_libraries = []
     for library in config.libraries:
         if library.skip_library:
             logger.info("")
@@ -685,8 +968,8 @@ def run_libraries(config):
             continue
         library_status[library.name] = {}
         try:
-            #logger.add_library_handler(library.mapping_name)
-            plexapi.server.TIMEOUT = library.timeout
+            # logger.add_library_handler(library.mapping_name)
+            plexapi.server.TIMEOUT = library.timeout  # pyright: ignore[reportPrivateImportUsage,reportAttributeAccessIssue]
             os.environ["PLEXAPI_PLEXAPI_TIMEOUT"] = str(library.timeout)
             logger.info("")
             logger.separator(f"{library.original_mapping_name} Library")
@@ -742,7 +1025,7 @@ def run_libraries(config):
                         logger.info(f"Collection {collection.title} Deleted")
                     except Failed as e:
                         logger.error(e)
-                library_status[library.name]["All Collections Deleted"] = str(datetime.now() - time_start).split('.')[0]
+                library_status[library.name]["All Collections Deleted"] = str(datetime.now() - time_start).split(".")[0]
 
             if run_args["delete-labels"] and not run_args["playlists-only"]:
                 time_start = datetime.now()
@@ -762,7 +1045,7 @@ def run_libraries(config):
                             library.edit_tags("label", item, sync_tags=sync)
                         except NotFound:
                             logger.error(f"{item.title[:25]:<25} | Labels Failed to be Removed")
-                library_status[library.name]["All Labels Deleted"] = str(datetime.now() - time_start).split('.')[0]
+                library_status[library.name]["All Labels Deleted"] = str(datetime.now() - time_start).split(".")[0]
 
             time_start = datetime.now()
             temp_items = None
@@ -779,7 +1062,8 @@ def run_libraries(config):
                 logger.separator(f"Mapping {library.original_mapping_name} Library", space=False, border=False)
                 logger.info("")
                 library.map_guids(temp_items)
-            library_status[library.name]["Library Loading and Mapping"] = str(datetime.now() - time_start).split('.')[0]
+            library_status[library.name]["Library Loading and Mapping"] = str(datetime.now() - time_start).split(".")[0]
+            config.run_libraries.append(library)
 
             runs = {
                 "metadata": all([not run_args[x] for x in ["tests", "operations-only", "overlays-only", "playlists-only", "collections-only"]]),
@@ -787,6 +1071,18 @@ def run_libraries(config):
                 "operations": all([not run_args[x] for x in ["tests", "collections-only", "overlays-only", "playlists-only", "metadata-only"]]),
                 "overlays": all([not run_args[x] for x in ["tests", "collections-only", "operations-only", "playlists-only", "metadata-only"]]),
             }
+            # Pre-populate collection_names before the run_order loop so that operations can correctly identify unconfigured collections regardless of run_order.
+            # Without this, if operations runs before collections, collection_names is empty and every Plex collection is incorrectly flagged as unconfigured. #1968
+            if runs["collections"]:
+                # Only report duplicate collection titles when Kometa actually processed collections this run.
+                collections_ran = True
+                for metadata in library.collection_files:
+                    if config.requested_files and metadata.get_file_name() not in config.requested_files:
+                        continue
+                    for mapping_name in metadata.get_collections(config.requested_collections):
+                        if mapping_name not in library.collection_names:
+                            library.collection_names.append(mapping_name)
+
             for run_type in library.run_order:
                 if run_type == "collections" and runs[run_type]:
                     time_start = datetime.now()
@@ -809,7 +1105,15 @@ def run_libraries(config):
                             # logger.remove_library_handler(library.mapping_name)
                             run_collection(config, library, metadata, collections_to_run)
                             # logger.re_add_library_handler(library.mapping_name)
-                    library_status[library.name]["Library Collection Files"] = str(datetime.now() - time_start).split('.')[0]
+                    library_status[library.name]["Library Collection Files"] = str(datetime.now() - time_start).split(".")[0]
+                    # Skip hub sorting on a targeted -rc or -rf run: only the requested collections/files are rebuilt, so hub_priorities only reflects those collections, not every pinned collection.
+                    targeted_run = config.requested_collections or config.requested_files
+                    if not targeted_run and (library.hub_priorities or library.auto_sort_hubs):
+                        library.sort_collection_hubs(library.hub_priorities, library.auto_sort_hubs, library.hub_config_order, library.hub_title_sorts)
+                        library.hub_priorities = {}
+                    elif targeted_run and (library.hub_priorities or library.auto_sort_hubs):
+                        logger.info("")
+                        logger.info("Skipping Hub Sorting because a targeted Collection run (-rc or -rf) does not have the full set of hub_priority values")
                 elif run_type == "metadata" and runs[run_type]:
                     time_start = datetime.now()
                     for images in library.images_files:
@@ -826,7 +1130,7 @@ def run_libraries(config):
                             except Failed as e:
                                 library.notify(e)
                                 logger.error(e)
-                    library_status[library.name]["Library Images Files"] = str(datetime.now() - time_start).split('.')[0]
+                    library_status[library.name]["Library Images Files"] = str(datetime.now() - time_start).split(".")[0]
 
                     time_start = datetime.now()
                     for metadata in library.metadata_files:
@@ -842,17 +1146,17 @@ def run_libraries(config):
                         except Failed as e:
                             library.notify(e)
                             logger.error(e)
-                    library_status[library.name]["Library Metadata Files"] = str(datetime.now() - time_start).split('.')[0]
+                    library_status[library.name]["Library Metadata Files"] = str(datetime.now() - time_start).split(".")[0]
                 elif run_type == "operations" and runs[run_type] and not config.requested_files and library.library_operation:
                     library_status[library.name]["Library Operations"] = library.Operations.run_operations()
                 elif run_type == "overlays" and runs[run_type] and (library.overlay_files or (library.remove_overlays and not config.requested_files)):
                     library_status[library.name]["Library Overlay Files"] = library.Overlays.run_overlays()
-            #logger.remove_library_handler(library.mapping_name)
+            # logger.remove_library_handler(library.mapping_name)
         except Exception as e:
-            library.notify(e)
-            logger.stacktrace()
-            logger.critical(e)
-    return library_status
+            library.notify(get_critical_error_message(e))
+            log_critical_exception(e)
+    return library_status, collections_ran
+
 
 def run_collection(config, library, metadata, requested_collections):
     logger.info("")
@@ -863,13 +1167,15 @@ def run_collection(config, library, metadata, requested_collections):
             no_template_test = True
             if "template" in collection_attrs and collection_attrs["template"]:
                 for data_template in util.get_list(collection_attrs["template"], split=False):
-                    if "name" in data_template \
-                            and data_template["name"] \
-                            and metadata.templates \
-                            and data_template["name"] in metadata.templates \
-                            and metadata.templates[data_template["name"]][0] \
-                            and "test" in metadata.templates[data_template["name"]][0] \
-                            and metadata.templates[data_template["name"]][0]["test"] is True:
+                    if (
+                        "name" in data_template
+                        and data_template["name"]
+                        and metadata.templates
+                        and data_template["name"] in metadata.templates
+                        and metadata.templates[data_template["name"]][0]
+                        and "test" in metadata.templates[data_template["name"]][0]
+                        and metadata.templates[data_template["name"]][0]["test"] is True
+                    ):
                         no_template_test = False
             if no_template_test:
                 continue
@@ -879,13 +1185,13 @@ def run_collection(config, library, metadata, requested_collections):
         elif run_args["resume"] == mapping_name:
             run_args["resume"] = None
             logger.info("")
-            logger.separator(f"Resuming Collections")
+            logger.separator("Resuming Collections")
 
         if "name_mapping" in collection_attrs and collection_attrs["name_mapping"]:
             collection_log_name, output_str = util.validate_filename(collection_attrs["name_mapping"])
         else:
             collection_log_name, output_str = util.validate_filename(mapping_name)
-        #logger.add_collection_handler(library.mapping_name, collection_log_name)
+        # logger.add_collection_handler(library.mapping_name, collection_log_name)
         library.status[str(mapping_name)] = {"status": "Unchanged", "errors": [], "added": 0, "unchanged": 0, "removed": 0, "radarr": 0, "sonarr": 0}
 
         try:
@@ -918,27 +1224,36 @@ def run_collection(config, library, metadata, requested_collections):
                     logger.info("")
                     try:
                         builder.filter_and_save_items(builder.gather_ids(method, value))
+                    except BuilderValidationError:
+                        raise
+                    except OverlayError:
+                        raise
+                    except MappingConvertError:
+                        raise
+                    except ServiceError:
+                        raise
                     except Failed as e:
                         if builder.ignore_blank_results:
+                            logger.warning(e)
+                        elif builder.obj:
                             logger.warning(e)
                         else:
                             raise Failed(e)
 
                 builder.display_filters()
 
-                beginning_count = builder.beginning_count if builder.beginning_count is not None else 0
-                if len(builder.found_items) > 0 and len(
-                        builder.found_items) + beginning_count >= builder.minimum and builder.build_collection:
+                items_added = 0
+                items_removed = 0
+                if len(builder.found_items) > 0 and len(builder.found_items) + builder.beginning_count >= builder.minimum and builder.build_collection:
                     items_added, items_unchanged = builder.add_to_collection()
                     library.stats["added"] += items_added
                     library.status[str(mapping_name)]["added"] = items_added
                     library.stats["unchanged"] += items_unchanged
                     library.status[str(mapping_name)]["unchanged"] = items_unchanged
-                    items_removed = 0
-                    if builder.sync:
-                        items_removed = builder.sync_collection()
-                        library.stats["removed"] += items_removed
-                        library.status[str(mapping_name)]["removed"] = items_removed
+                if should_sync_collection(builder):
+                    items_removed = builder.sync_collection()
+                    library.stats["removed"] += items_removed
+                    library.status[str(mapping_name)]["removed"] = items_removed
 
                 if builder.do_missing and (len(builder.missing_movies) > 0 or len(builder.missing_shows) > 0):
                     logger.info("")
@@ -949,11 +1264,12 @@ def run_collection(config, library, metadata, requested_collections):
                     library.stats["sonarr"] += sonarr_add
                     library.status[str(mapping_name)]["sonarr"] += sonarr_add
 
-                if not builder.found_items and not builder.ignore_blank_results:
+                if not builder.found_items and not builder.ignore_blank_results and not builder.obj:
                     raise NonExisting(f"{builder.Type} Warning: No items found")
 
             valid = True
-            if builder.build_collection and not builder.blank_collection and items_added + builder.beginning_count - items_removed < builder.minimum:
+            final_collection_count = collection_count_after_run(builder.beginning_count, items_added, items_removed)
+            if builder.build_collection and not builder.blank_collection and final_collection_count < builder.minimum:
                 logger.info("")
                 logger.info(f"{builder.Type} Minimum: {builder.minimum} not met for {mapping_name} Collection")
                 delete_status = f"Minimum {builder.minimum} Not Met"
@@ -1036,6 +1352,22 @@ def run_collection(config, library, metadata, requested_collections):
                 library.status[str(mapping_name)]["status"] = "Not Scheduled"
         except FilterFailed:
             pass
+        except BuilderValidationError as e:
+            logger.error(e)
+            library.status[str(mapping_name)]["status"] = "Builder Validation Error"
+            library.status[str(mapping_name)]["errors"].append(e)
+        except MappingConvertError as e:
+            logger.error(e)
+            library.status[str(mapping_name)]["status"] = "Mapping/Conversion Error"
+            library.status[str(mapping_name)]["errors"].append(e)
+        except OverlayError as e:
+            logger.error(e)
+            library.status[str(mapping_name)]["status"] = "Overlay Error"
+            library.status[str(mapping_name)]["errors"].append(e)
+        except ServiceError as e:
+            logger.error(e)
+            library.status[str(mapping_name)]["status"] = "Service Error"
+            library.status[str(mapping_name)]["errors"].append(e)
         except Failed as e:
             library.notify(e, collection=mapping_name)
             logger.stacktrace()
@@ -1048,11 +1380,12 @@ def run_collection(config, library, metadata, requested_collections):
             logger.error(f"Unknown Error: {e}")
             library.status[str(mapping_name)]["status"] = "Unknown Error"
             library.status[str(mapping_name)]["errors"].append(e)
-        collection_run_time = str(datetime.now() - collection_start).split('.')[0]
+        collection_run_time = str(datetime.now() - collection_start).split(".")[0]
         library.status[str(mapping_name)]["run_time"] = collection_run_time
         logger.info("")
         logger.separator(f"Finished {mapping_name} Collection\nCollection Run Time: {collection_run_time}")
-        #logger.remove_collection_handler(library.mapping_name, collection_log_name)
+        # logger.remove_collection_handler(library.mapping_name, collection_log_name)
+
 
 def run_playlists(config):
     stats = {"created": 0, "modified": 0, "deleted": 0, "added": 0, "unchanged": 0, "removed": 0, "radarr": 0, "sonarr": 0, "names": []}
@@ -1066,14 +1399,16 @@ def run_playlists(config):
             if run_args["tests"] and ("test" not in playlist_attrs or playlist_attrs["test"] is not True):
                 no_template_test = True
                 if "template" in playlist_attrs and playlist_attrs["template"]:
-                    for data_template in util.get_list(playlist_attrs["template"], split=False):
-                        if "name" in data_template \
-                                and data_template["name"] \
-                                and playlist_file.templates \
-                                and data_template["name"] in playlist_file.templates \
-                                and playlist_file.templates[data_template["name"]][0] \
-                                and "test" in playlist_file.templates[data_template["name"]][0] \
-                                and playlist_file.templates[data_template["name"]][0]["test"] is True:
+                    for data_template in util.get_list(playlist_attrs["template"], split=False, return_none=False):
+                        if (
+                            "name" in data_template
+                            and data_template["name"]
+                            and playlist_file.templates
+                            and data_template["name"] in playlist_file.templates
+                            and playlist_file.templates[data_template["name"]][0]
+                            and "test" in playlist_file.templates[data_template["name"]][0]
+                            and playlist_file.templates[data_template["name"]][0]["test"] is True
+                        ):
                             no_template_test = False
                 if no_template_test:
                     continue
@@ -1082,7 +1417,7 @@ def run_playlists(config):
                 playlist_log_name, output_str = util.validate_filename(playlist_attrs["name_mapping"])
             else:
                 playlist_log_name, output_str = util.validate_filename(mapping_name)
-            #logger.add_playlist_handler(playlist_log_name)
+            # logger.add_playlist_handler(playlist_log_name)
             status[mapping_name] = {"status": "Unchanged", "errors": [], "added": 0, "unchanged": 0, "removed": 0, "radarr": 0, "sonarr": 0}
             server_name = None
             try:
@@ -1110,9 +1445,19 @@ def run_playlists(config):
                     ids = builder.libraries[0].get_rating_keys(method, value, True)
                 elif "plex" in method:
                     ids = []
+                    logged_plex_search = False
                     for pl_library in builder.libraries:
                         try:
-                            ids.extend(pl_library.get_rating_keys(method, value, True))
+                            if method == "plex_search":
+                                builder.library = pl_library
+                                plex_search = builder.build_filter("plex_search", value)
+                                if not logged_plex_search:
+                                    search_details = "\n".join(plex_search[1].splitlines()[1:])
+                                    logger.info(f"Processing Plex Search{f'{chr(10)}{search_details}' if search_details else ''}")
+                                    logged_plex_search = True
+                                ids.extend(pl_library.get_rating_keys(method, plex_search, True, display=False))
+                            else:
+                                ids.extend(pl_library.get_rating_keys(method, value, True))
                         except Failed as e:
                             if builder.validate_builders:
                                 raise
@@ -1235,30 +1580,31 @@ def run_playlists(config):
                 status[mapping_name]["status"] = "Unknown Error"
                 status[mapping_name]["errors"].append(e)
             logger.info("")
-            playlist_run_time = str(datetime.now() - playlist_start).split('.')[0]
+            playlist_run_time = str(datetime.now() - playlist_start).split(".")[0]
             status[mapping_name]["run_time"] = playlist_run_time
             logger.info("")
             logger.separator(f"Finished {mapping_name} Playlist\nPlaylist Run Time: {playlist_run_time}")
-            #logger.remove_playlist_handler(playlist_log_name)
+            # logger.remove_playlist_handler(playlist_log_name)
     return status, stats
+
 
 if __name__ == "__main__":
     try:
-        if run_args["run"] or run_args["tests"] or run_args["run-collections"] or run_args["run-libraries"] or run_args["run-files"] or run_args["resume"]:
+        if run_args["run"] or run_args["tests"] or run_args["run-collections"] or run_args["run-libraries"] or run_args["run-files"] or run_args["resume"] or run_args["validate"] or run_args["validate-file"] or run_args["validate-dir"]:
             process({"collections": run_args["run-collections"], "libraries": run_args["run-libraries"], "files": run_args["run-files"]})
         else:
-            times_to_run = util.get_list_bar_then_comma(run_args["times"])
+            times_to_run = util.get_list_bar_then_comma(run_args["times"]) or []
             valid_times = []
             for time_to_run in times_to_run:
                 try:
-                    final_time = datetime.strftime(datetime.strptime(time_to_run, "%H:%M"), "%H:%M")
+                    final_time = datetime.strftime(datetime.strptime(str(time_to_run), "%H:%M"), "%H:%M")
                     if final_time not in valid_times:
                         valid_times.append(final_time)
                 except ValueError:
                     if time_to_run:
                         raise Failed(f"Argument Error: time argument invalid: {time_to_run} must be in the HH:MM format between 00:00-23:59")
                     else:
-                        raise Failed(f"Argument Error: blank time argument")
+                        raise Failed("Argument Error: blank time argument")
             for time_to_run in valid_times:
                 schedule.every().day.at(time_to_run).do(process, {"time": time_to_run})
             while True:

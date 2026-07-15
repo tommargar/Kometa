@@ -1,12 +1,27 @@
 import re
 
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import ConnectTimeout, ReadTimeout, Timeout
 from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_fixed
-from tmdbapis import Movie, NotFound, TMDbAPIs, TMDbException
+from tmdbapis import Movie
+from tmdbapis import NotFound as TMDbNotFound
+from tmdbapis import TMDbAPIs, TMDbException
 
 from modules import util
 from modules.util import Failed
 
 logger = util.logger
+
+
+class NotFound(Failed):
+    """Raised when a TMDb resource (e.g. a collection) is gone from TMDb (HTTP 4xx).
+
+    Distinct from Failed so callers can downgrade noisy log lines / webhook
+    failures for IDs the user did not control (e.g. collection IDs auto-discovered
+    from the library by the franchise default that have since been deleted upstream
+    — TMDb now only permits collections for true movie sequels).
+    """
+
 
 int_builders = ["tmdb_airing_today", "tmdb_popular", "tmdb_top_rated", "tmdb_now_playing", "tmdb_on_the_air", "tmdb_trending_daily", "tmdb_trending_weekly", "tmdb_upcoming"]
 info_builders = ["tmdb_actor", "tmdb_collection", "tmdb_crew", "tmdb_director", "tmdb_list", "tmdb_movie", "tmdb_producer", "tmdb_show", "tmdb_writer"]
@@ -98,15 +113,6 @@ class TMDbCountry:
         return f"{self.iso_3166_1}:{self.name}"
 
 
-class TMDbLanguage:
-    def __init__(self, data):
-        self.iso_639_1 = data.split(":")[0] if isinstance(data, str) else data.iso_639_1
-        self.name = data.split(":")[1] if isinstance(data, str) else data.name
-
-    def __repr__(self):
-        return f"{self.iso_639_1}:{self.name}"
-
-
 class TMDbSeason:
     def __init__(self, data):
         self.season_number = int(data.split("%:%")[0]) if isinstance(data, str) else data.season_number
@@ -115,6 +121,27 @@ class TMDbSeason:
 
     def __repr__(self):
         return f"{self.season_number}%:%{self.name}%:%{self.average}"
+
+
+def _is_transient_tmdb_exception(exception):
+    current = exception
+    seen = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, (RequestsConnectionError, ConnectTimeout, ReadTimeout, Timeout)):
+            return True
+        message = str(current)
+        if any(pattern in message for pattern in ("Connection reset by peer", "Connection aborted", "Failed to Connect", "Read timed out", "timed out")):
+            return True
+        current = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
+    return False
+
+
+def _log_tmdb_exception(tmdb_id, exception):
+    if _is_transient_tmdb_exception(exception):
+        logger.warning(f"TMDb Warning: transient network error for TMDb ID {tmdb_id}: {exception}")
+    else:
+        logger.stacktrace()
 
 
 class TMDBObj:
@@ -130,6 +157,7 @@ class TMDBObj:
         self.imdb_id = data["imdb_id"] if isinstance(data, dict) else data.imdb_id
         self.poster_url = data["poster_url"] if isinstance(data, dict) else data.poster_url
         self.backdrop_url = data["backdrop_url"] if isinstance(data, dict) else data.backdrop_url
+        self.logos = [] if isinstance(data, dict) else data.logos
         self.vote_count = data["vote_count"] if isinstance(data, dict) else data.vote_count
         self.vote_average = data["vote_average"] if isinstance(data, dict) else data.vote_average
         self.language_iso = data["language_iso"] if isinstance(data, dict) else data.original_language.iso_639_1 if data.original_language else None
@@ -154,17 +182,9 @@ class TMDbMovie(TMDBObj):
         self.studio = data["studio"] if isinstance(data, dict) else data.companies[0].name if data.companies else None
         self.collection_id = data["collection_id"] if isinstance(data, dict) else data.collection.id if data.collection else None
         self.collection_name = data["collection_name"] if isinstance(data, dict) else data.collection.name if data.collection else None
-        loop = data.countries if not isinstance(data, dict) else data.get("countries", "").split("|") if data.get("countries") else []
-        self.countries = [TMDbCountry(c) for c in loop]
-        loop = data.spoken_languages if not isinstance(data, dict) else data.get("languages", "").split("|") if data.get("languages") else []
-        self.languages = [TMDbLanguage(l) for l in loop]
-
-        if isinstance(data, dict):
-            self.cast = data.get("cast", [])
-            self.crew = data.get("crew", [])
-        else:
-            self.cast = [{"id": c.id, "name": c.name, "character": getattr(c, "character", None), "order": getattr(c, "order", None)} for c in getattr(data, "cast", [])]
-            self.crew = [{"id": c.id, "name": c.name, "job": getattr(c, "job", None), "department": getattr(c, "department", None)} for c in getattr(data, "crew", [])]
+        # tvdb_id is only meaningful for shows; set None here so the attribute
+        # exists on the class and pyright doesn't flag it in convert_from().
+        self.tvdb_id: None = None
 
         if self._tmdb.cache and not ignore_cache:
             self._tmdb.cache.update_tmdb_movie(expired, self, self._tmdb.language, self._tmdb.expiration)
@@ -172,13 +192,11 @@ class TMDbMovie(TMDBObj):
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type(Failed))
     def load_movie(self):
         try:
-            return self._tmdb.TMDb.movie(self.tmdb_id, partial="external_ids,keywords,credits")
-        except NotFound:
-            raise Failed(f"TMDb Error: No Movie found for TMDb ID: {self.tmdb_id}")
-        except ValueError as e:
-            raise Failed(f"TMDb Error: Invalid TMDb ID '{self.tmdb_id}': {e}")
+            return self._tmdb.TMDb.movie(self.tmdb_id, partial="external_ids,keywords,images")
+        except TMDbNotFound:
+            raise NotFound(f"TMDb Error: No Movie found for TMDb ID: {self.tmdb_id}")
         except TMDbException as e:
-            logger.stacktrace()
+            _log_tmdb_exception(self.tmdb_id, e)
             raise TMDbException(f"TMDb Error: Unexpected Error with TMDb ID: {self.tmdb_id}: {e}")
 
 
@@ -202,17 +220,8 @@ class TMDbShow(TMDBObj):
         self.tvdb_id = data["tvdb_id"] if isinstance(data, dict) else data.tvdb_id
         loop = data.origin_countries if not isinstance(data, dict) else data["countries"].split("|") if data["countries"] else []  # noqa
         self.countries = [TMDbCountry(c) for c in loop]
-        loop = data.spoken_languages if not isinstance(data, dict) else data.get("languages", "").split("|") if data.get("languages") else []
-        self.languages = [TMDbLanguage(l) for l in loop]
         loop = data.seasons if not isinstance(data, dict) else data["seasons"].split("%|%") if data["seasons"] else []  # noqa
         self.seasons = [TMDbSeason(s) for s in loop]
-
-        if isinstance(data, dict):
-            self.cast = data.get("cast", [])
-            self.crew = data.get("crew", [])
-        else:
-            self.cast = [{"id": c.id, "name": c.name, "character": getattr(c, "character", None), "order": getattr(c, "order", None)} for c in getattr(data, "cast", [])]
-            self.crew = [{"id": c.id, "name": c.name, "job": getattr(c, "job", None), "department": getattr(c, "department", None)} for c in getattr(data, "crew", [])]
 
         if self._tmdb.cache and not ignore_cache:
             self._tmdb.cache.update_tmdb_show(expired, self, self._tmdb.language, self._tmdb.expiration)
@@ -220,13 +229,11 @@ class TMDbShow(TMDBObj):
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type(Failed))
     def load_show(self):
         try:
-            return self._tmdb.TMDb.tv_show(self.tmdb_id, partial="external_ids,keywords,credits")
-        except NotFound:
-            raise Failed(f"TMDb Error: No Show found for TMDb ID: {self.tmdb_id} - https://themoviedb.org/tv/{self.tmdb_id}")
-        except ValueError as e:
-            raise Failed(f"TMDb Error: Invalid TMDb ID '{self.tmdb_id}': {e}")
+            return self._tmdb.TMDb.tv_show(self.tmdb_id, partial="external_ids,keywords,images")
+        except TMDbNotFound:
+            raise NotFound(f"TMDb Error: No Show found for TMDb ID: {self.tmdb_id}")
         except TMDbException as e:
-            logger.stacktrace()
+            _log_tmdb_exception(self.tmdb_id, e)
             raise TMDbException(f"TMDb Error: Unexpected Error with TMDb ID: {self.tmdb_id}: {e}")
 
 
@@ -260,10 +267,10 @@ class TMDbEpisode:
     def load_episode(self):
         try:
             return self._tmdb.TMDb.tv_episode(self.tmdb_id, self.season_number, self.episode_number)
-        except NotFound as e:
-            raise Failed(f"TMDb Error: No Episode found for TMDb ID {self.tmdb_id} - Season {self.season_number} Episode {self.episode_number}: {e}")
+        except TMDbNotFound as e:
+            raise Failed(f"TMDb Error: No Episode found for TMDb ID {self.tmdb_id} Season {self.season_number} Episode {self.episode_number}: {e}")
         except TMDbException as e:
-            logger.stacktrace()
+            _log_tmdb_exception(self.tmdb_id, e)
             raise TMDbException(f"TMDb Error: Unexpected Error with TMDb ID: {self.tmdb_id}: {e}")
 
 
@@ -296,7 +303,7 @@ class TMDb:
             results = self.TMDb.find_by_id(tvdb_id=tvdb_id)
             if results.tv_results:
                 return results.tv_results[0].id
-        except NotFound:
+        except TMDbNotFound:
             pass
         raise Failed(f"TMDb Error: No TMDb ID found for TVDb ID {tvdb_id}")
 
@@ -311,7 +318,7 @@ class TMDb:
             elif results.tv_episode_results:
                 item = results.tv_episode_results[0]
                 return f"{item.tv_id}_{item.season_number}_{item.episode_number}", "episode"
-        except NotFound:
+        except TMDbNotFound:
             pass
         raise Failed(f"TMDb Error: No TMDb ID found for IMDb ID {imdb_id}")
 
@@ -330,6 +337,16 @@ class TMDb:
     def get_movie(self, tmdb_id, ignore_cache=False):
         return TMDbMovie(self, tmdb_id, ignore_cache=ignore_cache)
 
+    @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type(Failed))
+    def get_movie_release_dates(self, tmdb_id):
+        try:
+            return self.TMDb.movie(tmdb_id, partial="release_dates").release_dates
+        except TMDbNotFound as e:
+            raise Failed(f"TMDb Error: No Movie found for TMDb ID {tmdb_id}: {e}")
+        except TMDbException as e:
+            _log_tmdb_exception(tmdb_id, e)
+            raise TMDbException(f"TMDb Error: Unexpected Error with TMDb ID: {tmdb_id}: {e}")
+
     def get_show(self, tmdb_id, ignore_cache=False):
         return TMDbShow(self, tmdb_id, ignore_cache=ignore_cache)
 
@@ -337,7 +354,7 @@ class TMDb:
     def get_season(self, tmdb_id, season_number, partial=None):
         try:
             return self.TMDb.tv_season(tmdb_id, season_number, partial=partial)
-        except NotFound as e:
+        except TMDbNotFound as e:
             raise Failed(f"TMDb Error: No Season found for TMDb ID {tmdb_id} Season {season_number}: {e}")
 
     def get_episode(self, tmdb_id, season_number, episode_number, ignore_cache=False):
@@ -347,42 +364,42 @@ class TMDb:
     def get_collection(self, tmdb_id, partial=None):
         try:
             return self.TMDb.collection(tmdb_id, partial=partial)
-        except NotFound as e:
-            raise Failed(f"TMDb Error: No Collection found for TMDb ID {tmdb_id}: {e}")
+        except TMDbNotFound as e:
+            raise NotFound(f"TMDb Error: No Collection found for TMDb ID {tmdb_id}: {e}")
 
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type(Failed))
     def get_person(self, tmdb_id, partial=None):
         try:
             return self.TMDb.person(tmdb_id, partial=partial)
-        except NotFound as e:
+        except TMDbNotFound as e:
             raise Failed(f"TMDb Error: No Person found for TMDb ID {tmdb_id}: {e}")
 
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type(Failed))
     def _company(self, tmdb_id, partial=None):
         try:
             return self.TMDb.company(tmdb_id, partial=partial)
-        except NotFound as e:
+        except TMDbNotFound as e:
             raise Failed(f"TMDb Error: No Company found for TMDb ID {tmdb_id}: {e}")
 
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type(Failed))
     def _network(self, tmdb_id, partial=None):
         try:
             return self.TMDb.network(tmdb_id, partial=partial)
-        except NotFound as e:
+        except TMDbNotFound as e:
             raise Failed(f"TMDb Error: No Network found for TMDb ID {tmdb_id}: {e}")
 
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type(Failed))
     def _keyword(self, tmdb_id):
         try:
             return self.TMDb.keyword(tmdb_id)
-        except NotFound as e:
+        except TMDbNotFound as e:
             raise Failed(f"TMDb Error: No Keyword found for TMDb ID {tmdb_id}: {e}")
 
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type(Failed))
     def get_list(self, tmdb_id):
         try:
             return self.TMDb.list(tmdb_id)
-        except NotFound as e:
+        except TMDbNotFound as e:
             raise Failed(f"TMDb Error: No List found for TMDb ID {tmdb_id}: {e}")
 
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type(Failed))
@@ -393,14 +410,32 @@ class TMDb:
     def search_people(self, name):
         try:
             return self.TMDb.people_search(name)
-        except NotFound:
+        except TMDbNotFound:
             raise Failed(f"TMDb Error: Actor {name} Not Found")
 
     def validate_tmdb_ids(self, tmdb_ids, tmdb_method):
         tmdb_list = util.get_int_list(tmdb_ids, f"TMDb {type_map[tmdb_method]} ID")
-        if len(tmdb_list) == 0:
+        tmdb_values = []
+        all_not_found = True
+        for tmdb_id in tmdb_list:
+            try:
+                tmdb_values.append(self.validate_tmdb(tmdb_id, tmdb_method))
+            except NotFound as e:
+                # Keep the raw TMDb exception trace-only; the caller logs the user-facing summary.
+                if logger.is_trace:
+                    logger.error(e)
+                if type_map[tmdb_method] == "Collection":
+                    logger.error(f"TMDb Error: Collection ID {tmdb_id} missing on TMDb; add '{tmdb_id}' to the franchise exclude list if this is auto-built.")
+                else:
+                    logger.error(f"TMDb Error: {type_map[tmdb_method]} ID {tmdb_id} missing on TMDb. Verify it still exists and update your config.")
+            except Failed as e:
+                all_not_found = False
+                logger.error(e)
+        if len(tmdb_values) == 0:
+            if all_not_found:
+                raise NotFound(f"TMDb Error: No valid TMDb IDs in {tmdb_list}")
             raise Failed(f"TMDb Error: No valid TMDb IDs in {tmdb_list}")
-        return tmdb_list
+        return tmdb_values
 
     def validate_tmdb(self, tmdb_id, tmdb_method):
         tmdb_type = type_map[tmdb_method]

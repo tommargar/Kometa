@@ -15,8 +15,8 @@ logger = util.logger
 all_auto = ["genre", "number", "custom"]
 ms_auto = ["actor", "year", "content_rating", "original_language", "tmdb_popular_people", "trakt_user_lists", "studio", "trakt_liked_lists", "trakt_people_list", "subtitle_language", "audio_language", "resolution", "decade", "imdb_awards"]
 auto = {
-    "Movie": ["tmdb_collection", "edition", "country", "director", "producer", "writer", "composer", "letterboxd_user_lists"] + all_auto + ms_auto,
-    "Show": ["network", "origin_country", "episode_year"] + all_auto + ms_auto,
+    "Movie": ["tmdb_collection", "edition", "country", "director", "producer", "writer", "letterboxd_user_lists"] + all_auto + ms_auto,
+    "Show": ["edition", "network", "origin_country", "episode_year"] + all_auto + ms_auto,
     "Artist": ["mood", "style", "country", "album_genre", "album_mood", "album_style", "track_mood"] + all_auto,
     "Video": ["country", "content_rating"] + all_auto,
 }
@@ -225,7 +225,7 @@ class DataFile:
             raise Failed(f"{self.data_type} Error: template attribute is blank")
         else:
             new_attributes = {}
-            for original_variables in util.get_list(template_call, split=False):
+            for original_variables in util.get_list(template_call, split=False, return_none=False):
                 if original_variables["name"] not in self.templates:
                     raise Failed(f"{self.data_type} Error: template {original_variables['name']} not found")
                 elif not isinstance(self.templates[original_variables["name"]][0], dict):
@@ -353,7 +353,7 @@ class DataFile:
 
                     if "optional" in template:
                         if template["optional"]:
-                            for op in util.get_list(template["optional"]):
+                            for op in util.get_list(template["optional"], return_none=False):
                                 op = replace_var(op, variables)
                                 if op not in default and op not in conditionals:
                                     optional.append(str(op))
@@ -465,7 +465,7 @@ class DataFile:
                             logger.debug(f"{self.data_type} Warning: template sub-attribute move_collection_prefix will run as move_prefix")
                             prefix = template["move_collection_prefix"]
                         if prefix:
-                            for op in util.get_list(prefix):
+                            for op in util.get_list(prefix, return_none=False):
                                 if not sort_name and variables[name_var].startswith(f"{op} "):
                                     sort_name = f"{variables[name_var][len(op):].strip()}, {op}"
                                 if not sort_mapping and variables["mapping_name"].startswith(f"{op} "):
@@ -597,7 +597,7 @@ class DataFile:
                                 continue
                     logger.trace(f"Current Final: {new_attributes}")
                     logger.trace("")
-            logger.separator(f"Final Template Attributes", space=False, border=False, debug=True)
+            logger.separator("Final Template Attributes", space=False, border=False, debug=True)
             logger.debug("")
             logger.debug(new_attributes)
             logger.debug("")
@@ -615,10 +615,11 @@ class DataFile:
 
 
 class MetadataFile(DataFile):
-    def __init__(self, config, library, file_type, path, temp_vars, asset_directory, file_style):
+    def __init__(self, config, library, file_type, path, temp_vars, asset_directory, file_style, configured_names_only=False):
         self.file_style = file_style
         self.type_str = f"{file_style.capitalize()} File"
         super().__init__(config, file_type, path, temp_vars, asset_directory, self.type_str)
+        self.configured_names_only = configured_names_only
         self.data_type = "Collection"
         self.library = library
         self.metadata = None
@@ -648,14 +649,14 @@ class MetadataFile(DataFile):
             exclude = []
             if "exclude" in methods:
                 if not use_all:
-                    raise Failed(f"Image Set Error: exclude only works when use_all is true")
+                    raise Failed("Image Set Error: exclude only works when use_all is true")
                 exclude = util.parse("Images", "exclude", self.temp_vars, datatype="list", methods=methods)
                 logger.info(f"Exclude: {exclude}")
 
             include = []
             if "include" in methods:
                 if use_all:
-                    raise Failed(f"Image Set Error: include only works when use_all is false")
+                    raise Failed("Image Set Error: include only works when use_all is false")
                 include = util.parse("Images", "include", self.temp_vars, datatype="list", methods=methods)
                 logger.info(f"Include: {include}")
 
@@ -867,7 +868,7 @@ class MetadataFile(DataFile):
                         if auto_type == "decade" and library.is_show:
                             all_items = library.get_all()
                             if addons:
-                                raise Failed(f"Config Error: addons cannot be used with show decades")
+                                raise Failed("Config Error: addons cannot be used with show decades")
                             addons = {}
                             all_keys = {}
                             for i, item in enumerate(all_items, 1):
@@ -1314,12 +1315,17 @@ class MetadataFile(DataFile):
                             remove_suffix = util.parse("Config", "remove_suffix", self.temp_vars["remove_suffix"], parent="template_variables", datatype="commalist")
                         elif "remove_suffix" in methods:
                             remove_suffix = util.parse("Config", "remove_suffix", dynamic, parent=map_name, methods=methods, datatype="commalist")
-                        sync = {i.title: i for i in self.library.get_all_collections(label=str(map_name))} if sync else {}
+                        sync = {str(i.title).casefold(): i for i in self.library.get_all_collections(label=str(map_name))} if sync and not self.configured_names_only else {}
                         other_name = None
                         if "other_name" in self.temp_vars and include:
-                            other_name = util.parse("Config", "other_name", self.temp_vars["remove_suffix"], parent="template_variables")
+                            other_name = util.parse("Config", "other_name", self.temp_vars["other_name"], parent="template_variables")
                         elif "other_name" in methods and include:
                             other_name = util.parse("Config", "other_name", dynamic, parent=map_name, methods=methods)
+                        if other_name:
+                            if "<<library_type>>" in other_name:
+                                other_name = other_name.replace("<<library_type>>", library.type.lower())
+                            if "<<library_typeU>>" in other_name:
+                                other_name = other_name.replace("<<library_typeU>>", library.type)
                         other_templates = util.parse("Config", "other_template", dynamic, parent=map_name, methods=methods, datatype="strlist") if "other_template" in methods and include else None
                         if other_templates:
                             for other_template in other_templates:
@@ -1355,7 +1361,7 @@ class MetadataFile(DataFile):
                         logger.debug(f"All Keys: {all_keys.keys()}")
                         if not auto_list:
                             raise Failed("No Keys found to create a set of Dynamic Collections")
-                        logger.debug(f"Keys (Title):")
+                        logger.debug("Keys (Title):")
                         for key, value in auto_list.items():
                             logger.debug(f"  - {key}{'' if key == value else f' ({value})'}")
 
@@ -1398,16 +1404,51 @@ class MetadataFile(DataFile):
                             if key in title_override:
                                 collection_title = title_override[key]
                             else:
-                                collection_title = title_format.replace("<<title>>", key_name).replace("<<key_name>>", key_name)
+                                # Sync-key priority: name_format (user override) → translation_key → title_format
+                                _name_fmt = og_call.get("name_format") or self.temp_vars.get("name_format")
+                                _trans_base = None
+                                if isinstance(_name_fmt, str):
+                                    _base = _name_fmt
+                                else:
+                                    _trans_key_val = og_call.get("translation_key")
+                                    if isinstance(_trans_key_val, str):
+                                        try:
+                                            _en = self.config.GitHub.translation_yaml("en")
+                                            _tr = self.config.GitHub.translation_yaml(self.language)
+                                            if _trans_key_val in _en.get("collections", {}):
+                                                _trans_base = _tr.get("collections", {}).get(_trans_key_val, {}).get("name") or _en["collections"][_trans_key_val].get("name")
+                                        except Exception:
+                                            pass
+                                    _base = _trans_base if _trans_base else title_format
+                                collection_title = _base.replace("<<title>>", key_name).replace("<<key_name>>", key_name)
+                                for _var_key, _var_val in og_call.items():
+                                    if f"<<{_var_key}>>" in collection_title:
+                                        collection_title = collection_title.replace(f"<<{_var_key}>>", str(_var_val))
+                                if "<<" in collection_title:
+                                    for _template_name in template_names:
+                                        if _template_name in self.templates and isinstance(self.templates[_template_name][0], dict):
+                                            for _var_key, _var_val in self.templates[_template_name][0].get("default", {}).items():
+                                                if f"<<{_var_key}>>" in collection_title and not isinstance(_var_val, (dict, list)):
+                                                    collection_title = collection_title.replace(f"<<{_var_key}>>", str(_var_val))
+                                    # Fall back to title_format if translation name has unresolvable library-context vars (e.g. <<library_translationU>>).
+                                    if "<<" in collection_title and _trans_base:
+                                        collection_title = title_format.replace("<<title>>", key_name).replace("<<key_name>>", key_name)
+                                        for _var_key, _var_val in og_call.items():
+                                            if f"<<{_var_key}>>" in collection_title:
+                                                collection_title = collection_title.replace(f"<<{_var_key}>>", str(_var_val))
                             if collection_title in col_names:
                                 logger.warning(f"Config Warning: Skipping duplicate collection: {collection_title}")
                             else:
                                 logger.info(template_call)
                                 col = {"template": template_call, "append_label": str(map_name)}
+                                # Only set col["name"] for name_format/title_override — lets builder.py resolve translation naturally while still matching our sync key.
+                                _name_fmt_check = og_call.get("name_format") or self.temp_vars.get("name_format")
+                                if key in title_override or isinstance(_name_fmt_check, str):
+                                    col["name"] = collection_title
                                 if test:
                                     col["test"] = True
-                                if collection_title in sync:
-                                    sync.pop(collection_title)
+                                if collection_title.casefold() in sync:
+                                    sync.pop(collection_title.casefold())
                                 col_names.append(collection_title)
                                 self.collections[collection_title] = col
                         if other_name and not other_keys:
@@ -1431,13 +1472,13 @@ class MetadataFile(DataFile):
                             col = {"template": other_call, "append_label": str(map_name)}
                             if test:
                                 col["test"] = True
-                            if other_name in sync:
-                                sync.pop(other_name)
+                            if other_name.casefold() in sync:
+                                sync.pop(other_name.casefold())
                             self.collections[other_name] = col
-                        for col_title, col in sync.items():
+                        for _, col in sync.items():
                             try:
                                 self.library.delete(col)
-                                logger.info(f"{map_name} Dynamic Collection: {col_title} Deleted")
+                                logger.info(f"{map_name} Dynamic Collection: {col.title} Deleted")
                             except Failed as e:
                                 logger.error(e)
                     except Failed as e:
@@ -1582,8 +1623,8 @@ class MetadataFile(DataFile):
         return self.library.image_styles[style_id]
 
     def get_collections(self, requested_collections):
-        if requested_collections:
-            return {c: self.collections[c] for c in util.get_list(requested_collections) if c in self.collections}
+        if requested_collections and self.collections:
+            return {c: self.collections[c] for c in util.get_list(requested_collections, return_none=False) if c in self.collections}
         else:
             return self.collections
 
@@ -1599,7 +1640,7 @@ class MetadataFile(DataFile):
         elif f"{attr}.sync" in alias and not group[alias[f"{attr}.sync"]]:
             logger.warning(f"{self.type_str} Error: {attr}.sync attribute is blank")
         elif attr in alias or f"{attr}.remove" in alias or f"{attr}.sync" in alias:
-            add_tags = util.get_list(group[alias[attr]]) if attr in alias else []
+            add_tags = util.get_list(group[alias[attr]], return_none=False) if attr in alias else []
             if extra:
                 add_tags.extend(extra)
             remove_tags = util.get_list(group[alias[f"{attr}.remove"]]) if f"{attr}.remove" in alias else None
@@ -1623,10 +1664,10 @@ class MetadataFile(DataFile):
 
                 if "template" in methods:
                     logger.debug("")
-                    logger.separator(f"Building Definition From Templates", space=False, border=False)
+                    logger.separator("Building Definition From Templates", space=False, border=False)
                     logger.debug("")
                     named_templates = []
-                    for original_variables in util.get_list(meta[methods["template"]], split=False):
+                    for original_variables in util.get_list(meta[methods["template"]], split=False, return_none=False):
                         if not isinstance(original_variables, dict):
                             raise Failed(f"{self.type_str} Error: template attribute is not a dictionary")
                         elif "name" not in original_variables:
@@ -1657,15 +1698,15 @@ class MetadataFile(DataFile):
                         raise NotScheduled("Skipped because run_definition has no value")
                     logger.debug(f"Value: {meta[methods['run_definition']]}")
                     valid_options = ["true", "false"] + plex.library_types
-                    for library_type in util.get_list(meta[methods["run_definition"]], lower=True):
+                    for library_type in util.get_list(meta[methods["run_definition"]], lower=True, return_none=False):
                         if library_type not in valid_options:
                             raise Failed(f"{self.type_str} Error: {library_type} is invalid. Options: true, false, {', '.join(plex.library_types)}")
                         elif library_type == "false":
-                            raise NotScheduled(f"Skipped because run_definition is false")
-                        elif library_type != "true" and self.library and hasattr(self.library, "Plex") and self.library.Plex and library_type != self.library.Plex.type:
+                            raise NotScheduled("Skipped because run_definition is false")
+                        elif library_type != "true" and self.library and library_type != self.library.Plex.type:
                             raise NotScheduled(f"Skipped because run_definition library_type: {library_type} doesn't match")
 
-                match_data = None
+                match_data: dict = {}
                 match_methods = {}
                 if "match" in methods:
                     logger.debug("")
@@ -1707,7 +1748,7 @@ class MetadataFile(DataFile):
                 blank_edition = False
                 edition_titles = []
                 edition_contains = []
-                if self.library.is_movie:
+                if self.library.is_movie or self.library.is_show:
                     if "blank_edition" in match_methods or "blank_edition" in methods:
                         logger.debug("")
                         logger.debug("Validating Method: blank_edition")
@@ -1763,7 +1804,7 @@ class MetadataFile(DataFile):
                         item.extend(temp_items)
 
                     if not item:
-                        logger.error(f"Skipping {mapping_name}: Item not found")
+                        logger.warning(f"Skipping {mapping_name}: Item not found")
                         continue
 
                 if not isinstance(item, list):
@@ -1824,6 +1865,8 @@ class MetadataFile(DataFile):
 
         def add_edit(name, current_item, group=None, alias=None, key=None, value=None, var_type="str"):
             nonlocal updated
+            if alias is None or group is None:
+                return
             if value or name in alias:
                 if value or group[alias[name]]:
                     if key is None:
@@ -1878,7 +1921,7 @@ class MetadataFile(DataFile):
                     logger.error(f"{self.type_str} Error: {name} attribute is blank")
 
         def finish_edit(current_item, description):
-            nonlocal updated
+            nonlocal updated  # noqa: F824
             if updated:
                 try:
                     logger.info(f"{description} Metadata Update Successful")
@@ -1928,7 +1971,7 @@ class MetadataFile(DataFile):
 
         add_edit("title", item, meta, methods)
         add_edit("sort_title", item, meta, methods, key="titleSort")
-        if self.library.is_movie:
+        if self.library.is_movie or self.library.is_show:
             if "edition" in methods and not self.library.plex_pass:
                 logger.error("Plex Error: Plex Pass is Required to edit Edition")
             else:
@@ -1993,7 +2036,7 @@ class MetadataFile(DataFile):
                 logger.warning(f"{self.type_str} Warning: update_seasons has no value and season updates will be performed")
             else:
                 logger.debug(f"Value: {meta[methods['update_seasons']]}")
-                for library_type in util.get_list(meta[methods["run_definition"]], lower=True):
+                for library_type in util.get_list(meta[methods["run_definition"]], lower=True, return_none=False):
                     if library_type not in ["true", "false"]:
                         raise Failed(f"{self.type_str} Error: {library_type} is invalid. Options: true or false")
                     elif library_type == "false":
@@ -2007,7 +2050,7 @@ class MetadataFile(DataFile):
                 logger.warning(f"{self.type_str} Warning: update_episodes has no value and episode updates will be performed")
             else:
                 logger.debug(f"Value: {meta[methods['update_episodes']]}")
-                for library_type in util.get_list(meta[methods["run_definition"]], lower=True):
+                for library_type in util.get_list(meta[methods["run_definition"]], lower=True, return_none=False):
                     if library_type not in ["true", "false"]:
                         raise Failed(f"{self.type_str} Error: {library_type} is invalid. Options: true or false")
                     elif library_type == "false":
@@ -2362,9 +2405,9 @@ class OverlayFile(DataFile):
                             temp_vars[k] = v
                 if "conditionals" in queue["settings"]:
                     if not queue["settings"]["conditionals"]:
-                        raise Failed(f"Queue Error: conditionals is blank")
+                        raise Failed("Queue Error: conditionals is blank")
                     if not isinstance(queue["settings"]["conditionals"], dict):
-                        raise Failed(f"Queue Error: conditionals is not a dictionary")
+                        raise Failed("Queue Error: conditionals is not a dictionary")
                     for con_key, con_value in queue["settings"]["conditionals"].items():
                         if not isinstance(con_value, dict):
                             raise Failed(f"Queue Error: conditional {con_key} is not a dictionary")
@@ -2431,10 +2474,10 @@ class OverlayFile(DataFile):
                     dynamic_settings = {
                         "initial_vertical_align": util.parse("Config", "initial_vertical_align", dynamic_settings["initial_vertical_align"], options=["top", "center", "bottom"], default="top"),
                         "initial_horizontal_align": util.parse("Config", "initial_horizontal_align", dynamic_settings["initial_horizontal_align"], options=["left", "center", "right"], default="left"),
-                        "initial_vertical_offset": util.parse("Config", "initial_vertical_offset", dynamic_settings["initial_vertical_offset"], datatype="int", default=0, minimum=None),
-                        "initial_horizontal_offset": util.parse("Config", "initial_horizontal_offset", dynamic_settings["initial_horizontal_offset"], datatype="int", default=0, minimum=None),
-                        "vertical_spacing": util.parse("Config", "vertical_spacing", dynamic_settings["vertical_spacing"], datatype="int", default=0, minimum=None),
-                        "horizontal_spacing": util.parse("Config", "horizontal_spacing", dynamic_settings["horizontal_spacing"], datatype="int", default=0, minimum=None),
+                        "initial_vertical_offset": util.parse("Config", "initial_vertical_offset", dynamic_settings["initial_vertical_offset"], datatype="int", default=0, minimum=None),  # type: ignore[arg-type]
+                        "initial_horizontal_offset": util.parse("Config", "initial_horizontal_offset", dynamic_settings["initial_horizontal_offset"], datatype="int", default=0, minimum=None),  # type: ignore[arg-type]
+                        "vertical_spacing": util.parse("Config", "vertical_spacing", dynamic_settings["vertical_spacing"], datatype="int", default=0, minimum=None),  # type: ignore[arg-type]
+                        "horizontal_spacing": util.parse("Config", "horizontal_spacing", dynamic_settings["horizontal_spacing"], datatype="int", default=0, minimum=None),  # type: ignore[arg-type]
                         "surround": util.parse("Config", "surround", dynamic_settings["surround"], datatype="bool", default=False),
                     }
                     queue_position = [
@@ -2495,4 +2538,4 @@ class OverlayFile(DataFile):
         self.external_templates(data, overlay=True)
         if not self.overlays:
             raise Failed("YAML Error: overlays attribute is required")
-        logger.info(f"Overlay File Loaded Successfully")
+        logger.info("Overlay File Loaded Successfully")

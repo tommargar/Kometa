@@ -62,6 +62,17 @@ Builders use third-party services to source items to be added to the collection.
 
 !!! builder
 
+    **[YamTrack](../yamtrack/overview)** builders grab items based on lists from your configured YamTrack instance
+
+    [:octicons-home-16: View Builder](../yamtrack/overview){ .md-button .md-button--primary }
+
+    ??? quicklink "Popular Builders"
+
+        - [:octicons-list-ordered-16: YamTrack List](../yamtrack/list) - Gets every movie/show in a YamTrack List.
+        - [:octicons-list-ordered-16: YamTrack Tracked](../yamtrack/tracked) - Gets tracked movies/shows/anime by YamTrack status.
+
+!!! builder
+
     ![IMDb logo](../../assets/images/files/builders/imdb.png){ align=right }
 
     **[IMDb](../imdb/overview)** builders grab items based on metadata and lists on IMDb.com
@@ -245,10 +256,10 @@ Builders use third-party services to source items to be added to the collection.
 
     ![Text File logo](../../assets/images/files/builders/text.png){ align=right }
 
-    **[Text File](textfile/overview.md)** builders read items from a manually maintained local text file.
+    **[Text File](textfile/overview.md)** builders read items from a manually maintained local or remote text file.
 
     [:octicons-home-16: View Builder](textfile/overview.md){ .md-button .md-button--primary }
 
     ??? quicklink "Popular Builders"
 
-        - [:material-file-document-outline: Text File](textfile/text-file.md) - Reads supported IDs and URLs from a local text file while preserving file order.
+        - [:material-file-document-outline: Text File](textfile/text-file.md) - Reads supported IDs and URLs from a local or remote text file while preserving source order.

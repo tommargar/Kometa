@@ -1,8 +1,7 @@
 import time
 from datetime import datetime
-from json import JSONDecodeError
+
 from modules import util
-from modules.request import urlparse
 from modules.util import Failed, LimitReached
 
 logger = util.logger
@@ -10,9 +9,31 @@ logger = util.logger
 # --- REQUIRED MODULE ATTRIBUTES ---
 builders = ["mdblist_list"]
 sort_names = [
-    "rank", "score", "score_average", "released", "releasedigital", "imdbrating", "imdbvotes", "imdbpopular", 
-    "tmdbpopular", "rogerebert", "rtomatoes", "rtaudience", "metacritic", "myanimelist", "letterrating", "lettervotes",
-    "last_air_date", "budget", "revenue", "runtime", "title", "sort_title", "random", "usort", "added"
+    "rank",
+    "score",
+    "score_average",
+    "released",
+    "releasedigital",
+    "imdbrating",
+    "imdbvotes",
+    "imdbpopular",
+    "tmdbpopular",
+    "rogerebert",
+    "rtomatoes",
+    "rtaudience",
+    "metacritic",
+    "myanimelist",
+    "letterrating",
+    "lettervotes",
+    "last_air_date",
+    "budget",
+    "revenue",
+    "runtime",
+    "title",
+    "sort_title",
+    "random",
+    "usort",
+    "added",
 ]
 
 list_sorts = [f"{s}.asc" for s in sort_names] + [f"{s}.desc" for s in sort_names]
@@ -21,6 +42,7 @@ base_url = "https://mdblist.com/lists/"
 api_url = "https://api.mdblist.com/"
 
 headers = {"User-Agent": "Kometa"}
+
 
 class MDbObj:
     def __init__(self, data):
@@ -65,7 +87,7 @@ class MDbObj:
                 self.trakt_rating = util.check_num(rating["value"])
             elif rating["source"] == "tomatoes":
                 self.tomatoes_rating = util.check_num(rating["value"])
-            elif rating["source"] == "tomatoesaudience":
+            elif rating["source"] in ("tomatoesaudience", "popcorn"):
                 self.tomatoesaudience_rating = util.check_num(rating["value"])
             elif rating["source"] == "tmdb":
                 self.tmdb_rating = util.check_num(rating["value"])
@@ -76,6 +98,7 @@ class MDbObj:
         self.content_rating = data.get("certification")
         self.commonsense = bool(data.get("commonsense"))
         self.age_rating = data.get("age_rating")
+
 
 class MDBList:
     def __init__(self, requests, cache):
@@ -105,15 +128,15 @@ class MDBList:
             self.patron = response.get("patron_status", False)
             self.api_requests = response.get("api_requests", 0)
             self.api_requests_count = response.get("api_requests_count", 0)
-    
+
             logger.info(f"MDBList Connection Verified (Supporter: {self.supporter})")
             logger.info(f"Patron Status: {self.patron}")
             logger.info(f"Daily API Requests: {self.api_requests}")
             logger.info(f"API Requests Used Today: {self.api_requests_count}")
-            
-            self.get_item(media_provider='imdb', media_type='movie', media_id="tt0080684", ignore_cache=True)
+
+            self.get_item(media_provider="imdb", media_type="movie", media_id="tt0080684", ignore_cache=True)
         except LimitReached:
-            logger.info(f"MDBList API limit exhausted")
+            logger.info("MDBList API limit exhausted")
             self.limit = True
         except Failed as fe:
             logger.info(f"MDBList API connection failed: {fe}")
@@ -128,39 +151,38 @@ class MDBList:
         final_params = {"apikey": self.apikey}
         if params:
             final_params.update(params)
-        
+
         # Respect API Rate limits
         time.sleep(0.2 if self.supporter else 1.0)
-        
+
         response = self.requests.get(url, params=final_params)
-        
+
         if response.status_code != 200:
             raise Failed(f"MDBList Error: {response.status_code} - {response.text}")
 
         json_data = response.json()
         if isinstance(json_data, dict) and json_data.get("response") is False:
-            if json_data.get('error') in ["API Limit Reached!", "API Rate Limit Reached!"]:
+            if json_data.get("error") in ["API Limit Reached!", "API Rate Limit Reached!"]:
                 self.limit = True
                 raise LimitReached(f"MDBList Error: {json_data.get('error')}")
             raise Failed(f"MDBList Error: {json_data.get('error')}")
-            
+
         return json_data, response.headers
 
     def get_item(self, media_provider=None, media_type=None, media_id=None, ignore_cache=False):
 
         is_movie = media_type == "movie"
 
-        if media_provider == 'imdb':
+        if media_provider == "imdb":
             key = media_id
-        elif media_provider == 'tmdb':
+        elif media_provider == "tmdb":
             key = f"{'tm' if is_movie else 'ts'}{media_id}"
-        elif media_provider == 'tvdb':
+        elif media_provider == "tvdb":
             key = f"{'tvm' if is_movie else 'tvs'}{media_id}"
         else:
             raise Failed("MDBList Error: media_provider, media_type, media_id Required")
 
         expired = None
-        mdb_dict = None
 
         item_url = f"{api_url}{media_provider}/{media_type}/{media_id}/"
 
@@ -168,20 +190,8 @@ class MDBList:
             mdb_dict, expired = self.cache.query_mdb(key, self.expiration)
             if mdb_dict and expired is False:
                 return MDbObj(mdb_dict)
-
-        if self.limit and mdb_dict:
-            # logger.info(f"MDBList Limit reached, using expired cache for {key}")
-            return MDbObj(mdb_dict)
-
         logger.trace(f"ID: {key}")
-        try:
-            mdb_tuple = self._request(item_url, params={})
-        except LimitReached:
-            if mdb_dict:
-                # logger.info(f"MDBList Limit reached, using expired cache for {key}")
-                return MDbObj(mdb_dict)
-            raise
-
+        mdb_tuple = self._request(item_url, params={})
         mdb = MDbObj(mdb_tuple[0])
         if self.cache and not ignore_cache:
             self.cache.update_mdb(expired, key, mdb, self.expiration)
@@ -192,24 +202,21 @@ class MDBList:
 
     def get_series(self, tvdb_id):
         return self.get_item(media_provider="tvdb", media_type="show", media_id=tvdb_id)
- 
-    def get_movie(self, tmdb_id): 
+
+    def get_movie(self, tmdb_id):
         return self.get_item(media_provider="tmdb", media_type="movie", media_id=tmdb_id)
 
     def validate_mdblist_lists(self, error_type, mdb_lists):
         valid_lists = []
-        for mdb_dict in util.get_list(mdb_lists, split=False):
+        for mdb_dict in util.get_list(mdb_lists, split=False, return_none=False) or []:
             if not isinstance(mdb_dict, dict):
                 mdb_dict = {"url": mdb_dict}
-            
-            url = mdb_dict.get("url", "").strip("/")
+
+            url = str(mdb_dict.get("url", "")).strip("/")
             if not url.startswith(base_url.strip("/")):
                 raise Failed(f"{error_type} Error: {url} must start with {base_url}")
 
-            list_object = {
-                "url": url,
-                "limit": int(mdb_dict.get("limit", 0))
-            }
+            list_object = {"url": url, "limit": int(mdb_dict.get("limit", 0))}
 
             if "sort_by" in mdb_dict:
                 sort_by = mdb_dict["sort_by"]
@@ -225,9 +232,8 @@ class MDBList:
 
         external_id = list_path.split("/external/")[-1] if "/external/" in list_path else None
 
-        total_items = 0
-
         items_url = f"{api_url}external/lists/{external_id}/items/" if external_id else f"{api_url}lists/{list_path}/items/"
+        meta_url = f"{api_url}external/lists/{external_id}" if external_id else f"{api_url}lists/{list_path}"
 
         sort, direction = data["sort_by"].split(".") if "sort_by" in data else (None, None)
         results = []
@@ -244,6 +250,18 @@ class MDBList:
         else:
             params["unified"] = True
 
+        # Fetch list total so progress percentage is accurate for lists over 1000 items.
+        # X-Total-Items / X-Matched-Items headers return the per-page count, not the global total.
+        total_count = 0
+        try:
+            meta_data, _ = self._request(meta_url)
+            if isinstance(meta_data, list) and meta_data:
+                meta_data = meta_data[0]
+            if isinstance(meta_data, dict):
+                total_count = int(meta_data.get("items", 0) or 0)
+        except Exception:
+            pass
+
         items = []
 
         while has_more:
@@ -258,20 +276,15 @@ class MDBList:
             try:
                 page_data, headers = self._request(items_url, params=params)
                 has_more = headers.get("X-Has-More", "false").lower() == "true"
-                total_items = int(headers.get("X-Total-Items", 0))
-                total_matched_items = int(headers.get("X-Matched-Items", total_items))
-                
-                if total_matched_items == 0:
-                    total_matched_items = total_items
 
-                items = [] 
+                items = []
                 if isinstance(page_data, dict):
                     if is_movie:
                         items = page_data.get("movies")
                     else:
                         items = page_data.get("shows")
 
-                    if len(items) == 0 and "items" in page_data: # type: ignore
+                    if len(items) == 0 and "items" in page_data:  # type: ignore
                         items = page_data["items"]
 
                 elif isinstance(page_data, list):
@@ -279,7 +292,7 @@ class MDBList:
             except Exception as e:
                 raise Failed(f"MDBList Error: Could not fetch list items: {e}")
 
-            for item in items: # type: ignore
+            for item in items:  # type: ignore
                 if 0 < limit_config <= len(results):
                     return results
 
@@ -289,15 +302,17 @@ class MDBList:
                     type_key = "tmdb" if m_type.lower() == "movie" else "tmdb_show"
                     results.append((tmdb_id, type_key))
 
-            offset += len(items) # type: ignore
-            
-            if total_items > 0:
-                percent = int((len(results) / total_matched_items) * 100)
-                logger.info(f"MDBList Sync Progress: {len(results)}/{total_matched_items} ({percent}%)")
-            else:
-                logger.info(f"MDBList Sync Progress: {len(results)} items processed...")
+            offset += len(items)  # type: ignore
 
-            if len(items) == 0: # type: ignore
+            if total_count:
+                percent = min(int((len(results) / total_count) * 100), 100)
+                suffix = "..." if has_more else " - Complete"
+                logger.info(f"MDBList Sync Progress: {len(results)}/{total_count} ({percent}%){suffix}")
+            else:
+                suffix = "..." if has_more else ""
+                logger.info(f"MDBList Sync Progress: {len(results)} items fetched{suffix}")
+
+            if len(items) == 0:  # type: ignore
                 break
 
         return results

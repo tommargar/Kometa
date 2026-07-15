@@ -22,6 +22,7 @@ class TestEmbyIntegration:
         """Clean up temporary files."""
         import gc
         cache_path = self.cache.cache_path
+        self.cache.close()
         self.cache = None
         gc.collect()
         if os.path.exists(cache_path):
@@ -41,6 +42,8 @@ class TestEmbyIntegration:
             summary = "A chemistry teacher turned meth cook."
             poster_url = "https://example.com/poster.jpg"
             background_url = "https://example.com/background.jpg"
+            logo_url = None
+            icon_url = None
             release_date = None
             genres = ["Drama", "Crime"]
             networks = ["AMC"]
@@ -213,6 +216,7 @@ class TestCacheLanguageEdgeCases:
         """Clean up temporary files."""
         import gc
         cache_path = self.cache.cache_path
+        self.cache.close()
         self.cache = None
         gc.collect()
         if os.path.exists(cache_path):

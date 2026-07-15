@@ -1,6 +1,10 @@
 import re
+import time
 from datetime import datetime
 
+from lxml import html
+from lxml.etree import ParserError
+from requests.exceptions import MissingSchema
 from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_fixed
 
 from modules import util
@@ -8,10 +12,37 @@ from modules.util import Failed
 
 logger = util.logger
 
+
+class NotFound(Failed):
+    """Raised when TVDb gives a definitive HTTP 4xx for a resource - i.e. TVDb itself confirms there is nothing at this ID."""
+
+
+class Unavailable(Failed):
+    """Raised when TVDb never returned usable content after retries were exhausted (e.g. repeated 202/empty-body); not a confirmed absence like NotFound."""
+
+
+class TVDbServerError(Exception):
+    """Raised for 5xx responses from TVDb; not a Failed subclass so tenacity's retry_if_not_exception_type(Failed) will retry it."""
+
+
+def _tvdb_retry_exhausted(retry_state):
+    """Convert an exhausted TVDb retry loop (5xx, or repeated unparsable 202/empty responses) into Unavailable."""
+    raise Unavailable(f"TVDb Error: No usable response from TVDb after {retry_state.attempt_number} attempt(s): {retry_state.outcome.exception()}") from retry_state.outcome.exception()
+
+
 builders = ["tvdb_list", "tvdb_list_details", "tvdb_movie", "tvdb_movie_details", "tvdb_show", "tvdb_show_details"]
 base_url = "https://www.thetvdb.com"
 alt_url = "https://thetvdb.com"
-api_url = "https://api4.thetvdb.com/v4"
+urls = {
+    "list": f"{base_url}/lists/",
+    "alt_list": f"{alt_url}/lists/",
+    "series": f"{base_url}/series/",
+    "alt_series": f"{alt_url}/series/",
+    "movies": f"{base_url}/movies/",
+    "alt_movies": f"{alt_url}/movies/",
+    "series_id": f"{base_url}/dereferrer/series/",
+    "movie_id": f"{base_url}/dereferrer/movie/",
+}
 language_translation = {
     "ab": "abk",
     "aa": "aar",
@@ -200,249 +231,201 @@ language_translation = {
 
 
 class TVDbObj:
-    def __init__(self, tvdb, tvdb_id, is_movie=False, ignore_cache=False, data=None):
+    def __init__(self, tvdb, tvdb_id, is_movie=False, ignore_cache=False):
         self._tvdb = tvdb
         self.tvdb_id = tvdb_id
         self.is_movie = is_movie
         self.ignore_cache = ignore_cache
         expired = None
-        if not data and self._tvdb.cache and not ignore_cache:
+        data = None
+        if self._tvdb.cache and not ignore_cache:
             data, expired = self._tvdb.cache.query_tvdb(tvdb_id, is_movie, self._tvdb.expiration)
         if expired or not data:
-            data = self._tvdb.get_item(tvdb_id, is_movie=is_movie)
-
-        self.title = data.get("title")
-        self.summary = data.get("summary")
-        self.poster_url = data.get("poster_url")
-        self.background_url = data.get("background_url")
-        self.release_date = data.get("release_date")
-        if self.release_date and isinstance(self.release_date, str):
+            item_url = f"{urls['movie_id' if is_movie else 'series_id']}{tvdb_id}"
             try:
-                self.release_date = datetime.strptime(self.release_date, "%Y-%m-%d")
+                data = self._tvdb.get_request(item_url)
+            except NotFound:
+                raise NotFound(f"TVDb Error: No {'Movie' if is_movie else 'Series'} found for TVDb ID: {tvdb_id} at {item_url}")
+            except Unavailable:
+                # Already has its own accurate message - don't relabel it as "No Series/Movie found"
+                raise
+            except (Failed, TVDbServerError):
+                raise Failed(f"TVDb Error: No {'Movie' if is_movie else 'Series'} found for TVDb ID: {tvdb_id} at {item_url}")
+
+        def parse_page(xpath, is_list=False):
+            parse_results = data.xpath(xpath)
+            if len(parse_results) > 0:
+                parse_results = [r.strip() for r in parse_results if len(r) > 0]
+            return parse_results if is_list else parse_results[0] if len(parse_results) > 0 else None
+
+        def parse_title_summary(lang=None):
+            place = "//div[@class='change_translation_text' and "
+            place += f"@data-language='{lang}']" if lang else "not(@style='display:none')]"
+            return parse_page(f"{place}/@data-title"), parse_page(f"{place}/p/text()[normalize-space()]")
+
+        if isinstance(data, dict):
+            self.title = data["title"]
+            self.summary = data["summary"]
+            self.poster_url = data["poster_url"]
+            self.background_url = data["background_url"]
+            self.logo_url = data.get("logo_url", "")
+            self.icon_url = data.get("icon_url", "")
+            self.release_date = data["release_date"]
+            self.status = data["status"]
+            self.genres = data["genres"].split("|")
+        else:
+            self.title, self.summary = parse_title_summary(lang=self._tvdb.language)
+            if not self.title and self._tvdb.language in language_translation:
+                self.title, self.summary = parse_title_summary(lang=language_translation[self._tvdb.language])
+            if not self.title:
+                self.title, self.summary = parse_title_summary()
+            if not self.title:
+                raise Failed(f"TVDb Error: Name not found from TVDb ID: {self.tvdb_id}")
+
+            self.poster_url = parse_page("//div[@id='artwork-posters']//a/@href")
+            self.background_url = parse_page("//div[@id='artwork-backgrounds']//a/@href")
+            self.logo_url = parse_page("//div[@id='artwork-clearlogo']//a/@href")
+            self.icon_url = parse_page("//div[@id='artwork-icons']//a/@href")
+            if is_movie:
+                released = parse_page("//strong[text()='Released']/parent::li/span/text()[normalize-space()]")
+            else:
+                released = parse_page("//strong[text()='First Aired']/parent::li/span/text()[normalize-space()]")
+
+            try:
+                self.release_date = datetime.strptime(str(released), "%B %d, %Y") if released else released  # noqa
             except ValueError:
                 self.release_date = None
-        self.status = data.get("status")
-        self.genres = data.get("genres", [])
-        if isinstance(self.genres, str):
-            self.genres = self.genres.split("|")
-        self.networks = data.get("networks", [])
-        if isinstance(self.networks, str):
-            self.networks = self.networks.split("|")
-        self.production = data.get("production", [])
-        if isinstance(self.production, str):
-            self.production = self.production.split("|")
-        self.studio = data.get("studio", [])
-        if isinstance(self.studio, str):
-            self.studio = self.studio.split("|")
+            self.status = parse_page("//strong[text()='Status']/parent::li/span/text()[normalize-space()]")
+
+            self.genres = parse_page("//strong[text()='Genres']/parent::li/span/a/text()[normalize-space()]", is_list=True)
 
         if self._tvdb.cache and not ignore_cache:
             self._tvdb.cache.update_tvdb(expired, self, self._tvdb.expiration)
 
 
 class TVDb:
-    def __init__(self, requests, cache, params):
+    def __init__(self, requests, cache, tvdb_language, expiration):
         self.requests = requests
         self.cache = cache
-        self.apikey = params.get("apikey")
-        self.pin = params.get("pin")
-        self.language = params.get("language", "en")
-        self.expiration = params.get("cache_expiration", 60)
-        self.token = None
-        if self.apikey:
-            self._login()
-
-    def _login(self):
-        data = {"apikey": self.apikey}
-        if self.pin:
-            data["pin"] = self.pin
-        try:
-            response = self.requests.post(f"{api_url}/login", json=data)
-            if response.status_code == 200:
-                self.token = response.json()["data"]["token"]
-            else:
-                raise Failed(f"TVDb Error: Login failed ({response.status_code})")
-        except Exception as e:
-            raise Failed(f"TVDb Error: Login failed: {e}")
-
-    @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type(Failed))
-    def _request(self, endpoint, params=None):
-        if not self.token:
-            if self.apikey:
-                self._login()
-            else:
-                raise Failed("TVDb Error: No API Key provided")
-
-        headers = {"Authorization": f"Bearer {self.token}"}
-        url = f"{api_url}{endpoint}"
-        response = self.requests.get(url, headers=headers, params=params)
-
-        if response.status_code == 401:
-            self._login()
-            headers = {"Authorization": f"Bearer {self.token}"}
-            response = self.requests.get(url, headers=headers, params=params)
-
-        if response.status_code >= 400:
-            raise Failed(f"TVDb Error: Request failed {url} ({response.status_code})")
-
-        return response.json()
+        self.language = tvdb_language
+        self.expiration = expiration
 
     def get_tvdb_obj(self, tvdb_url, is_movie=False):
         tvdb_id, _, _ = self.get_id_from_url(tvdb_url, is_movie=is_movie)
         return TVDbObj(self, tvdb_id, is_movie=is_movie)
+
+    @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type(Failed), retry_error_callback=_tvdb_retry_exhausted)
+    def get_request(self, tvdb_url):
+        response = self.requests.get(tvdb_url, language=self.language)
+        if response.status_code >= 400:
+            # 4xx = definitive "gone" (NotFound); 5xx = transient (TVDbServerError, retried by tenacity)
+            if 400 <= response.status_code < 500:
+                raise NotFound(f"({response.status_code}) {response.reason}")
+            raise TVDbServerError(f"({response.status_code}) {response.reason}")
+        return html.fromstring(response.content)
 
     def get_id_from_url(self, tvdb_url, is_movie=False, ignore_cache=False):
         try:
             if not is_movie:
                 return int(tvdb_url), None, None
             else:
-                return int(tvdb_url), None, None
+                tvdb_url = f"{urls['movie_id']}{int(tvdb_url)}"
         except ValueError:
             pass
         tvdb_url = tvdb_url.strip()
+        if tvdb_url.startswith((urls["series"], urls["alt_series"], urls["series_id"])):
+            media_type = "Series"
+        elif tvdb_url.startswith((urls["movies"], urls["alt_movies"], urls["movie_id"])):
+            media_type = "Movie"
+        else:
+            raise Failed(f"TVDb Error: {tvdb_url} must begin with {urls['movies']} or {urls['series']}")
         expired = None
         if self.cache and not ignore_cache and not is_movie:
             tvdb_id, expired = self.cache.query_tvdb_map(tvdb_url, self.expiration)
             if tvdb_id and not expired:
                 return tvdb_id, None, None
         logger.trace(f"URL: {tvdb_url}")
-
-        # Parse slug from URL
-        slug = None
-        if "/series/" in tvdb_url:
-            slug = tvdb_url.split("/series/")[1].split("/")[0]
-        elif "/movies/" in tvdb_url:
-            slug = tvdb_url.split("/movies/")[1].split("/")[0]
-
-        if not slug:
-            # Try dereferrer ID
-            if "/dereferrer/" in tvdb_url:
-                try:
-                    return int(tvdb_url.split("/")[-1]), None, None
-                except ValueError:
-                    pass
-            raise Failed(f"TVDb Error: Could not parse slug from {tvdb_url}")
-
         try:
-            results = self._request("/search", params={"query": slug, "type": "movie" if is_movie else "series"})
-        except Failed:
-            raise Failed(f"TVDb Error: Search failed for {slug}")
-
-        if results and "data" in results and results["data"]:
-            # Try to match slug exactly or take first result
-            match = None
-            for item in results["data"]:
-                if item.get("slug") == slug:
-                    match = item
-                    break
-            if not match:
-                match = results["data"][0]
-
-            tvdb_id = int(match["tvdb_id"])
+            response = self.get_request(tvdb_url)
+        except (ParserError, Failed, TVDbServerError):
+            raise Failed(f"TVDb Error: Failed not parse {tvdb_url}")
+        results = response.xpath(f"//*[text()='TheTVDB.com {media_type} ID']/parent::node()/span/text()")
+        if len(results) > 0:
+            tvdb_id = int(results[0])
             tmdb_id = None
             imdb_id = None
-
-            # For movies, we might want to fetch extended info to get external IDs if not in search result
-            if is_movie:
-                try:
-                    extended = self._request(f"/movies/{tvdb_id}/extended")
-                    if extended and "data" in extended:
-                        remote_ids = extended["data"].get("remoteIds", [])
-                        for rid in remote_ids:
-                            if rid["sourceName"] == "TheMovieDB.com":
-                                tmdb_id = int(rid["id"])
-                            elif rid["sourceName"] == "IMDB":
-                                imdb_id = rid["id"]
-                except Failed:
-                    pass
-
+            if media_type == "Movie":
+                results = response.xpath("//*[text()='TheMovieDB.com']/@href")
+                if len(results) > 0:
+                    try:
+                        tmdb_id = util.regex_first_int(results[0], "TMDb ID")
+                    except Failed:
+                        pass
+                results = response.xpath("//*[text()='IMDB']/@href")
+                if len(results) > 0:
+                    try:
+                        imdb_id = util.get_id_from_imdb_url(results[0])
+                    except Failed:
+                        pass
+                if tmdb_id is None and imdb_id is None:
+                    raise Failed("TVDb Error: No TMDb ID or IMDb ID found")
             if self.cache and not ignore_cache and not is_movie:
                 self.cache.update_tvdb_map(expired, tvdb_url, tvdb_id, self.expiration)
             return tvdb_id, tmdb_id, imdb_id
+        elif tvdb_url.startswith(urls["movie_id"]):
+            err_text = f"using TVDb Movie ID: {tvdb_url[len(urls['movie_id']):]}"
+        elif tvdb_url.startswith(urls["series_id"]):
+            err_text = f"using TVDb Series ID: {tvdb_url[len(urls['series_id']):]}"
         else:
-            raise Failed(f"TVDb Error: Could not find ID for {slug}")
-
-    def get_item(self, tvdb_id, is_movie=False):
-        endpoint = f"/movies/{tvdb_id}/extended" if is_movie else f"/series/{tvdb_id}/extended"
-        try:
-            response = self._request(endpoint)
-        except Failed as e:
-            msg = str(e)
-            if "404" in msg:
-                raise Failed(f"TVDb Error: Item {tvdb_id} not found")
-            raise Failed(f"TVDb Error: Item {tvdb_id} request failed: {msg}")
-
-        if "data" not in response:
-            raise Failed(f"TVDb Error: Item {tvdb_id} data not found")
-
-        data = response["data"]
-        # print(data)
-        companies = data.get("companies") or []
-        if isinstance(companies, dict):
-            production = [c["name"] for c in (companies.get("production") or [])]
-            studios = [c["name"] for c in (companies.get("studio") or [])]
-        else:
-            production = [c["name"] for c in companies]
-            studios = [c["name"] for c in companies]
-
-        item = {
-            "title": data.get("name"),
-            "summary": data.get("overview"),
-            "poster_url": data.get("image"),
-            "background_url": data.get("art"),
-            "release_date": data.get("firstAired"),
-            "status": data.get("status", {}).get("name") if isinstance(data.get("status"), dict) else data.get("status"),
-            "genres": [g["name"] for g in (data.get("genres") or [])],
-            "networks": [n["name"] for n in (data.get("networks") or [])],
-            "production": production,
-            "studio": studios,
-        }
-
-        # Handle translations if needed
-        lang = language_translation.get(self.language, self.language)
-
-        # If language is not eng, try to fetch translation
-        if self.language != "eng" and self.language != "en":
-            try:
-                trans = self._request(f"/{'movies' if is_movie else 'series'}/{tvdb_id}/translations/{lang}")
-                if trans and "data" in trans:
-                    if trans["data"].get("name"):
-                        item["title"] = trans["data"]["name"]
-                    if trans["data"].get("overview"):
-                        item["summary"] = trans["data"]["overview"]
-            except Failed:
-                pass
-
-        return item
+            err_text = f"ID at the URL {tvdb_url}"
+        raise Failed(f"TVDb Error: Could not find a TVDb {media_type} {err_text}")
 
     def get_list_description(self, tvdb_url):
-        if "/lists/" in tvdb_url:
-            list_id = tvdb_url.split("/lists/")[1].split("/")[0]
-            try:
-                data = self._request(f"/lists/{list_id}")
-                if "data" in data:
-                    return data["data"].get("overview"), data["data"].get("image")
-            except Failed:
-                pass
-        return None, None
+        response = self.requests.get_html(tvdb_url, language=self.language)
+        description = response.xpath("//div[@class='block']/div[not(@style='display:none')]/p/text()")
+        description = description[0] if len(description) > 0 and len(description[0]) > 0 else None
+        poster = response.xpath("//div[@id='artwork']/div/div/a/@href")
+        poster = poster[0] if len(poster) > 0 and len(poster[0]) > 0 else None
+        return description, poster
 
     def _ids_from_url(self, tvdb_url):
         ids = []
         tvdb_url = tvdb_url.strip()
         logger.trace(f"URL: {tvdb_url}")
-        if "/lists/" in tvdb_url:
-            list_id = tvdb_url.split("/lists/")[1].split("/")[0]
+        if tvdb_url.startswith((urls["list"], urls["alt_list"])):
             try:
-                # Fetch list items (extended to get entities)
-                data = self._request(f"/lists/{list_id}/extended")
-                if "data" in data and "entities" in data["data"]:
-                    for entity in data["data"]["entities"]:
-                        if entity.get("seriesId"):
-                            ids.append((int(entity["seriesId"]), "tvdb"))
-                        elif entity.get("movieId"):
-                            ids.append((int(entity["movieId"]), "tvdb"))
-            except Failed:
-                raise Failed(f"TVDb Error: Failed to fetch list {tvdb_url}")
-        return ids
+                response = self.requests.get_html(tvdb_url, language=self.language)
+                items = response.xpath("//div[@id='general']//div/div/h3/a")
+                for item in items:
+                    title = item.xpath("text()")[0]
+                    item_url = item.xpath("@href")[0]
+                    if item_url.startswith("/series/"):
+                        try:
+                            tvdb_id, _, _ = self.get_id_from_url(f"{base_url}{item_url}")
+                            if tvdb_id:
+                                ids.append((tvdb_id, "tvdb"))
+                        except Failed as e:
+                            logger.error(f"{e} for series {title}")
+                    elif item_url.startswith("/movies/"):
+                        try:
+                            _, tmdb_id, imdb_id = self.get_id_from_url(f"{base_url}{item_url}", is_movie=True)
+                            if tmdb_id:
+                                ids.append((tmdb_id, "tmdb"))
+                            elif imdb_id:
+                                ids.append((imdb_id, "imdb"))
+                        except Failed as e:
+                            logger.error(f"{e} for movie {title}")
+                    else:
+                        logger.error(f"TVDb Error: Skipping Movie: {title}")
+                    time.sleep(2)
+                if len(ids) > 0:
+                    return ids
+                raise Failed(f"TVDb Error: No TVDb IDs found at {tvdb_url}")
+            except MissingSchema:
+                logger.stacktrace()
+                raise Failed(f"TVDb Error: URL Lookup Failed for {tvdb_url}")
+        else:
+            raise Failed(f"TVDb Error: {tvdb_url} must begin with {urls['list']}")
 
     def get_tvdb_ids(self, method, data):
         if method == "tvdb_show":

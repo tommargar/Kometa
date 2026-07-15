@@ -1,5 +1,6 @@
 import time
 import webbrowser
+from typing import Any
 
 from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_fixed
 
@@ -58,6 +59,7 @@ class Trakt:
         self.pin = params["pin"]
         self.config_path = params["config_path"]
         self.authorization = params["authorization"]
+        self.username = None
         logger.secret(self.client_secret)
         if self.force_refresh is True or not self._save(self.authorization):
             if not self._refresh():
@@ -197,7 +199,10 @@ class Trakt:
         return False
 
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type(Failed))
-    def _request(self, url, params=None, json_data=None):
+    def _request(self, url, params=None, json_data=None, ignore_404=False) -> Any:
+        # Returns dict[str, Any] for single-page endpoints and list[dict] for
+        # paginated endpoints.  Annotated Any so callers can subscript/iterate
+        # based on their knowledge of the specific endpoint being called.
         output_json = []
         if params is None:
             params = {}
@@ -230,6 +235,8 @@ class Trakt:
                 if reauth_count > 1:
                     logger.debug("Trakt token has been refreshed twice on this request; this may be a private list")
                     raise Failed(f"({response.status_code}) {response.reason}")
+            elif response.status_code == 404 and ignore_404:
+                return None
             elif response.status_code != 200:
                 logger.debug(f"Trakt response issue: ({response.status_code}) {response.reason}")
                 raise Failed(f"({response.status_code}) {response.reason}")
@@ -253,6 +260,41 @@ class Trakt:
     def get_episode_rating(self, show_id, season, episode):
         response = self._request(f"/shows/{show_id}/seasons/{season}/episodes/{episode}/ratings")
         return response["rating"]
+
+    def get_item_images(self, item_id, media_type, season=None, episode=None):
+        if media_type not in ["movie", "show"]:
+            raise Failed(f"Trakt Error: Images not supported for media type {media_type}")
+
+        def _images(data):
+            if isinstance(data, list):
+                data = next((d for d in data if isinstance(d, dict) and (season is None or d.get("number") == season)), {})
+            return data.get("images") if isinstance(data, dict) else {}
+
+        show_id = item_id
+        if media_type == "movie":
+            data = self._request(f"/movies/{item_id}", params={"extended": "full,images"}, ignore_404=True)
+        elif season is None:
+            data = self._request(f"/shows/{show_id}", params={"extended": "full,images"}, ignore_404=True)
+        elif episode is None:
+            data = self._request(f"/shows/{show_id}/seasons", params={"extended": "full,images"}, ignore_404=True)
+        else:
+            data = self._request(f"/shows/{show_id}/seasons/{season}/episodes/{episode}", params={"extended": "full,images"}, ignore_404=True)
+        if not data:
+            return {}
+        return _images(data) or {}
+
+    def lookup_item_images(self, external_id, from_source, media_type, season=None, episode=None):
+        if season is None:
+            lookup = self._request(f"/search/{from_source}/{external_id}", params={"type": media_type, "extended": "full"})
+            if lookup and media_type in lookup[0]:
+                return lookup[0][media_type].get("images") or {}
+            raise Failed(f"Trakt Error: No {media_type} found for {from_source.upper().replace('B', 'b')} ID: {external_id}")
+        lookup = self._request(f"/search/{from_source}/{external_id}", params={"type": "show"})
+        if lookup and "show" in lookup[0]:
+            show_id = lookup[0]["show"]["ids"].get("slug") or lookup[0]["show"]["ids"].get("trakt")
+            if show_id:
+                return self.get_item_images(show_id, "show", season=season, episode=episode)
+        raise Failed(f"Trakt Error: No show found for {from_source.upper().replace('B', 'b')} ID: {external_id}")
 
     def get_rating(self, show_id, is_movie):
         item_type = "movies" if is_movie else "shows"
@@ -290,7 +332,14 @@ class Trakt:
                 data = item
                 current_type = item_type
             elif item_type:
-                data = item[item_type]
+                try:
+                    data = item[item_type]
+                except KeyError:
+                    # some of these responses have a new structure
+                    if "ids" in item and item["ids"]:
+                        data = item
+                    else:
+                        continue
                 current_type = item_type
             elif "type" in item and item["type"] in id_translation:
                 data = item[id_translation[item["type"]]]
@@ -299,7 +348,7 @@ class Trakt:
                 continue
             if current_type in ["person", "list"] and ignore_other:
                 continue
-            id_type, id_display = id_types[current_type]
+            id_type, id_display = id_types[current_type]  # type: ignore[index]
             if id_type in data["ids"] and data["ids"][id_type]:
                 final_id = data["ids"][id_type]
                 if current_type == "episode":
@@ -324,9 +373,9 @@ class Trakt:
                 continue
             type_set = str(id_type).split("_")
             id_set = str(input_id).split("_")
-            item = {"ids": {type_set[0]: id_set[0] if type_set[0] == "imdb" else int(id_set[0])}}
+            item: dict[str, Any] = {"ids": {type_set[0]: id_set[0] if type_set[0] == "imdb" else int(id_set[0])}}
             if id_type in ["tvdb_season", "tvdb_episode"]:
-                season_data = {"number": int(id_set[1])}
+                season_data: dict[str, Any] = {"number": int(id_set[1])}
                 if id_type == "tvdb_episode":
                     season_data["episodes"] = [{"number": int(id_set[2])}]
                 item["seasons"] = [season_data]
@@ -440,15 +489,21 @@ class Trakt:
         return self._parse(items, typeless=True, item_type="movie" if is_movie else "show")
 
     def _charts(self, chart_type, is_movie, params, time_period=None, ignore_other=False):
-        chart_url = f"{chart_type}/{time_period}" if time_period else chart_type
-        items = self._request(f"/{'movies' if is_movie else 'shows'}/{chart_url}", params=params)
+        media = "movies" if is_movie else "shows"
+        if chart_type == "recommended":
+            chart_url = f"/recommendations/{media}"
+        elif time_period:
+            chart_url = f"/{media}/{chart_type}/{time_period}"
+        else:
+            chart_url = f"/{media}/{chart_type}"
+        items = self._request(chart_url, params=params)
         return self._parse(items, typeless=chart_type == "popular", item_type="movie" if is_movie else "show", ignore_other=ignore_other)
 
     def get_people(self, data):
         return {str(i[0][0]): i[0][1] for i in self._list(data) if i[1] == "tmdb_person"}  # noqa
 
     def validate_list(self, trakt_lists):
-        values = util.get_list(trakt_lists, split=False)
+        values = util.get_list(trakt_lists, split=False, return_none=False)
         trakt_values = []
         for value in values:
             if isinstance(value, dict):
@@ -464,7 +519,7 @@ class Trakt:
 
     def validate_chart(self, err_type, method_name, data, is_movie):
         valid_dicts = []
-        for trakt_dict in util.get_list(data, split=False):
+        for trakt_dict in util.get_list(data, split=False, return_none=False):
             if not isinstance(trakt_dict, dict):
                 raise Failed(f"{err_type} Error: {method_name} must be a dictionary")
             dict_methods = {dm.lower(): dm for dm in trakt_dict}
@@ -474,8 +529,11 @@ class Trakt:
                     final_dict["chart"] = util.parse(err_type, "chart", trakt_dict, methods=dict_methods, parent=method_name, options=["recommended", "watched", "anticipated", "collected", "trending", "popular"])
                     final_dict["limit"] = util.parse(err_type, "limit", trakt_dict, methods=dict_methods, parent=method_name, datatype="int", default=10)
                     final_dict["time_period"] = None
-                    if final_dict["chart"] in ["recommended", "watched", "collected"] and "time_period" in dict_methods:
-                        final_dict["time_period"] = util.parse(err_type, "time_period", trakt_dict, methods=dict_methods, parent=method_name, default="weekly", options=periods)
+                    if final_dict["chart"] in ["watched", "collected"]:
+                        if "time_period" in dict_methods:
+                            final_dict["time_period"] = util.parse(err_type, "time_period", trakt_dict, methods=dict_methods, parent=method_name, default="weekly", options=periods)
+                        else:
+                            final_dict["time_period"] = "weekly"
                     if "query" in dict_methods:
                         final_dict["query"] = util.parse(err_type, "query", trakt_dict, methods=dict_methods, parent=method_name)
                     if "years" in dict_methods:
@@ -580,11 +638,11 @@ class Trakt:
                 "rt_user_meters",
                 "metascores",
             ]:
-                if attr in data:
-                    logger.info(f"{attr:>22}: {','.join(data[attr]) if isinstance(data[attr], list) else data[attr]}")
-                    values = [status_translation[v] for v in data[attr]] if attr == "status" else data[attr]
-                    params[attr] = ",".join(values) if isinstance(values, list) else values
-            return self._charts(data["chart"], is_movie, params, time_period=data["time_period"], ignore_other=True)
+                if attr in data:  # type: ignore[operator]
+                    logger.info(f"{attr:>22}: {','.join(data[attr]) if isinstance(data[attr], list) else data[attr]}")  # type: ignore[index]
+                    values = [status_translation[v] for v in data[attr]] if attr == "status" else data[attr]  # type: ignore[index]
+                    params[attr] = ",".join(values) if isinstance(values, list) else values  # type: ignore[index]
+            return self._charts(data["chart"], is_movie, params, time_period=data["time_period"], ignore_other=True)  # type: ignore[index]
         elif method == "trakt_userlist":
             logger.info(f"Processing {pretty} {media_type}s from {data['user']}'s {data['userlist'].capitalize()}")
             return self._userlist(data["userlist"], data["user"], is_movie, sort_by=data["sort_by"], ignore_other=True)

@@ -24,6 +24,7 @@ class TestCacheLanguageParameters:
         """Clean up temporary files."""
         import gc
         cache_path = self.cache.cache_path
+        self.cache.close()
         self.cache = None
         gc.collect()
         if os.path.exists(cache_path):
@@ -160,6 +161,7 @@ class TestMediaPeopleCache:
         """Clean up temporary files."""
         import gc
         cache_path = self.cache.cache_path
+        self.cache.close()
         self.cache = None
         gc.collect()
         if os.path.exists(cache_path):
@@ -229,6 +231,7 @@ class TestTmdbPersonMap:
         """Clean up temporary files."""
         import gc
         cache_path = self.cache.cache_path
+        self.cache.close()
         self.cache = None
         gc.collect()
         if os.path.exists(cache_path):

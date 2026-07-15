@@ -5,6 +5,7 @@ from datetime import datetime
 from modules import operations, radarr, sonarr, util
 from modules.anidb import AniDB
 from modules.anilist import AniList
+from modules.apprise_notify import AppriseNotify
 from modules.cache import Cache
 from modules.convert import Convert
 from modules.emby import Emby
@@ -35,6 +36,7 @@ from modules.trakt import Trakt
 from modules.tvdb import TVDb
 from modules.util import Failed, NotScheduled, NotScheduledRange
 from modules.webhooks import Webhooks
+from modules.yamtrack import YamTrack
 
 logger = util.logger
 
@@ -54,6 +56,15 @@ filetype_list = {
     "png": "Use PNG files for saving Overlays",
     "webp_lossy": "Use Lossy WEBP files for saving Overlays",
     "webp_lossless": "Use Lossless WEBP files for saving Overlays",
+}
+hub_sort_options = {
+    "sort_title": "Sort Recommendation Hubs by Collection Sort Title (ascending)",
+    "sort_title.desc": "Sort Recommendation Hubs by Collection Sort Title (descending)",
+    "alpha": "Sort Recommendation Hubs by Collection Title alphabetically (ascending)",
+    "alpha.desc": "Sort Recommendation Hubs by Collection Title alphabetically (descending)",
+    "configured": "Sort Recommendation Hubs in the order collections appear in your config files (first to last)",
+    "configured.desc": "Sort Recommendation Hubs in the order collections appear in your config files (last to first)",
+    "random": "Sort Recommendation Hubs in a random order",
 }
 imdb_label_options = {
     "remove": "Remove All IMDb Parental Labels",
@@ -130,6 +141,12 @@ mass_available_options = {
     "remove": "Remove and Lock Originally Available",
     "reset": "Remove and Unlock Originally Available",
     "tmdb": "Use TMDb Release",
+    "tmdb_premiere": "Use TMDb Premiere Release",
+    "tmdb_theatrical": "Use TMDb Theatrical Release",
+    "tmdb_theatricallimited": "Use TMDb Theatrical Limited Release",
+    "tmdb_digital": "Use TMDb Digital Release",
+    "tmdb_physical": "Use TMDb Physical Release",
+    "tmdb_tv": "Use TMDb TV Release",
     "omdb": "Use IMDb Release through OMDb",
     "mdb": "Use MDBList Release",
     "mdb_digital": "Use MDBList Digital Release",
@@ -142,6 +159,8 @@ mass_image_options = {
     "unlock": "Unlock Image",
     "plex": "Use Plex Images",
     "tmdb": "Use TMDb Images",
+    "trakt": "Use Trakt Images",
+    "tvdb": "Use TVDb Images",
 }
 mass_episode_rating_options = {
     "lock": "Lock Rating",
@@ -190,6 +209,8 @@ reset_overlay_options = {"tmdb": "Reset to TMDb poster", "plex": "Reset to Plex 
 library_operations = {
     "assets_for_all": "bool",
     "assets_for_all_collections": "bool",
+    "ignore_labels": "list",
+    "respect_ignore_ids": "bool",
     "split_duplicates": "bool",
     "update_blank_track_titles": "bool",
     "remove_title_parentheses": "bool",
@@ -214,6 +235,8 @@ library_operations = {
     "mass_collection_mode": "mass_collection_mode",
     "mass_poster_update": "dict",
     "mass_background_update": "dict",
+    "mass_image_update": "dict",
+    "mass_metadata_update": "dict",
     "metadata_backup": "dict",
     "delete_collections": "dict",
     "genre_mapper": "dict",
@@ -440,6 +463,8 @@ class ConfigFile:
             self.data["gotify"] = self.data.pop("gotify")
         if "ntfy" in self.data:
             self.data["ntfy"] = self.data.pop("ntfy")
+        if "apprise" in self.data:
+            self.data["apprise"] = self.data.pop("apprise")
         if "anidb" in self.data:
             self.data["anidb"] = self.data.pop("anidb")
         if "radarr" in self.data:
@@ -610,6 +635,171 @@ class ConfigFile:
                     logger.warning(options)
             return default
 
+        def parse_mass_image_operation(input_dict, image_type, allow_tmdb=False, allow_tvdb=False, allow_show_levels=False):
+            image_config = input_dict.get(image_type)
+            if not image_config:
+                return None
+            if not isinstance(image_config, dict):
+                image_config = {"source": image_config}
+            options = {k: v for k, v in mass_image_options.items() if (allow_tmdb or k != "tmdb") and (allow_tvdb or k != "tvdb")}
+            _language = check_for_attribute(image_config, "language", default_is_none=True, do_print=False, save=False)
+            if _language is not None:
+                _language = str(_language).lower()
+                if self.TMDb and _language not in self.TMDb.TMDb._iso_639_1:
+                    raise Failed(f"Config Error: mass_image_update {image_type} language {_language} is not a valid ISO 639-1 language code")
+            if isinstance(image_config.get("source"), list):
+                sources = check_for_attribute(image_config, "source", test_list=options, var_type="lower_list", default_is_none=True, save=False)
+                source = sources[0] if sources else None
+            else:
+                source = check_for_attribute(image_config, "source", test_list=options, default_is_none=True, save=False)
+                sources = [source] if source else []
+            parsed = {
+                "source": source,
+                "sources": sources,
+                "language": _language,
+                "ignore_locked": check_for_attribute(image_config, "ignore_locked", var_type="bool", default=False, do_print=False, save=False),
+                "ignore_overlays": check_for_attribute(image_config, "ignore_overlays", var_type="bool", default=False, do_print=False, save=False),
+            }
+            if allow_show_levels:
+                parsed["seasons"] = check_for_attribute(image_config, "seasons", var_type="bool", default=True, do_print=False, save=False)
+                parsed["episodes"] = check_for_attribute(image_config, "episodes", var_type="bool", default=True, do_print=False, save=False)
+            return parsed
+
+        def expand_mass_metadata_operation(config_op, input_dict):
+            if not input_dict or not isinstance(input_dict, dict):
+                raise Failed("Config Error: mass_metadata_update must be a dictionary")
+            base_op = dict(config_op)
+            base_op.pop("mass_metadata_update", None)
+            base_schedule = base_op.pop("schedule", None)
+            output_ops = []
+
+            def get_schedule(input_value, inherited_schedule=None):
+                if isinstance(input_value, dict) and "schedule" in input_value:
+                    return input_value["schedule"]
+                return inherited_schedule
+
+            def get_source(input_value):
+                if isinstance(input_value, dict) and "source" in input_value:
+                    return input_value["source"]
+                return input_value
+
+            def add_expanded(new_key, old_key, value, output_op):
+                if old_key in output_op:
+                    logger.warning(f"Config Warning: Operation {new_key} ignored because {old_key} is already scheduled")
+                else:
+                    output_op[old_key] = value
+
+            def add_operation(new_key, expanded_values, schedule=None):
+                output_op = {}
+                schedule = schedule if schedule is not None else base_schedule
+                if schedule is not None:
+                    output_op["schedule"] = schedule
+                for old_key, value in expanded_values.items():
+                    add_expanded(new_key, old_key, value, output_op)
+                output_ops.append(output_op)
+
+            if base_op:
+                if base_schedule is not None:
+                    base_op["schedule"] = base_schedule
+                output_ops.append(base_op)
+
+            direct_aliases = {
+                "original_title": "mass_original_title_update",
+                "studio": "mass_studio_update",
+                "originally_available": "mass_originally_available_update",
+                "added_at": "mass_added_at_update",
+            }
+            for new_key, old_key in direct_aliases.items():
+                if new_key in input_dict:
+                    input_value = input_dict[new_key]
+                    add_operation(new_key, {old_key: get_source(input_value)}, schedule=get_schedule(input_value))
+
+            if "backup" in input_dict:
+                backup_config = input_dict["backup"]
+                if isinstance(backup_config, dict):
+                    backup_config = {k: v for k, v in backup_config.items() if k != "schedule"}
+                add_operation("backup", {"metadata_backup": backup_config}, schedule=get_schedule(input_dict["backup"]))
+
+            if "collections" in input_dict:
+                collections_config = input_dict["collections"]
+                collections_schedule = get_schedule(collections_config)
+                if isinstance(collections_config, dict):
+                    if "mode" in collections_config:
+                        add_operation("collections.mode", {"mass_collection_mode": collections_config["mode"]}, schedule=collections_schedule)
+                else:
+                    add_operation("collections", {"mass_collection_mode": collections_config}, schedule=collections_schedule)
+
+            if "genre" in input_dict:
+                genre_config = input_dict["genre"]
+                genre_schedule = get_schedule(genre_config)
+                expanded_values = {}
+                if isinstance(genre_config, dict):
+                    if "mappings" in genre_config:
+                        expanded_values["genre_mapper"] = genre_config["mappings"]
+                    if "source" in genre_config:
+                        expanded_values["mass_genre_update"] = genre_config["source"]
+                    else:
+                        genre_updates = [k for k in genre_config if k not in ["mappings", "schedule"]]
+                        if genre_updates:
+                            expanded_values["mass_genre_update"] = genre_updates
+                else:
+                    expanded_values["mass_genre_update"] = genre_config
+                if expanded_values:
+                    add_operation("genre", expanded_values, schedule=genre_schedule)
+
+            if "content_rating" in input_dict:
+                content_rating_config = input_dict["content_rating"]
+                content_rating_schedule = get_schedule(content_rating_config)
+                expanded_values = {}
+                if isinstance(content_rating_config, dict):
+                    if "mappings" in content_rating_config:
+                        expanded_values["content_rating_mapper"] = content_rating_config["mappings"]
+                    if "source" in content_rating_config:
+                        expanded_values["mass_content_rating_update"] = content_rating_config["source"]
+                    else:
+                        content_rating_updates = [k for k in content_rating_config if k not in ["mappings", "schedule"]]
+                        if content_rating_updates:
+                            expanded_values["mass_content_rating_update"] = content_rating_updates
+                else:
+                    expanded_values["mass_content_rating_update"] = content_rating_config
+                if expanded_values:
+                    add_operation("content_rating", expanded_values, schedule=content_rating_schedule)
+
+            if "labels" in input_dict:
+                labels_config = input_dict["labels"]
+                labels_schedule = get_schedule(labels_config)
+                if isinstance(labels_config, dict):
+                    if "severity" in labels_config:
+                        add_operation("labels.severity", {"mass_imdb_parental_labels": labels_config["severity"]}, schedule=labels_schedule)
+                else:
+                    add_operation("labels", {"mass_imdb_parental_labels": labels_config}, schedule=labels_schedule)
+
+            if "ratings" in input_dict:
+                ratings_config = input_dict["ratings"]
+                if not isinstance(ratings_config, dict):
+                    raise Failed("Config Error: mass_metadata_update ratings must be a dictionary")
+                ratings_schedule = get_schedule(ratings_config)
+                ratings_aliases = {
+                    "audience": "mass_audience_rating_update",
+                    "critic": "mass_critic_rating_update",
+                    "user": "mass_user_rating_update",
+                    "episode_audience": "mass_episode_audience_rating_update",
+                    "episode_critic": "mass_episode_critic_rating_update",
+                    "episode_user": "mass_episode_user_rating_update",
+                }
+                for new_key, old_key in ratings_aliases.items():
+                    if new_key in ratings_config:
+                        input_value = ratings_config[new_key]
+                        add_operation(f"ratings.{new_key}", {old_key: get_source(input_value)}, schedule=get_schedule(input_value, inherited_schedule=ratings_schedule))
+
+            for image_key in ["poster", "background", "logo", "square_art", "squart_art"]:
+                if image_key in input_dict:
+                    image_config = input_dict[image_key]
+                    if isinstance(image_config, dict):
+                        image_config = {k: v for k, v in image_config.items() if k != "schedule"}
+                    add_operation(image_key, {"mass_image_update": {image_key: image_config}}, schedule=get_schedule(input_dict[image_key]))
+            return output_ops
+
         self.general = {
             "run_order": check_for_attribute(
                 self.data,
@@ -638,6 +828,7 @@ class ConfigFile:
             "item_refresh_delay": check_for_attribute(self.data, "item_refresh_delay", parent="settings", var_type="int", default=0),
             "delete_below_minimum": check_for_attribute(self.data, "delete_below_minimum", parent="settings", var_type="bool", default=False),
             "delete_not_scheduled": check_for_attribute(self.data, "delete_not_scheduled", parent="settings", var_type="bool", default=False),
+            "auto_sort_hubs": check_for_attribute(self.data, "auto_sort_hubs", parent="settings", test_list=hub_sort_options, default_is_none=True),
             "run_again_delay": check_for_attribute(self.data, "run_again_delay", parent="settings", var_type="int", default=0),
             "missing_only_released": check_for_attribute(self.data, "missing_only_released", parent="settings", var_type="bool", default=False),
             "only_filter_missing": check_for_attribute(self.data, "only_filter_missing", parent="settings", var_type="bool", default=False),
@@ -771,6 +962,24 @@ class ConfigFile:
         else:
             logger.info("ntfy attribute not found")
 
+        self.AppriseFactory = None
+        if "apprise" in self.data:
+            logger.info("Connecting to Apprise...")
+            try:
+                self.AppriseFactory = AppriseNotify(
+                    self.Requests,
+                    {"config": check_for_attribute(self.data, "config", parent="apprise", throw=True)},
+                )
+            except Failed as e:
+                if str(e).endswith("is blank"):
+                    logger.warning(e)
+                else:
+                    logger.stacktrace()
+                    logger.error(e)
+            logger.info(f"Apprise Connection {'Failed' if self.AppriseFactory is None else 'Successful'}")
+        else:
+            logger.info("apprise attribute not found")
+
         self.webhooks = {
             "error": check_for_attribute(self.data, "error", parent="webhooks", var_type="list", default_is_none=True),
             "version": check_for_attribute(self.data, "version", parent="webhooks", var_type="list", default_is_none=True),
@@ -779,7 +988,7 @@ class ConfigFile:
             "changes": check_for_attribute(self.data, "changes", parent="webhooks", var_type="list", default_is_none=True),
             "delete": check_for_attribute(self.data, "delete", parent="webhooks", var_type="list", default_is_none=True),
         }
-        self.Webhooks = Webhooks(self, self.webhooks, notifiarr=self.NotifiarrFactory, gotify=self.GotifyFactory, ntfy=self.NtfyFactory)
+        self.Webhooks = Webhooks(self, self.webhooks, notifiarr=self.NotifiarrFactory, gotify=self.GotifyFactory, ntfy=self.NtfyFactory, apprise=self.AppriseFactory)
         try:
             self.Webhooks.start_time_hooks(self.start_time)
             if self.Requests.has_new_version():
@@ -988,12 +1197,36 @@ class ConfigFile:
             self.Letterboxd = Letterboxd(self.Requests, self.Cache)
             self.BoxOfficeMojo = BoxOfficeMojo(self.Requests, self.Cache)
             self.StevenLu = StevenLu(self.Requests)
+            self.Simkl = Simkl(self.Requests, self.Cache)
             self.TextFile = TextFile(self.Requests)
             self.Ergast = Ergast(self.Requests, self.Cache)
+            self.YamTrack = None
+            if "yamtrack" in self.data:
+                logger.info("Connecting to YamTrack...")
+                try:
+                    yamtrack_obj = YamTrack(
+                        self.Requests,
+                        {
+                            "url": check_for_attribute(self.data, "url", parent="yamtrack", throw=True),
+                            "username": check_for_attribute(self.data, "username", parent="yamtrack", throw=True),
+                            "password": check_for_attribute(self.data, "password", parent="yamtrack", throw=True),
+                        },
+                    )
+                    yamtrack_obj.test_connection()
+                    self.YamTrack = yamtrack_obj
+                except Failed as e:
+                    if str(e).endswith("is blank"):
+                        logger.warning(e)
+                    else:
+                        logger.error(e)
+                logger.info(f"YamTrack Connection {'Failed' if self.YamTrack is None else 'Successful'}")
+            else:
+                logger.info("yamtrack attribute not found")
 
             logger.separator()
 
             logger.info(f"Connecting to Media Center Libraries...")
+            self.server_type = str(self.data.get("settings", {}).get("server_type", "plex")).lower() if self.data else "plex"
 
             self.general["plex"] = {
                 "url": check_for_attribute(self.data, "url", parent="plex", var_type="url", default_is_none=True),
@@ -1075,12 +1308,15 @@ class ConfigFile:
             }
 
             self.libraries = []
+            self.run_libraries = []
             libs = check_for_attribute(self.data, "libraries", throw=True)
 
             for library_name, lib in libs.items():
                 if self.requested_libraries and library_name not in self.requested_libraries:
                     continue
                 params = {o: None for o in library_operations}
+                params["mass_logo_update"] = None
+                params["mass_square_art_update"] = None
                 params["mapping_name"] = str(library_name)
                 params["name"] = str(lib["library_name"]) if lib and "library_name" in lib and lib["library_name"] else str(library_name)
                 display_name = f"{params['name']} ({params['mapping_name']})" if lib and "library_name" in lib and lib["library_name"] else params["mapping_name"]
@@ -1089,36 +1325,279 @@ class ConfigFile:
                 logger.info("")
                 logger.info(f"Connecting to {display_name} Library...")
 
-                params["run_order"] = check_for_attribute(lib, "run_order", parent="settings", var_type="lower_list", default=self.general["run_order"], do_print=False, save=False)
-                params["asset_directory"] = check_for_attribute(lib, "asset_directory", parent="settings", var_type="list_path", default=self.general["asset_directory"], default_is_none=True, do_print=False, save=False)
-                params["asset_folders"] = check_for_attribute(lib, "asset_folders", parent="settings", var_type="bool", default=self.general["asset_folders"], do_print=False, save=False)
-                params["asset_depth"] = check_for_attribute(lib, "asset_depth", parent="settings", var_type="int", default=self.general["asset_depth"], do_print=False, save=False)
-                params["sync_mode"] = check_for_attribute(lib, "sync_mode", parent="settings", test_list=sync_modes, default=self.general["sync_mode"], do_print=False, save=False)
-                params["default_collection_order"] = check_for_attribute(lib, "default_collection_order", parent="settings", default=self.general["default_collection_order"], default_is_none=True, do_print=False, save=False)
-                params["show_unmanaged"] = check_for_attribute(lib, "show_unmanaged", parent="settings", var_type="bool", default=self.general["show_unmanaged"], do_print=False, save=False)
-                params["show_unconfigured"] = check_for_attribute(lib, "show_unconfigured", parent="settings", var_type="bool", default=self.general["show_unconfigured"], do_print=False, save=False)
-                params["show_filtered"] = check_for_attribute(lib, "show_filtered", parent="settings", var_type="bool", default=self.general["show_filtered"], do_print=False, save=False)
-                params["show_unfiltered"] = check_for_attribute(lib, "show_unfiltered", parent="settings", var_type="bool", default=self.general["show_unfiltered"], do_print=False, save=False)
-                params["show_options"] = check_for_attribute(lib, "show_options", parent="settings", var_type="bool", default=self.general["show_options"], do_print=False, save=False)
-                params["show_missing"] = check_for_attribute(lib, "show_missing", parent="settings", var_type="bool", default=self.general["show_missing"], do_print=False, save=False)
-                params["show_missing_assets"] = check_for_attribute(lib, "show_missing_assets", parent="settings", var_type="bool", default=self.general["show_missing_assets"], do_print=False, save=False)
-                params["save_report"] = check_for_attribute(lib, "save_report", parent="settings", var_type="bool", default=self.general["save_report"], do_print=False, save=False)
-                params["missing_only_released"] = check_for_attribute(lib, "missing_only_released", parent="settings", var_type="bool", default=self.general["missing_only_released"], do_print=False, save=False)
-                params["only_filter_missing"] = check_for_attribute(lib, "only_filter_missing", parent="settings", var_type="bool", default=self.general["only_filter_missing"], do_print=False, save=False)
-                params["create_asset_folders"] = check_for_attribute(lib, "create_asset_folders", parent="settings", var_type="bool", default=self.general["create_asset_folders"], do_print=False, save=False)
-                params["dimensional_asset_rename"] = check_for_attribute(lib, "dimensional_asset_rename", parent="settings", var_type="bool", default=self.general["dimensional_asset_rename"], do_print=False, save=False)
-                params["prioritize_assets"] = check_for_attribute(lib, "prioritize_assets", parent="settings", var_type="bool", default=self.general["prioritize_assets"], do_print=False, save=False)
-                params["download_url_assets"] = check_for_attribute(lib, "download_url_assets", parent="settings", var_type="bool", default=self.general["download_url_assets"], do_print=False, save=False)
-                params["show_missing_season_assets"] = check_for_attribute(lib, "show_missing_season_assets", parent="settings", var_type="bool", default=self.general["show_missing_season_assets"], do_print=False, save=False)
-                params["show_missing_episode_assets"] = check_for_attribute(lib, "show_missing_episode_assets", parent="settings", var_type="bool", default=self.general["show_missing_episode_assets"], do_print=False, save=False)
-                params["show_asset_not_needed"] = check_for_attribute(lib, "show_asset_not_needed", parent="settings", var_type="bool", default=self.general["show_asset_not_needed"], do_print=False, save=False)
-                params["minimum_items"] = check_for_attribute(lib, "minimum_items", parent="settings", var_type="int", default=self.general["minimum_items"], do_print=False, save=False)
-                params["item_refresh_delay"] = check_for_attribute(lib, "item_refresh_delay", parent="settings", var_type="int", default=self.general["item_refresh_delay"], do_print=False, save=False)
-                params["delete_below_minimum"] = check_for_attribute(lib, "delete_below_minimum", parent="settings", var_type="bool", default=self.general["delete_below_minimum"], do_print=False, save=False)
-                params["delete_not_scheduled"] = check_for_attribute(lib, "delete_not_scheduled", parent="settings", var_type="bool", default=self.general["delete_not_scheduled"], do_print=False, save=False)
-                params["ignore_ids"] = check_for_attribute(lib, "ignore_ids", parent="settings", var_type="int_list", default_is_none=True, do_print=False, save=False)
+                params["run_order"] = check_for_attribute(
+                    lib,
+                    "run_order",
+                    parent="settings",
+                    var_type="lower_list",
+                    default=self.general["run_order"],
+                    do_print=False,
+                    save=False,
+                )
+                params["asset_directory"] = check_for_attribute(
+                    lib,
+                    "asset_directory",
+                    parent="settings",
+                    var_type="list_path",
+                    default=self.general["asset_directory"],
+                    default_is_none=True,
+                    do_print=False,
+                    save=False,
+                )
+                params["asset_folders"] = check_for_attribute(
+                    lib,
+                    "asset_folders",
+                    parent="settings",
+                    var_type="bool",
+                    default=self.general["asset_folders"],
+                    do_print=False,
+                    save=False,
+                )
+                params["asset_depth"] = check_for_attribute(
+                    lib,
+                    "asset_depth",
+                    parent="settings",
+                    var_type="int",
+                    default=self.general["asset_depth"],
+                    do_print=False,
+                    save=False,
+                )
+                params["sync_mode"] = check_for_attribute(
+                    lib,
+                    "sync_mode",
+                    parent="settings",
+                    test_list=sync_modes,
+                    default=self.general["sync_mode"],
+                    do_print=False,
+                    save=False,
+                )
+                params["default_collection_order"] = check_for_attribute(
+                    lib,
+                    "default_collection_order",
+                    parent="settings",
+                    default=self.general["default_collection_order"],
+                    default_is_none=True,
+                    do_print=False,
+                    save=False,
+                )
+                params["show_unmanaged"] = check_for_attribute(
+                    lib,
+                    "show_unmanaged",
+                    parent="settings",
+                    var_type="bool",
+                    default=self.general["show_unmanaged"],
+                    do_print=False,
+                    save=False,
+                )
+                params["show_unconfigured"] = check_for_attribute(
+                    lib,
+                    "show_unconfigured",
+                    parent="settings",
+                    var_type="bool",
+                    default=self.general["show_unconfigured"],
+                    do_print=False,
+                    save=False,
+                )
+                params["show_filtered"] = check_for_attribute(
+                    lib,
+                    "show_filtered",
+                    parent="settings",
+                    var_type="bool",
+                    default=self.general["show_filtered"],
+                    do_print=False,
+                    save=False,
+                )
+                params["show_unfiltered"] = check_for_attribute(
+                    lib,
+                    "show_unfiltered",
+                    parent="settings",
+                    var_type="bool",
+                    default=self.general["show_unfiltered"],
+                    do_print=False,
+                    save=False,
+                )
+                params["show_options"] = check_for_attribute(
+                    lib,
+                    "show_options",
+                    parent="settings",
+                    var_type="bool",
+                    default=self.general["show_options"],
+                    do_print=False,
+                    save=False,
+                )
+                params["show_missing"] = check_for_attribute(
+                    lib,
+                    "show_missing",
+                    parent="settings",
+                    var_type="bool",
+                    default=self.general["show_missing"],
+                    do_print=False,
+                    save=False,
+                )
+                params["show_missing_assets"] = check_for_attribute(
+                    lib,
+                    "show_missing_assets",
+                    parent="settings",
+                    var_type="bool",
+                    default=self.general["show_missing_assets"],
+                    do_print=False,
+                    save=False,
+                )
+                params["save_report"] = check_for_attribute(
+                    lib,
+                    "save_report",
+                    parent="settings",
+                    var_type="bool",
+                    default=self.general["save_report"],
+                    do_print=False,
+                    save=False,
+                )
+                params["missing_only_released"] = check_for_attribute(
+                    lib,
+                    "missing_only_released",
+                    parent="settings",
+                    var_type="bool",
+                    default=self.general["missing_only_released"],
+                    do_print=False,
+                    save=False,
+                )
+                params["only_filter_missing"] = check_for_attribute(
+                    lib,
+                    "only_filter_missing",
+                    parent="settings",
+                    var_type="bool",
+                    default=self.general["only_filter_missing"],
+                    do_print=False,
+                    save=False,
+                )
+                params["create_asset_folders"] = check_for_attribute(
+                    lib,
+                    "create_asset_folders",
+                    parent="settings",
+                    var_type="bool",
+                    default=self.general["create_asset_folders"],
+                    do_print=False,
+                    save=False,
+                )
+                params["dimensional_asset_rename"] = check_for_attribute(
+                    lib,
+                    "dimensional_asset_rename",
+                    parent="settings",
+                    var_type="bool",
+                    default=self.general["dimensional_asset_rename"],
+                    do_print=False,
+                    save=False,
+                )
+                params["prioritize_assets"] = check_for_attribute(
+                    lib,
+                    "prioritize_assets",
+                    parent="settings",
+                    var_type="bool",
+                    default=self.general["prioritize_assets"],
+                    do_print=False,
+                    save=False,
+                )
+                params["download_url_assets"] = check_for_attribute(
+                    lib,
+                    "download_url_assets",
+                    parent="settings",
+                    var_type="bool",
+                    default=self.general["download_url_assets"],
+                    do_print=False,
+                    save=False,
+                )
+                params["show_missing_season_assets"] = check_for_attribute(
+                    lib,
+                    "show_missing_season_assets",
+                    parent="settings",
+                    var_type="bool",
+                    default=self.general["show_missing_season_assets"],
+                    do_print=False,
+                    save=False,
+                )
+                params["show_missing_episode_assets"] = check_for_attribute(
+                    lib,
+                    "show_missing_episode_assets",
+                    parent="settings",
+                    var_type="bool",
+                    default=self.general["show_missing_episode_assets"],
+                    do_print=False,
+                    save=False,
+                )
+                params["show_asset_not_needed"] = check_for_attribute(
+                    lib,
+                    "show_asset_not_needed",
+                    parent="settings",
+                    var_type="bool",
+                    default=self.general["show_asset_not_needed"],
+                    do_print=False,
+                    save=False,
+                )
+                params["minimum_items"] = check_for_attribute(
+                    lib,
+                    "minimum_items",
+                    parent="settings",
+                    var_type="int",
+                    default=self.general["minimum_items"],
+                    do_print=False,
+                    save=False,
+                )
+                params["item_refresh_delay"] = check_for_attribute(
+                    lib,
+                    "item_refresh_delay",
+                    parent="settings",
+                    var_type="int",
+                    default=self.general["item_refresh_delay"],
+                    do_print=False,
+                    save=False,
+                )
+                params["delete_below_minimum"] = check_for_attribute(
+                    lib,
+                    "delete_below_minimum",
+                    parent="settings",
+                    var_type="bool",
+                    default=self.general["delete_below_minimum"],
+                    do_print=False,
+                    save=False,
+                )
+                params["delete_not_scheduled"] = check_for_attribute(
+                    lib,
+                    "delete_not_scheduled",
+                    parent="settings",
+                    var_type="bool",
+                    default=self.general["delete_not_scheduled"],
+                    do_print=False,
+                    save=False,
+                )
+                params["auto_sort_hubs"] = check_for_attribute(
+                    lib,
+                    "auto_sort_hubs",
+                    parent="settings",
+                    test_list=hub_sort_options,
+                    default=self.general["auto_sort_hubs"],
+                    default_is_none=True,
+                    do_print=False,
+                    save=False,
+                )
+                params["ignore_ids"] = check_for_attribute(
+                    lib,
+                    "ignore_ids",
+                    parent="settings",
+                    var_type="int_list",
+                    default_is_none=True,
+                    do_print=False,
+                    save=False,
+                )
                 params["ignore_ids"].extend([i for i in self.general["ignore_ids"] if i not in params["ignore_ids"]])
-                params["ignore_imdb_ids"] = check_for_attribute(lib, "ignore_imdb_ids", parent="settings", var_type="lower_list", default_is_none=True, do_print=False, save=False)
+                params["ignore_imdb_ids"] = check_for_attribute(
+                    lib,
+                    "ignore_imdb_ids",
+                    parent="settings",
+                    var_type="lower_list",
+                    default_is_none=True,
+                    do_print=False,
+                    save=False,
+                )
                 params["ignore_imdb_ids"].extend([i for i in self.general["ignore_imdb_ids"] if i not in params["ignore_imdb_ids"]])
                 params["overlay_artwork_filetype"] = check_for_attribute(
                     lib, "overlay_artwork_filetype", parent="settings", test_list=filetype_list, translations={"webp": "webp_lossy"}, default=self.general["overlay_artwork_filetype"], do_print=False, save=False
@@ -1139,6 +1618,16 @@ class ConfigFile:
                     final_operations = {}
                     logger.separator("Operation Configuration", space=False, border=False)
                     config_ops = util.parse("Config", "operations", lib["operations"], datatype="listdict")
+                    expanded_config_ops = []
+                    for config_op in config_ops:
+                        if "mass_metadata_update" in config_op:
+                            try:
+                                expanded_config_ops.extend(expand_mass_metadata_operation(config_op, config_op["mass_metadata_update"]))
+                            except Failed as e:
+                                logger.error(e)
+                        else:
+                            expanded_config_ops.append(config_op)
+                    config_ops = expanded_config_ops
                     op_size = len(config_ops)
                     for i, config_op in enumerate(config_ops, 1):
                         logger.info("")
@@ -1157,9 +1646,21 @@ class ConfigFile:
                         if "delete_collections" not in config_op and ("delete_unmanaged_collections" in config_op or "delete_collections_with_less" in config_op):
                             config_op["delete_collections"] = {}
                             if "delete_unmanaged_collections" in config_op:
-                                config_op["delete_collections"]["unmanaged"] = check_for_attribute(config_op, "delete_unmanaged_collections", var_type="bool", default=False, save=False)
+                                config_op["delete_collections"]["unmanaged"] = check_for_attribute(
+                                    config_op,
+                                    "delete_unmanaged_collections",
+                                    var_type="bool",
+                                    default=False,
+                                    save=False,
+                                )
                             if "delete_collections_with_less" in config_op:
-                                config_op["delete_collections"]["less"] = check_for_attribute(config_op, "delete_collections_with_less", var_type="int", default_is_none=True, save=False)
+                                config_op["delete_collections"]["less"] = check_for_attribute(
+                                    config_op,
+                                    "delete_collections_with_less",
+                                    var_type="int",
+                                    default_is_none=True,
+                                    save=False,
+                                )
                         section_final = {}
                         for op, data_type in library_operations.items():
                             if op not in config_op:
@@ -1213,13 +1714,47 @@ class ConfigFile:
                                 if not input_dict or not isinstance(input_dict, dict):
                                     raise Failed(f"Config Error: {op} must be a dictionary")
                                 elif op in ["mass_poster_update", "mass_background_update"]:
+                                    _language = check_for_attribute(input_dict, "language", default_is_none=True, save=False)
+                                    if _language is not None:
+                                        _language = str(_language).lower()
+                                        if self.TMDb and _language not in self.TMDb.TMDb._iso_639_1:
+                                            raise Failed(f"Config Error: {op} language {_language} is not a valid ISO 639-1 language code")
+                                    if isinstance(input_dict.get("source"), list):
+                                        sources = check_for_attribute(input_dict, "source", test_list=mass_image_options, var_type="lower_list", default_is_none=True, save=False)
+                                        source = sources[0] if sources else None
+                                    else:
+                                        source = check_for_attribute(
+                                            input_dict,
+                                            "source",
+                                            test_list=mass_image_options,
+                                            default_is_none=True,
+                                            save=False,
+                                        )
+                                        sources = [source] if source else []
                                     section_final[op] = {
-                                        "source": check_for_attribute(input_dict, "source", test_list=mass_image_options, default_is_none=True, save=False),
+                                        "source": source,
+                                        "sources": sources,
+                                        "language": _language,
                                         "seasons": check_for_attribute(input_dict, "seasons", var_type="bool", default=True, save=False),
                                         "episodes": check_for_attribute(input_dict, "episodes", var_type="bool", default=True, save=False),
                                         "ignore_locked": check_for_attribute(input_dict, "ignore_locked", var_type="bool", default=False, save=False),
                                         "ignore_overlays": check_for_attribute(input_dict, "ignore_overlays", var_type="bool", default=False, save=False),
                                     }
+                                elif op == "mass_image_update":
+                                    poster_update = parse_mass_image_operation(input_dict, "poster", allow_tmdb=True, allow_tvdb=True, allow_show_levels=True)
+                                    background_update = parse_mass_image_operation(input_dict, "background", allow_tmdb=True, allow_tvdb=True, allow_show_levels=True)
+                                    logo_update = parse_mass_image_operation(input_dict, "logo", allow_tmdb=True, allow_tvdb=True)
+                                    square_art_update = parse_mass_image_operation(input_dict, "square_art", allow_tmdb=False, allow_tvdb=True)
+                                    if "squart_art" in input_dict and "square_art" not in input_dict:
+                                        square_art_update = parse_mass_image_operation(input_dict, "squart_art", allow_tmdb=False, allow_tvdb=True)
+                                    if poster_update:
+                                        section_final["mass_poster_update"] = poster_update
+                                    if background_update:
+                                        section_final["mass_background_update"] = background_update
+                                    if logo_update:
+                                        section_final["mass_logo_update"] = logo_update
+                                    if square_art_update:
+                                        section_final["mass_square_art_update"] = square_art_update
                                 elif op == "metadata_backup":
                                     default_path = os.path.join(default_dir, f"{str(library_name)}_Metadata_Backup.yml")
                                     if "path" not in input_dict:
@@ -1230,7 +1765,13 @@ class ConfigFile:
                                         default_path = input_dict["path"]
                                     section_final[op] = {
                                         "path": default_path,
-                                        "exclude": check_for_attribute(input_dict, "exclude", var_type="lower_list", default_is_none=True, save=False),
+                                        "exclude": check_for_attribute(
+                                            input_dict,
+                                            "exclude",
+                                            var_type="lower_list",
+                                            default_is_none=True,
+                                            save=False,
+                                        ),
                                         "sync_tags": check_for_attribute(input_dict, "sync_tags", var_type="bool", default=False, save=False),
                                         "add_blank_entries": check_for_attribute(input_dict, "add_blank_entries", var_type="bool", default=True, save=False),
                                     }
@@ -1247,13 +1788,38 @@ class ConfigFile:
                                     section_final[op] = {
                                         "managed": check_for_attribute(input_dict, "managed", var_type="bool", default_is_none=True, save=False),
                                         "configured": check_for_attribute(input_dict, "configured", var_type="bool", default_is_none=True, save=False),
-                                        "less": check_for_attribute(input_dict, "less", var_type="int", default_is_none=True, save=False, int_min=1),
-                                        "ignore_empty_smart_collections": check_for_attribute(input_dict, "ignore_empty_smart_collections", var_type="bool", default=True, save=False),
+                                        "less": check_for_attribute(
+                                            input_dict,
+                                            "less",
+                                            var_type="int",
+                                            default_is_none=True,
+                                            save=False,
+                                            int_min=1,
+                                        ),
+                                        "ignore_empty_smart_collections": check_for_attribute(
+                                            input_dict,
+                                            "ignore_empty_smart_collections",
+                                            var_type="bool",
+                                            default=True,
+                                            save=False,
+                                        ),
                                     }
                                 elif op == "mass_collection_content_rating_update":
                                     section_final[op] = {
-                                        "source": check_for_attribute(input_dict, "source", test_list=mass_collection_content_options, default_is_none=True, save=False),
-                                        "ranking": check_for_attribute(input_dict, "ranking", var_type="list", default=content_rating_default, save=False),
+                                        "source": check_for_attribute(
+                                            input_dict,
+                                            "source",
+                                            test_list=mass_collection_content_options,
+                                            default_is_none=True,
+                                            save=False,
+                                        ),
+                                        "ranking": check_for_attribute(
+                                            input_dict,
+                                            "ranking",
+                                            var_type="list",
+                                            default=content_rating_default,
+                                            save=False,
+                                        ),
                                     }
                             else:
                                 section_final[op] = check_for_attribute(config_op, op, var_type=data_type, default=False, save=False)
@@ -1293,13 +1859,27 @@ class ConfigFile:
                     lib_vars = lib["template_variables"]
 
                 params["collection_files"] = []
+                params["configured_collection_files"] = []
                 try:
                     if lib and "collection_files" in lib:
                         logger.info("")
                         logger.info("Reading in Collection Files")
                         if not lib["collection_files"]:
                             raise Failed("Config Error: collection_files attribute is blank")
-                        files, had_scheduled = util.load_files(lib["collection_files"], "collection_files", schedule=(current_time, self.run_hour, self.ignore_schedules), lib_vars=lib_vars)
+                        files, had_scheduled = util.load_files(
+                            lib["collection_files"],
+                            "collection_files",
+                            schedule=(current_time, self.run_hour, self.ignore_schedules),
+                            lib_vars=lib_vars,
+                        )
+                        configured_files = files
+                        if had_scheduled:
+                            configured_files, _ = util.load_files(
+                                lib["collection_files"],
+                                "collection_files",
+                                lib_vars=lib_vars,
+                            )
+                        params["configured_collection_files"] = configured_files
                         if files:
                             params["collection_files"] = files
                         elif not had_scheduled:
@@ -1314,7 +1894,12 @@ class ConfigFile:
                         logger.info("Reading in Metadata Files")
                         if not lib["metadata_files"]:
                             raise Failed("Config Error: metadata_files attribute is blank")
-                        files, had_scheduled = util.load_files(lib["metadata_files"], "metadata_files", schedule=(current_time, self.run_hour, self.ignore_schedules), lib_vars=lib_vars)
+                        files, had_scheduled = util.load_files(
+                            lib["metadata_files"],
+                            "metadata_files",
+                            schedule=(current_time, self.run_hour, self.ignore_schedules),
+                            lib_vars=lib_vars,
+                        )
                         if files:
                             params["metadata_files"] = files
                         elif not had_scheduled:
@@ -1326,7 +1911,7 @@ class ConfigFile:
                 params["skip_library"] = False
                 if lib and "schedule" in lib and not self.requested_libraries and not self.ignore_schedules:
                     if not lib["schedule"]:
-                        logger.error(f"Config Error: schedule attribute is blank")
+                        logger.error("Config Error: schedule attribute is blank")
                     else:
                         logger.debug(f"Value: {lib['schedule']}")
                         try:
@@ -1430,21 +2015,61 @@ class ConfigFile:
                     logger.info("")
                     logger.separator("Plex Configuration", space=False, border=False)
                     params["plex"] = {
-                        "url": check_for_attribute(lib, "url", parent="plex", var_type="url", default=self.general["plex"]["url"], req_default=True, save=False),
-                        "token": check_for_attribute(lib, "token", parent="plex", default=self.general["plex"]["token"], req_default=True, save=False),
-                        "timeout": check_for_attribute(lib, "timeout", parent="plex", var_type="int", default=self.general["plex"]["timeout"], save=False),
-                        "verify_ssl": check_for_attribute(lib, "verify_ssl", parent="plex", var_type="bool", default=self.general["plex"]["verify_ssl"], default_is_none=True, save=False),
-                        "db_cache": check_for_attribute(lib, "db_cache", parent="plex", var_type="int", default=self.general["plex"]["db_cache"], default_is_none=True, save=False),
+                        "url": check_for_attribute(
+                            lib,
+                            "url",
+                            parent="plex",
+                            var_type="url",
+                            default=self.general["plex"]["url"],
+                            req_default=True,
+                            save=False,
+                        ),
+                        "token": check_for_attribute(
+                            lib,
+                            "token",
+                            parent="plex",
+                            default=self.general["plex"]["token"],
+                            req_default=True,
+                            save=False,
+                        ),
+                        "timeout": check_for_attribute(
+                            lib,
+                            "timeout",
+                            parent="plex",
+                            var_type="int",
+                            default=self.general["plex"]["timeout"],
+                            save=False,
+                        ),
+                        "verify_ssl": check_for_attribute(
+                            lib,
+                            "verify_ssl",
+                            parent="plex",
+                            var_type="bool",
+                            default=self.general["plex"]["verify_ssl"],
+                            default_is_none=True,
+                            save=False,
+                        ),
+                        "db_cache": check_for_attribute(
+                            lib,
+                            "db_cache",
+                            parent="plex",
+                            var_type="int",
+                            default=self.general["plex"]["db_cache"],
+                            default_is_none=True,
+                            save=False,
+                        ),
                     }
-                    params["emby"] = {
-                        "url": check_for_attribute(lib, "url", parent="emby", var_type="url", default=self.general["emby"]["url"], req_default=True, save=False),
-                        "api_key": check_for_attribute(lib, "api_key", parent="emby", default=self.general["emby"]["api_key"], req_default=True, save=False),
-                        "user_id": check_for_attribute(lib, "user_id", parent="emby", default=self.general["emby"]["user_id"], req_default=True, save=False),
-                        "overlay_destination_folder": check_for_attribute(lib, "overlay_destination_folder", parent="emby", default=self.general["emby"]["overlay_destination_folder"], req_default=True, save=False),
-                        "timeout": check_for_attribute(lib, "timeout", parent="emby", var_type="int", default=self.general["emby"]["timeout"], save=False),
-                        "verify_ssl": check_for_attribute(lib, "verify_ssl", parent="emby", var_type="bool", default=self.general["emby"]["verify_ssl"], default_is_none=True, save=False),
-                        "db_cache": check_for_attribute(lib, "db_cache", parent="emby", var_type="int", default=self.general["emby"]["db_cache"], default_is_none=True, save=False),
-                    }
+                    params["emby"] = dict(self.general["emby"])
+                    if self.server_type == "emby":
+                        params["emby"] = {
+                            "url": check_for_attribute(lib, "url", parent="emby", var_type="url", default=self.general["emby"]["url"], req_default=True, save=False),
+                            "api_key": check_for_attribute(lib, "api_key", parent="emby", default=self.general["emby"]["api_key"], req_default=True, save=False),
+                            "user_id": check_for_attribute(lib, "user_id", parent="emby", default=self.general["emby"]["user_id"], req_default=True, save=False),
+                            "overlay_destination_folder": check_for_attribute(lib, "overlay_destination_folder", parent="emby", default=self.general["emby"]["overlay_destination_folder"], req_default=True, save=False),
+                            "timeout": check_for_attribute(lib, "timeout", parent="emby", var_type="int", default=self.general["emby"]["timeout"], save=False),
+                            "verify_ssl": check_for_attribute(lib, "verify_ssl", parent="emby", var_type="bool", default=self.general["emby"]["verify_ssl"], default_is_none=True, save=False),
+                            "db_cache": check_for_attribute(lib, "db_cache", parent="emby", var_type="int", default=self.general["emby"]["db_cache"], default_is_none=True, save=False),
+                        }
                     params["library_tags"] = check_for_attribute(lib, "library_tags", parent="settings", var_type="bool", default=True, save=False)
 
                     for attr in ["clean_bundles", "empty_trash", "optimize"]:
@@ -1467,7 +2092,6 @@ class ConfigFile:
                     if params["plex"]["token"].lower() == "env":
                         params["plex"]["token"] = self.env_plex_token
 
-                    self.server_type = str(self.data.get("settings", {}).get("server_type", "plex")).lower() if self.data else "plex"
                     if self.server_type == "emby":
                         library = Emby(self, params)
                     elif self.server_type == "jellyfin":
@@ -1508,21 +2132,128 @@ class ConfigFile:
                             self.Cache,
                             library,
                             {
-                                "url": check_for_attribute(lib, "url", parent="radarr", var_type="url", default=self.general["radarr"]["url"], req_default=True, save=False),
-                                "token": check_for_attribute(lib, "token", parent="radarr", default=self.general["radarr"]["token"], req_default=True, save=False),
-                                "add_missing": check_for_attribute(lib, "add_missing", parent="radarr", var_type="bool", default=self.general["radarr"]["add_missing"], save=False),
-                                "add_existing": check_for_attribute(lib, "add_existing", parent="radarr", var_type="bool", default=self.general["radarr"]["add_existing"], save=False),
-                                "upgrade_existing": check_for_attribute(lib, "upgrade_existing", parent="radarr", var_type="bool", default=self.general["radarr"]["upgrade_existing"], save=False),
-                                "monitor_existing": check_for_attribute(lib, "monitor_existing", parent="radarr", var_type="bool", default=self.general["radarr"]["monitor_existing"], save=False),
-                                "ignore_cache": check_for_attribute(lib, "ignore_cache", parent="radarr", var_type="bool", default=self.general["radarr"]["ignore_cache"], save=False),
-                                "root_folder_path": check_for_attribute(lib, "root_folder_path", parent="radarr", default=self.general["radarr"]["root_folder_path"], req_default=True, save=False),
-                                "monitor": check_for_attribute(lib, "monitor", parent="radarr", var_type="bool", default=self.general["radarr"]["monitor"], save=False),
-                                "availability": check_for_attribute(lib, "availability", parent="radarr", test_list=radarr.availability_descriptions, default=self.general["radarr"]["availability"], save=False),
-                                "quality_profile": check_for_attribute(lib, "quality_profile", parent="radarr", default=self.general["radarr"]["quality_profile"], req_default=True, save=False),
-                                "tag": check_for_attribute(lib, "tag", parent="radarr", var_type="lower_list", default=self.general["radarr"]["tag"], default_is_none=True, save=False),
-                                "search": check_for_attribute(lib, "search", parent="radarr", var_type="bool", default=self.general["radarr"]["search"], save=False),
-                                "radarr_path": check_for_attribute(lib, "radarr_path", parent="radarr", default=self.general["radarr"]["radarr_path"], default_is_none=True, save=False),
-                                "plex_path": check_for_attribute(lib, "plex_path", parent="radarr", default=self.general["radarr"]["plex_path"], default_is_none=True, save=False),
+                                "url": check_for_attribute(
+                                    lib,
+                                    "url",
+                                    parent="radarr",
+                                    var_type="url",
+                                    default=self.general["radarr"]["url"],
+                                    req_default=True,
+                                    save=False,
+                                ),
+                                "token": check_for_attribute(
+                                    lib,
+                                    "token",
+                                    parent="radarr",
+                                    default=self.general["radarr"]["token"],
+                                    req_default=True,
+                                    save=False,
+                                ),
+                                "add_missing": check_for_attribute(
+                                    lib,
+                                    "add_missing",
+                                    parent="radarr",
+                                    var_type="bool",
+                                    default=self.general["radarr"]["add_missing"],
+                                    save=False,
+                                ),
+                                "add_existing": check_for_attribute(
+                                    lib,
+                                    "add_existing",
+                                    parent="radarr",
+                                    var_type="bool",
+                                    default=self.general["radarr"]["add_existing"],
+                                    save=False,
+                                ),
+                                "upgrade_existing": check_for_attribute(
+                                    lib,
+                                    "upgrade_existing",
+                                    parent="radarr",
+                                    var_type="bool",
+                                    default=self.general["radarr"]["upgrade_existing"],
+                                    save=False,
+                                ),
+                                "monitor_existing": check_for_attribute(
+                                    lib,
+                                    "monitor_existing",
+                                    parent="radarr",
+                                    var_type="bool",
+                                    default=self.general["radarr"]["monitor_existing"],
+                                    save=False,
+                                ),
+                                "ignore_cache": check_for_attribute(
+                                    lib,
+                                    "ignore_cache",
+                                    parent="radarr",
+                                    var_type="bool",
+                                    default=self.general["radarr"]["ignore_cache"],
+                                    save=False,
+                                ),
+                                "root_folder_path": check_for_attribute(
+                                    lib,
+                                    "root_folder_path",
+                                    parent="radarr",
+                                    default=self.general["radarr"]["root_folder_path"],
+                                    req_default=True,
+                                    save=False,
+                                ),
+                                "monitor": check_for_attribute(
+                                    lib,
+                                    "monitor",
+                                    parent="radarr",
+                                    var_type="bool",
+                                    default=self.general["radarr"]["monitor"],
+                                    save=False,
+                                ),
+                                "availability": check_for_attribute(
+                                    lib,
+                                    "availability",
+                                    parent="radarr",
+                                    test_list=radarr.availability_descriptions,
+                                    default=self.general["radarr"]["availability"],
+                                    save=False,
+                                ),
+                                "quality_profile": check_for_attribute(
+                                    lib,
+                                    "quality_profile",
+                                    parent="radarr",
+                                    default=self.general["radarr"]["quality_profile"],
+                                    req_default=True,
+                                    save=False,
+                                ),
+                                "tag": check_for_attribute(
+                                    lib,
+                                    "tag",
+                                    parent="radarr",
+                                    var_type="lower_list",
+                                    default=self.general["radarr"]["tag"],
+                                    default_is_none=True,
+                                    save=False,
+                                ),
+                                "search": check_for_attribute(
+                                    lib,
+                                    "search",
+                                    parent="radarr",
+                                    var_type="bool",
+                                    default=self.general["radarr"]["search"],
+                                    save=False,
+                                ),
+                                "radarr_path": check_for_attribute(
+                                    lib,
+                                    "radarr_path",
+                                    parent="radarr",
+                                    default=self.general["radarr"]["radarr_path"],
+                                    default_is_none=True,
+                                    save=False,
+                                ),
+                                "plex_path": check_for_attribute(
+                                    lib,
+                                    "plex_path",
+                                    parent="radarr",
+                                    default=self.general["radarr"]["plex_path"],
+                                    default_is_none=True,
+                                    save=False,
+                                ),
                             },
                         )
                     except Failed as e:
@@ -1543,28 +2274,155 @@ class ConfigFile:
                             self.Cache,
                             library,
                             {
-                                "url": check_for_attribute(lib, "url", parent="sonarr", var_type="url", default=self.general["sonarr"]["url"], req_default=True, save=False),
-                                "token": check_for_attribute(lib, "token", parent="sonarr", default=self.general["sonarr"]["token"], req_default=True, save=False),
-                                "add_missing": check_for_attribute(lib, "add_missing", parent="sonarr", var_type="bool", default=self.general["sonarr"]["add_missing"], save=False),
-                                "add_existing": check_for_attribute(lib, "add_existing", parent="sonarr", var_type="bool", default=self.general["sonarr"]["add_existing"], save=False),
-                                "upgrade_existing": check_for_attribute(lib, "upgrade_existing", parent="sonarr", var_type="bool", default=self.general["sonarr"]["upgrade_existing"], save=False),
-                                "monitor_existing": check_for_attribute(lib, "monitor_existing", parent="sonarr", var_type="bool", default=self.general["sonarr"]["monitor_existing"], save=False),
-                                "ignore_cache": check_for_attribute(lib, "ignore_cache", parent="sonarr", var_type="bool", default=self.general["sonarr"]["ignore_cache"], save=False),
-                                "root_folder_path": check_for_attribute(lib, "root_folder_path", parent="sonarr", default=self.general["sonarr"]["root_folder_path"], req_default=True, save=False),
-                                "monitor": check_for_attribute(lib, "monitor", parent="sonarr", test_list=sonarr.monitor_descriptions, default=self.general["sonarr"]["monitor"], save=False),
-                                "quality_profile": check_for_attribute(lib, "quality_profile", parent="sonarr", default=self.general["sonarr"]["quality_profile"], req_default=True, save=False),
+                                "url": check_for_attribute(
+                                    lib,
+                                    "url",
+                                    parent="sonarr",
+                                    var_type="url",
+                                    default=self.general["sonarr"]["url"],
+                                    req_default=True,
+                                    save=False,
+                                ),
+                                "token": check_for_attribute(
+                                    lib,
+                                    "token",
+                                    parent="sonarr",
+                                    default=self.general["sonarr"]["token"],
+                                    req_default=True,
+                                    save=False,
+                                ),
+                                "add_missing": check_for_attribute(
+                                    lib,
+                                    "add_missing",
+                                    parent="sonarr",
+                                    var_type="bool",
+                                    default=self.general["sonarr"]["add_missing"],
+                                    save=False,
+                                ),
+                                "add_existing": check_for_attribute(
+                                    lib,
+                                    "add_existing",
+                                    parent="sonarr",
+                                    var_type="bool",
+                                    default=self.general["sonarr"]["add_existing"],
+                                    save=False,
+                                ),
+                                "upgrade_existing": check_for_attribute(
+                                    lib,
+                                    "upgrade_existing",
+                                    parent="sonarr",
+                                    var_type="bool",
+                                    default=self.general["sonarr"]["upgrade_existing"],
+                                    save=False,
+                                ),
+                                "monitor_existing": check_for_attribute(
+                                    lib,
+                                    "monitor_existing",
+                                    parent="sonarr",
+                                    var_type="bool",
+                                    default=self.general["sonarr"]["monitor_existing"],
+                                    save=False,
+                                ),
+                                "ignore_cache": check_for_attribute(
+                                    lib,
+                                    "ignore_cache",
+                                    parent="sonarr",
+                                    var_type="bool",
+                                    default=self.general["sonarr"]["ignore_cache"],
+                                    save=False,
+                                ),
+                                "root_folder_path": check_for_attribute(
+                                    lib,
+                                    "root_folder_path",
+                                    parent="sonarr",
+                                    default=self.general["sonarr"]["root_folder_path"],
+                                    req_default=True,
+                                    save=False,
+                                ),
+                                "monitor": check_for_attribute(
+                                    lib,
+                                    "monitor",
+                                    parent="sonarr",
+                                    test_list=sonarr.monitor_descriptions,
+                                    default=self.general["sonarr"]["monitor"],
+                                    save=False,
+                                ),
+                                "quality_profile": check_for_attribute(
+                                    lib,
+                                    "quality_profile",
+                                    parent="sonarr",
+                                    default=self.general["sonarr"]["quality_profile"],
+                                    req_default=True,
+                                    save=False,
+                                ),
                                 "language_profile": (
-                                    check_for_attribute(lib, "language_profile", parent="sonarr", default=self.general["sonarr"]["language_profile"], save=False)
+                                    check_for_attribute(
+                                        lib,
+                                        "language_profile",
+                                        parent="sonarr",
+                                        default=self.general["sonarr"]["language_profile"],
+                                        save=False,
+                                    )
                                     if self.general["sonarr"]["language_profile"]
                                     else check_for_attribute(lib, "language_profile", parent="sonarr", default_is_none=True, save=False)
                                 ),
-                                "series_type": check_for_attribute(lib, "series_type", parent="sonarr", test_list=sonarr.series_type_descriptions, default=self.general["sonarr"]["series_type"], save=False),
-                                "season_folder": check_for_attribute(lib, "season_folder", parent="sonarr", var_type="bool", default=self.general["sonarr"]["season_folder"], save=False),
-                                "tag": check_for_attribute(lib, "tag", parent="sonarr", var_type="lower_list", default=self.general["sonarr"]["tag"], default_is_none=True, save=False),
-                                "search": check_for_attribute(lib, "search", parent="sonarr", var_type="bool", default=self.general["sonarr"]["search"], save=False),
-                                "cutoff_search": check_for_attribute(lib, "cutoff_search", parent="sonarr", var_type="bool", default=self.general["sonarr"]["cutoff_search"], save=False),
-                                "sonarr_path": check_for_attribute(lib, "sonarr_path", parent="sonarr", default=self.general["sonarr"]["sonarr_path"], default_is_none=True, save=False),
-                                "plex_path": check_for_attribute(lib, "plex_path", parent="sonarr", default=self.general["sonarr"]["plex_path"], default_is_none=True, save=False),
+                                "series_type": check_for_attribute(
+                                    lib,
+                                    "series_type",
+                                    parent="sonarr",
+                                    test_list=sonarr.series_type_descriptions,
+                                    default=self.general["sonarr"]["series_type"],
+                                    save=False,
+                                ),
+                                "season_folder": check_for_attribute(
+                                    lib,
+                                    "season_folder",
+                                    parent="sonarr",
+                                    var_type="bool",
+                                    default=self.general["sonarr"]["season_folder"],
+                                    save=False,
+                                ),
+                                "tag": check_for_attribute(
+                                    lib,
+                                    "tag",
+                                    parent="sonarr",
+                                    var_type="lower_list",
+                                    default=self.general["sonarr"]["tag"],
+                                    default_is_none=True,
+                                    save=False,
+                                ),
+                                "search": check_for_attribute(
+                                    lib,
+                                    "search",
+                                    parent="sonarr",
+                                    var_type="bool",
+                                    default=self.general["sonarr"]["search"],
+                                    save=False,
+                                ),
+                                "cutoff_search": check_for_attribute(
+                                    lib,
+                                    "cutoff_search",
+                                    parent="sonarr",
+                                    var_type="bool",
+                                    default=self.general["sonarr"]["cutoff_search"],
+                                    save=False,
+                                ),
+                                "sonarr_path": check_for_attribute(
+                                    lib,
+                                    "sonarr_path",
+                                    parent="sonarr",
+                                    default=self.general["sonarr"]["sonarr_path"],
+                                    default_is_none=True,
+                                    save=False,
+                                ),
+                                "plex_path": check_for_attribute(
+                                    lib,
+                                    "plex_path",
+                                    parent="sonarr",
+                                    default=self.general["sonarr"]["plex_path"],
+                                    default_is_none=True,
+                                    save=False,
+                                ),
                             },
                         )
                     except Failed as e:
@@ -1584,8 +2442,23 @@ class ConfigFile:
                             self.Requests,
                             library,
                             {
-                                "url": check_for_attribute(lib, "url", parent="tautulli", var_type="url", default=self.general["tautulli"]["url"], req_default=True, save=False),
-                                "apikey": check_for_attribute(lib, "apikey", parent="tautulli", default=self.general["tautulli"]["apikey"], req_default=True, save=False),
+                                "url": check_for_attribute(
+                                    lib,
+                                    "url",
+                                    parent="tautulli",
+                                    var_type="url",
+                                    default=self.general["tautulli"]["url"],
+                                    req_default=True,
+                                    save=False,
+                                ),
+                                "apikey": check_for_attribute(
+                                    lib,
+                                    "apikey",
+                                    parent="tautulli",
+                                    default=self.general["tautulli"]["apikey"],
+                                    req_default=True,
+                                    save=False,
+                                ),
                             },
                         )
                     except Failed as e:
@@ -1594,7 +2467,7 @@ class ConfigFile:
                         logger.info("")
                     logger.info(f"{display_name} library's Tautulli Connection {'Failed' if library.Tautulli is None else 'Successful'}")
 
-                library.Webhooks = Webhooks(self, {}, library=library, notifiarr=self.NotifiarrFactory, gotify=self.GotifyFactory)
+                library.Webhooks = Webhooks(self, {}, library=library, notifiarr=self.NotifiarrFactory, gotify=self.GotifyFactory, ntfy=self.NtfyFactory, apprise=self.AppriseFactory)
                 library.Overlays = Overlays(self, library)
 
                 logger.info("")
@@ -1621,7 +2494,7 @@ class ConfigFile:
             raise
 
     def notify(self, text, server=None, library=None, collection=None, playlist=None, critical=True):
-        for error in util.get_list(text, split=False):
+        for error in util.get_list(text, split=False, return_none=False) or []:
             try:
                 self.Webhooks.error_hooks(error, server=server, library=library, collection=collection, playlist=playlist, critical=critical)
             except Failed as e:

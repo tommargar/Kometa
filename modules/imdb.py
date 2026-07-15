@@ -1,14 +1,19 @@
-import csv, gzip, json, math, os, re, shutil
+import csv
+import gzip
+import json
+import math
+import os
+import re
+import shutil
+from typing import Literal, overload
+
 from modules import util
 from modules.util import Failed
 
 logger = util.logger
 
 builders = ["imdb_list", "imdb_id", "imdb_chart", "imdb_watchlist", "imdb_search", "imdb_award"]
-movie_charts = [
-    "box_office", "popular_movies", "top_movies", "top_english", "lowest_rated",
-    "top_indian", "top_tamil", "top_telugu", "top_malayalam", "trending_india", "trending_tamil", "trending_telugu"
-]
+movie_charts = ["box_office", "popular_movies", "top_movies", "top_english", "lowest_rated", "top_indian", "top_tamil", "top_telugu", "top_malayalam", "trending_india", "trending_tamil", "trending_telugu"]
 show_charts = ["popular_shows", "top_shows", "trending_india"]
 charts = {
     "box_office": "Box Office",
@@ -47,55 +52,99 @@ chart_urls = {
 # that returns exact chart data in correct rank order (bypasses HTML scraping + AWS WAF)
 chart_graphql_map = {
     # chartTitles query: returns edges->node->id, has total field
-    "top_movies":       {"query": "chartTitles", "chartType": "TOP_RATED_MOVIES", "first": 250},
-    "top_shows":        {"query": "chartTitles", "chartType": "TOP_RATED_TV_SHOWS", "first": 250},
-    "popular_movies":   {"query": "chartTitles", "chartType": "MOST_POPULAR_MOVIES", "first": 100},
-    "popular_shows":    {"query": "chartTitles", "chartType": "MOST_POPULAR_TV_SHOWS", "first": 100},
-    "lowest_rated":     {"query": "chartTitles", "chartType": "LOWEST_RATED_MOVIES", "first": 100},
-    "top_english":      {"query": "chartTitles", "chartType": "TOP_RATED_ENGLISH_MOVIES", "first": 250},
-    "top_indian":       {"query": "chartTitles", "chartType": "TOP_RATED_INDIAN_MOVIES", "first": 250},
-    "top_tamil":        {"query": "chartTitles", "chartType": "TOP_RATED_TAMIL_MOVIES", "first": 250},
-    "top_telugu":       {"query": "chartTitles", "chartType": "TOP_RATED_TELUGU_MOVIES", "first": 250},
-    "top_malayalam":    {"query": "chartTitles", "chartType": "TOP_RATED_MALAYALAM_MOVIES", "first": 250},
+    "top_movies": {"query": "chartTitles", "chartType": "TOP_RATED_MOVIES", "first": 250},
+    "top_shows": {"query": "chartTitles", "chartType": "TOP_RATED_TV_SHOWS", "first": 250},
+    "popular_movies": {"query": "chartTitles", "chartType": "MOST_POPULAR_MOVIES", "first": 100},
+    "popular_shows": {"query": "chartTitles", "chartType": "MOST_POPULAR_TV_SHOWS", "first": 100},
+    "lowest_rated": {"query": "chartTitles", "chartType": "LOWEST_RATED_MOVIES", "first": 100},
+    "top_english": {"query": "chartTitles", "chartType": "TOP_RATED_ENGLISH_MOVIES", "first": 250},
+    "top_indian": {"query": "chartTitles", "chartType": "TOP_RATED_INDIAN_MOVIES", "first": 250},
+    "top_tamil": {"query": "chartTitles", "chartType": "TOP_RATED_TAMIL_MOVIES", "first": 250},
+    "top_telugu": {"query": "chartTitles", "chartType": "TOP_RATED_TELUGU_MOVIES", "first": 250},
+    "top_malayalam": {"query": "chartTitles", "chartType": "TOP_RATED_MALAYALAM_MOVIES", "first": 250},
     # boxOfficeWeekendChart query: returns entries->title->id
-    "box_office":       {"query": "boxOfficeWeekendChart"},
+    "box_office": {"query": "boxOfficeWeekendChart"},
     # topTrendingSetsPredefined query: returns edges->node->item->...on Title->id
-    "trending_india":   {"query": "topTrendingSetsPredefined", "predefined": "INDIA_TITLE_TRENDS_UPCOMING", "first": 50},
-    "trending_tamil":   {"query": "topTrendingSetsPredefined", "predefined": "INDIA_TITLE_TRENDS_RELEASED_TAMIL", "first": 200},
-    "trending_telugu":  {"query": "topTrendingSetsPredefined", "predefined": "INDIA_TITLE_TRENDS_RELEASED_TELUGU", "first": 200},
+    "trending_india": {"query": "topTrendingSetsPredefined", "predefined": "INDIA_TITLE_TRENDS_UPCOMING", "first": 50},
+    "trending_tamil": {"query": "topTrendingSetsPredefined", "predefined": "INDIA_TITLE_TRENDS_RELEASED_TAMIL", "first": 200},
+    "trending_telugu": {"query": "topTrendingSetsPredefined", "predefined": "INDIA_TITLE_TRENDS_RELEASED_TELUGU", "first": 200},
 }
 
 imdb_search_attributes = [
     "limit",
     "sort_by",
     "title",
-    "type", "type.not",
-    "release.after", "release.before", "rating.gte", "rating.lte",
-    "votes.gte", "votes.lte",
-    "genre", "genre.any", "genre.not",
-    "interests", "interests.any", "interests.not",
-    "topic", "topic.any", "topic.not",
-    "alternate_version", "alternate_version.any", "alternate_version.not",
-    "crazy_credit", "crazy_credit.any", "crazy_credit.not",
-    "location", "location.any", "location.not",
-    "goof", "goof.any", "goof.not",
-    "plot", "plot.any", "plot.not",
-    "quote", "quote.any", "quote.not",
-    "soundtrack", "soundtrack.any", "soundtrack.not",
-    "trivia", "trivia.any", "trivia.not",
-    "event", "event.winning",
-    "imdb_top", "imdb_bottom",
+    "type",
+    "type.not",
+    "release.after",
+    "release.before",
+    "rating.gte",
+    "rating.lte",
+    "votes.gte",
+    "votes.lte",
+    "genre",
+    "genre.any",
+    "genre.not",
+    "interests",
+    "interests.any",
+    "interests.not",
+    "topic",
+    "topic.any",
+    "topic.not",
+    "alternate_version",
+    "alternate_version.any",
+    "alternate_version.not",
+    "crazy_credit",
+    "crazy_credit.any",
+    "crazy_credit.not",
+    "location",
+    "location.any",
+    "location.not",
+    "goof",
+    "goof.any",
+    "goof.not",
+    "plot",
+    "plot.any",
+    "plot.not",
+    "quote",
+    "quote.any",
+    "quote.not",
+    "soundtrack",
+    "soundtrack.any",
+    "soundtrack.not",
+    "trivia",
+    "trivia.any",
+    "trivia.not",
+    "event",
+    "event.winning",
+    "imdb_top",
+    "imdb_bottom",
     "company",
     "content_rating",
-    "country", "country.any", "country.not", "country.origin",
-    "keyword", "keyword.any", "keyword.not",
-    "series", "series.not",
-    "list", "list.any", "list.not",
-    "language", "language.any", "language.not", "language.primary",
-    "popularity.gte", "popularity.lte",
+    "country",
+    "country.any",
+    "country.not",
+    "country.origin",
+    "keyword",
+    "keyword.any",
+    "keyword.not",
+    "series",
+    "series.not",
+    "list",
+    "list.any",
+    "list.not",
+    "language",
+    "language.any",
+    "language.not",
+    "language.primary",
+    "popularity.gte",
+    "popularity.lte",
     "character",
-    "cast", "cast.any", "cast.not",
-    "runtime.gte", "runtime.lte",
+    "cast",
+    "cast.any",
+    "cast.not",
+    "runtime.gte",
+    "runtime.lte",
     "adult",
 ]
 sort_by_options = {
@@ -121,15 +170,52 @@ list_sort_by_options = {
 }
 list_sort_options = [f"{a}.{d}" for a in list_sort_by_options for d in ["asc", "desc"]]
 title_type_options = {
-    "movie": "movie", "tv_series": "tvSeries", "short": "short", "tv_episode": "tvEpisode", "tv_mini_series": "tvMiniSeries",
-    "tv_movie": "tvMovie", "tv_special": "tvSpecial", "tv_short": "tvShort", "video_game": "videoGame", "video": "video",
-    "music_video": "musicVideo", "podcast_series": "podcastSeries", "podcast_episode": "podcastEpisode"
+    "movie": "movie",
+    "tv_series": "tvSeries",
+    "short": "short",
+    "tv_episode": "tvEpisode",
+    "tv_mini_series": "tvMiniSeries",
+    "tv_movie": "tvMovie",
+    "tv_special": "tvSpecial",
+    "tv_short": "tvShort",
+    "video_game": "videoGame",
+    "video": "video",
+    "music_video": "musicVideo",
+    "podcast_series": "podcastSeries",
+    "podcast_episode": "podcastEpisode",
 }
-genre_options = {a.lower(): a for a in [
-    "Action", "Adventure", "Animation", "Biography", "Comedy", "Documentary", "Drama", "Crime", "Family", "History",
-    "News", "Short", "Western", "Sport", "Reality-TV", "Horror", "Fantasy", "Film-Noir", "Music", "Romance",
-    "Talk-Show", "Thriller", "War", "Sci-Fi", "Musical", "Mystery", "Game-Show"
-]}
+genre_options = {
+    a.lower(): a
+    for a in [
+        "Action",
+        "Adventure",
+        "Animation",
+        "Biography",
+        "Comedy",
+        "Documentary",
+        "Drama",
+        "Crime",
+        "Family",
+        "History",
+        "News",
+        "Short",
+        "Western",
+        "Sport",
+        "Reality-TV",
+        "Horror",
+        "Fantasy",
+        "Film-Noir",
+        "Music",
+        "Romance",
+        "Talk-Show",
+        "Thriller",
+        "War",
+        "Sci-Fi",
+        "Musical",
+        "Mystery",
+        "Game-Show",
+    ]
+}
 interest_options = {
     "action": "in0000001",
     "action_epic": "in0000002",
@@ -388,6 +474,7 @@ watchlist_hash_url = "https://raw.githubusercontent.com/Kometa-Team/IMDb-Hash/ma
 graphql_url = "https://api.graphql.imdb.com/"
 list_url = f"{base_url}/list/ls"
 
+
 class IMDb:
     def __init__(self, requests, cache, default_dir):
         self.requests = requests
@@ -440,7 +527,7 @@ class IMDb:
     def validate_imdb(self, err_type, method, imdb_dicts):
         valid_lists = []
         main = "list_id" if method == "imdb_list" else "user_id"
-        for imdb_dict in util.get_list(imdb_dicts, split=True if isinstance(imdb_dicts, str) else False):
+        for imdb_dict in util.get_list(imdb_dicts, split=True if isinstance(imdb_dicts, str) else False, return_none=False) or []:
             if not isinstance(imdb_dict, dict):
                 imdb_dict = {main: imdb_dict}
             if "url" in imdb_dict and main not in imdb_dict:
@@ -451,7 +538,7 @@ class IMDb:
             elif imdb_dict[dict_methods[main]] is None:
                 raise Failed(f"{err_type} Error: {method} {main} attribute is blank")
             else:
-                main_data = imdb_dict[dict_methods[main]].strip()
+                main_data = str(imdb_dict[dict_methods[main]]).strip()
                 if method == "imdb_list":
                     if main_data.startswith(f"{base_url}/search/"):
                         raise Failed(f"IMDb Error: URLs with https://www.imdb.com/search/ no longer works with {method} use imdb_search.")
@@ -462,14 +549,20 @@ class IMDb:
                         raise Failed(f"IMDb Error: {method} {main} must begin with ls (ex. ls005526372)")
                     new_dict = {main: search.group(1)}
                 else:
+                    # Extract user ID from a full watchlist URL (handles both ur### and p. formats)
+                    url_match = re.search(r"imdb\.com/user/([^/?#]+)", main_data)
+                    if url_match:
+                        main_data = url_match.group(1)
                     user_id = None
                     if main_data.startswith("ur"):
                         try:
                             user_id = int(main_data[2:])
                         except ValueError:
                             pass
+                    elif re.match(r"^p\.[A-Za-z0-9_-]+$", main_data):
+                        user_id = main_data  # p. format: pass through as-is to the GraphQL API
                     if not user_id:
-                        raise Failed(f"{err_type} Error: {method} {main}: {main_data} not in the format of 'ur########'")
+                        raise Failed(f"{err_type} Error: {method} {main}: {main_data} must be in the format 'ur########' or 'p.xxxxxxx' (or a full watchlist URL)")
                     new_dict = {main: main_data}
 
             if "limit" in dict_methods:
@@ -531,7 +624,7 @@ class IMDb:
                                 out[constraint][f"{imdb_mod}{lower}"] = [d.replace(translation[0], translation[1]) for d in data[full_attr]]
                             elif isinstance(translation, dict):
                                 out[constraint][f"{imdb_mod}{lower}"] = [translation[d] if d in translation else d for d in data[full_attr]]
-                    if range_data:
+                    if range_data and range_name is not None:
                         out[constraint][range_name[i]] = range_data
 
         sort = data["sort_by"] if "sort_by" in data else "popularity.asc" if list_type == "search" else "custom.asc"
@@ -618,7 +711,21 @@ class IMDb:
         op, sha = self._json_operation(list_type)
         return {"operationName": op, "variables": out, "extensions": {"persistedQuery": {"version": 1, "sha256Hash": sha}}}
 
+    def _resolve_profile_id(self, profile_id):
+        """Resolve an IMDb p.xxxxxxx profileId to its internal ur### userId via the GraphQL userProfile query."""
+        logger.debug(f"IMDb: Resolving p. profileId '{profile_id}' to ur userId")
+        response = self._graph_request({"query": f'{{ userProfile(input: {{profileId: "{profile_id}"}}) {{ userId }} }}'})
+        if "errors" in response:
+            raise Failed(f"IMDb Error: Could not resolve watchlist profileId '{profile_id}': {response['errors'][0]['message']}")
+        user_id = response.get("data", {}).get("userProfile", {}).get("userId")
+        if not user_id:
+            raise Failed(f"IMDb Error: No IMDb account found for profileId '{profile_id}'")
+        logger.debug(f"IMDb: Resolved profileId '{profile_id}' -> userId '{user_id}'")
+        return user_id
+
     def _pagination(self, data, list_type):
+        if list_type == "watchlist" and re.match(r"^p\.", data["user_id"]):
+            data = {**data, "user_id": self._resolve_profile_id(data["user_id"])}
         is_list = list_type != "search"
         json_obj = self._graphql_json(data, list_type)
         item_count = 100 if is_list else 250
@@ -640,6 +747,9 @@ class IMDb:
                 logger.trace(response_json["errors"])
                 raise Failed(f"IMDb Error: {response_json['errors'][0]['message']}")
         step = "list" if list_type == "list" else "predefinedList"
+        if list_type == "watchlist" and response_json["data"].get("predefinedList") is None:
+            user_id = data["user_id"]
+            raise Failed(f"IMDb Error: No public watchlist found for user '{user_id}'. " f"Ensure the watchlist exists and is set to public. " f"If your config uses a ur### ID, update it to the p.xxxxxxx format shown in your watchlist URL at imdb.com.")
         search_data = response_json["data"][step]["titleListItemSearch"] if is_list else response_json["data"]["advancedTitleSearch"]
         total = search_data["total"]
         limit = data["limit"]
@@ -683,7 +793,10 @@ class IMDb:
             relevant = k.xpath("div[@class='did-you-know-actions']/div/a/text()")[0].strip()
             if "of" in relevant:
                 result = re.search(r"(\d+) of (\d+).*", relevant)
-                imdb_keywords[name] = (int(result.group(1)), int(result.group(2)))
+                if result is not None:
+                    imdb_keywords[name] = (int(result.group(1)), int(result.group(2)))
+                else:
+                    imdb_keywords[name] = (0, 0)
             else:
                 imdb_keywords[name] = (0, 0)
         if self.cache and not ignore_cache:
@@ -697,8 +810,17 @@ class IMDb:
             parental_dict, expired = self.cache.query_imdb_parental(imdb_id, self.cache.expiration)
             if parental_dict and expired is False:
                 return parental_dict
-        for e in self._request(f"{base_url}/title/{imdb_id}/parentalguide", xpath="//li[contains(@class, 'ipc-metadata-list-item--link')]"):
-            parental_dict[util.parental_types[e.xpath("a/text()")[0][:-1]]] = e.xpath("div/div/div/text()")[0]
+        gql = f'{{ title(id: "{imdb_id}") {{ parentsGuide {{ categories {{ category {{ text }} severity {{ text }} }} }} }} }}'
+        response = self._graph_request({"query": gql}) or {}
+        data = response.get("data") or {}
+        title = data.get("title") or {}
+        parents_guide = title.get("parentsGuide") or {}
+        categories = parents_guide.get("categories") or []
+        for cat in categories:
+            cat_text = ((cat or {}).get("category") or {}).get("text", "")
+            sev_text = ((cat or {}).get("severity") or {}).get("text", "")
+            if cat_text in util.parental_types and sev_text:
+                parental_dict[util.parental_types[cat_text]] = sev_text
         if parental_dict:
             for _, v in util.parental_types.items():
                 if v not in parental_dict:
@@ -715,10 +837,7 @@ class IMDb:
         query_type = cfg["query"]
 
         if query_type == "chartTitles":
-            gql = (
-                "{ chartTitles(chart: { chartType: %s }, first: %d) "
-                "{ edges { node { id } } total } }" % (cfg["chartType"], cfg["first"])
-            )
+            gql = "{ chartTitles(chart: { chartType: %s }, first: %d) " "{ edges { node { id } } total } }" % (cfg["chartType"], cfg["first"])
             data = self._graph_request({"query": gql})["data"]
             return [edge["node"]["id"] for edge in data["chartTitles"]["edges"]]
 
@@ -728,12 +847,7 @@ class IMDb:
             return [entry["title"]["id"] for entry in data["boxOfficeWeekendChart"]["entries"]]
 
         elif query_type == "topTrendingSetsPredefined":
-            gql = (
-                "{ topTrendingSetsPredefined(first: %d, input: "
-                "{ topTrendingSetPredefined: %s }) "
-                "{ edges { node { item { ... on Title { id } } } } } }"
-                % (cfg["first"], cfg["predefined"])
-            )
+            gql = "{ topTrendingSetsPredefined(first: %d, input: " "{ topTrendingSetPredefined: %s }) " "{ edges { node { item { ... on Title { id } } } } } }" % (cfg["first"], cfg["predefined"])
             data = self._graph_request({"query": gql})["data"]
             return [edge["node"]["item"]["id"] for edge in data["topTrendingSetsPredefined"]["edges"]]
 
@@ -780,12 +894,19 @@ class IMDb:
                 logger.info(f"    {k}: {data[k]}")
             return [(_i, "imdb") for _i in self._award(data)]
         elif method == "imdb_search":
-            logger.info(f"Processing IMDb Search:")
+            logger.info("Processing IMDb Search:")
             for k, v in data.items():
                 logger.info(f"    {k}: {v}")
             return [(_i, "imdb") for _i in self._pagination(data, "search")]
         else:
             raise Failed(f"IMDb Error: Method {method} not supported")
+
+    @overload
+    def _interface(self, interface: Literal["ratings"]) -> dict[str, str]: ...
+    @overload
+    def _interface(self, interface: Literal["basics"]) -> dict[str, list[str]]: ...
+    @overload
+    def _interface(self, interface: Literal["episode"]) -> list[list[str]]: ...
 
     def _interface(self, interface):
         gz = os.path.join(self.default_dir, f"title.{interface}.tsv.gz")
@@ -879,8 +1000,7 @@ class IMDb:
                 modifier = f".{modifier[7:]}"
                 if test_number is None or util.is_number_filter(test_number, modifier, filter_data):
                     return False
-            elif (not list(set(filter_data["keywords"]) & set(attrs)) and modifier == "") \
-                    or (list(set(filter_data["keywords"]) & set(attrs)) and modifier == ".not"):
+            elif (not list(set(filter_data["keywords"]) & set(attrs)) and modifier == "") or (list(set(filter_data["keywords"]) & set(attrs)) and modifier == ".not"):
                 return False
         return True
 
@@ -903,7 +1023,7 @@ class IMDb:
         if event_id not in self._web_event_validation:
             self._web_event_validation[event_id] = []
             for year_data in self._request(f"{base_url}/event/{event_id}", page_props=True)["historyEventEditions"]:
-                extra = '' if year_data["instanceWithinYear"] == 1 else f"-{year_data['instanceWithinYear']}"
+                extra = "" if year_data["instanceWithinYear"] == 1 else f"-{year_data['instanceWithinYear']}"
                 self._web_event_validation[event_id].append(f"{year_data['year']}{extra}")
         return False, self._web_event_validation[event_id]
 
