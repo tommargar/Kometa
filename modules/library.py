@@ -122,7 +122,8 @@ class Library(ABC):
         self.mass_imdb_parental_labels = params["mass_imdb_parental_labels"]
         self.mass_poster_update = params["mass_poster_update"]
         self.mass_background_update = params["mass_background_update"]
-        self.mass_cast_and_crew_update = params.get("mass_cast_and_crew_update", False)
+        # Experimental Emby Cast & Crew updates are intentionally disabled.
+        self.mass_cast_and_crew_update = False
         self.radarr_add_all_existing = params["radarr_add_all_existing"]
         self.radarr_remove_by_tag = params["radarr_remove_by_tag"]
         self.sonarr_add_all_existing = params["sonarr_add_all_existing"]

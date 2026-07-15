@@ -402,18 +402,6 @@ class Cache:
                 )""")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tmdb_person_map_tid ON tmdb_person_map(tmdb_id)")
 
-            # 2) cast/crew Spalten in tmdb_movie_data2 + tmdb_show_data4 ergänzen, falls fehlen
-            for table in ("tmdb_movie_data2", "tmdb_show_data4"):
-                cursor.execute(f"PRAGMA table_info({table})")
-                columns = [row[1] for row in cursor.fetchall()]
-                for col in ("cast", "crew"):
-                    if col not in columns:
-                        try:
-                            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
-                        except sqlite3.OperationalError as e:
-                            if "duplicate column name" not in str(e).lower():
-                                raise
-
             cursor.execute("PRAGMA table_info(tvdb_data5)")
             tvdb_columns = [row[1] for row in cursor.fetchall()]
             for col in ("networks", "production", "studio"):
@@ -800,10 +788,6 @@ class Cache:
                     tmdb_dict["release_date"] = datetime.strptime(row["release_date"], "%Y-%m-%d") if row["release_date"] else None
                     tmdb_dict["collection_id"] = row["collection_id"] if row["collection_id"] else None
                     tmdb_dict["collection_name"] = row["collection_name"] if row["collection_name"] else None
-                    # Cast/Crew als JSON speichern/laden
-                    tmdb_dict["cast"] = json.loads(row["cast"]) if row["cast"] else []
-                    tmdb_dict["crew"] = json.loads(row["crew"]) if row["crew"] else []
-                    # Expiration
                     datetime_object = datetime.strptime(row["expiration_date"], "%Y-%m-%d")
                     time_between_insertion = datetime.now() - datetime_object
                     expired = time_between_insertion.days > expiration
@@ -818,11 +802,8 @@ class Cache:
                     "UPDATE tmdb_movie_data2 SET title = ?, original_title = ?, studio = ?, overview = ?, tagline = ?, imdb_id = ?, "
                     "poster_url = ?, backdrop_url = ?, vote_count = ?, vote_average = ?, language_iso = ?, "
                     "language_name = ?, genres = ?, keywords = ?, release_date = ?, collection_id = ?, "
-                    "collection_name = ?, expiration_date = ?, cast = ?, crew = ? WHERE tmdb_id = ? AND language = ?"
+                    "collection_name = ?, expiration_date = ? WHERE tmdb_id = ? AND language = ?"
                 )
-                cast_json = json.dumps(obj.cast or [])
-                crew_json = json.dumps(obj.crew or [])
-
                 cursor.execute(
                     update_sql,
                     (
@@ -844,49 +825,10 @@ class Cache:
                         obj.collection_id,
                         obj.collection_name,
                         expiration_date.strftime("%Y-%m-%d"),
-                        cast_json,
-                        crew_json,
                         obj.tmdb_id,
                         language,
                     ),
                 )
-
-                # --- Person-Map aus den bereits vorliegenden cast/crew-Daten vorbefüllen (tmdb_id + name) ---
-                # Optimiert: Verwendet die bestehende Verbindung anstatt für jede Person eine neue zu öffnen
-                try:
-
-                    def _iter_people(lst):
-                        for it in (obj.cast or [] if lst == "cast" else obj.crew or []):
-                            if isinstance(it, dict):
-                                tid = it.get("person_id") or it.get("id")
-                                nm = it.get("name")
-                            else:
-                                tid = getattr(it, "person_id", None) or getattr(it, "id", None)
-                                nm = getattr(it, "name", None)
-                            if tid and nm and str(tid).isdigit():
-                                yield int(tid), str(nm)
-
-                    seen = set()
-                    person_expiration = self.expiration if hasattr(self, "expiration") else 30
-                    person_expiration_date = datetime.now() - timedelta(days=random.randint(1, person_expiration))
-                    person_expiration_str = person_expiration_date.strftime("%Y-%m-%d")
-
-                    for tid, nm in list(_iter_people("cast")) + list(_iter_people("crew")):
-                        if tid in seen:
-                            continue
-                        seen.add(tid)
-
-                        cursor.execute("INSERT OR IGNORE INTO tmdb_person_map(tmdb_id) VALUES(?)", (tid,))
-                        cursor.execute("SELECT emby_id, alias, meta_json FROM tmdb_person_map WHERE tmdb_id = ?", (tid,))
-                        row = cursor.fetchone()
-
-                        cur_emby = row["emby_id"] if row else None
-                        cur_alias = row["alias"] if row else None
-                        cur_meta = row["meta_json"] if row else None
-
-                        cursor.execute("UPDATE tmdb_person_map SET emby_id = ?, name = ?, alias = ?, meta_json = ?, expiration_date = ? WHERE tmdb_id = ?", (cur_emby, nm, cur_alias, cur_meta, person_expiration_str, tid))
-                except Exception:
-                    pass
 
     def query_tmdb_show(self, tmdb_id, language, expiration):
         tmdb_dict = {}
@@ -917,15 +859,6 @@ class Cache:
                     tmdb_dict["tvdb_id"] = row["tvdb_id"] if row["tvdb_id"] else None
                     tmdb_dict["countries"] = row["countries"] if row["countries"] else ""
                     tmdb_dict["seasons"] = row["seasons"] if row["seasons"] else ""
-                    # Cast/Crew als JSON laden (optionale Spalten)
-                    try:
-                        tmdb_dict["cast"] = json.loads(row["cast"]) if row["cast"] else []
-                    except (KeyError, IndexError, TypeError):
-                        tmdb_dict["cast"] = []
-                    try:
-                        tmdb_dict["crew"] = json.loads(row["crew"]) if row["crew"] else []
-                    except (KeyError, IndexError, TypeError):
-                        tmdb_dict["crew"] = []
                     datetime_object = datetime.strptime(row["expiration_date"], "%Y-%m-%d")
                     time_between_insertion = datetime.now() - datetime_object
                     expired = time_between_insertion.days > expiration
@@ -940,8 +873,7 @@ class Cache:
                     "UPDATE tmdb_show_data4 SET title = ?, original_title = ?, studio = ?, overview = ?, tagline = ?, imdb_id = ?, "
                     "poster_url = ?, backdrop_url = ?, vote_count = ?, vote_average = ?, language_iso = ?, "
                     "language_name = ?, genres = ?, keywords = ?, first_air_date = ?, last_air_date = ?, status = ?, "
-                    "type = ?, tvdb_id = ?, countries = ?, seasons = ?, expiration_date = ?, cast = ?, crew = ? "
-                    "WHERE tmdb_id = ? AND language = ?"
+                    "type = ?, tvdb_id = ?, countries = ?, seasons = ?, expiration_date = ? WHERE tmdb_id = ? AND language = ?"
                 )
                 cursor.execute(
                     update_sql,
@@ -968,8 +900,6 @@ class Cache:
                         "|".join([str(c) for c in obj.countries]),
                         "%|%".join([str(s) for s in obj.seasons]),
                         expiration_date.strftime("%Y-%m-%d"),
-                        json.dumps(getattr(obj, "cast", []) or []),
-                        json.dumps(getattr(obj, "crew", []) or []),
                         obj.tmdb_id,
                         language,
                     ),
