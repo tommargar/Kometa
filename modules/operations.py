@@ -768,19 +768,19 @@ class Operations:
                             try:
                                 temp_genres = []
                                 if option == "tmdb":
-                                    new_genres = tmdb_obj().genres  # noqa
+                                    temp_genres = tmdb_obj().genres  # noqa
                                 elif option == "imdb":
                                     temp_genres = self.config.IMDb.get_genres(imdb_id)
                                 elif option == "omdb":
-                                    new_genres = omdb_obj().genres  # noqa
+                                    temp_genres = omdb_obj().genres  # noqa
                                 elif option == "tvdb":
-                                    new_genres = tvdb_obj().genres  # noqa
+                                    temp_genres = tvdb_obj().genres  # noqa
                                 elif str(option) in anidb.weights:
-                                    new_genres = [str(t).title() for t, w in anidb_obj().tags.items() if w >= anidb.weights[str(option)]]  # noqa
+                                    temp_genres = [str(t).title() for t, w in anidb_obj().tags.items() if w >= anidb.weights[str(option)]]  # noqa
                                 elif option == "mal":
-                                    new_genres = mal_obj().genres  # noqa
+                                    temp_genres = mal_obj().genres  # noqa
                                 elif option == "mal_all":
-                                    new_genres = mal_obj().genres + mal_obj().explicit_genres + mal_obj().themes + mal_obj().demographics  # noqa
+                                    temp_genres = mal_obj().genres + mal_obj().explicit_genres + mal_obj().themes + mal_obj().demographics  # noqa
                                 else:
                                     # BUGFIX: Ensure single string options are treated as a list containing that string
                                     temp_genres = [option]

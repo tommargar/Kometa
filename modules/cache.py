@@ -404,7 +404,11 @@ class Cache:
 
             cursor.execute("PRAGMA table_info(tvdb_data5)")
             tvdb_columns = [row[1] for row in cursor.fetchall()]
-            for col in ("networks", "production", "studio"):
+            # Keep existing caches compatible with the complete tvdb_data5
+            # schema. Missing sqlite3.Row keys otherwise surface as the
+            # misleading error "No item with that key" while resolving a
+            # perfectly valid TVDb ID.
+            for col in ("logo_url", "icon_url", "networks", "production", "studio"):
                 if col not in tvdb_columns:
                     cursor.execute(f"ALTER TABLE tvdb_data5 ADD COLUMN {col} TEXT")
 

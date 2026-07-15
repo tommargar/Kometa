@@ -9,6 +9,7 @@ from plexapi.video import Episode, Season
 
 from modules import overlay, plex, util
 from modules.builder import CollectionBuilder
+from modules.poster import ImageData
 from modules.util import Failed, FilterFailed, NotScheduled, OverlayError
 
 logger = util.logger
@@ -69,7 +70,10 @@ class Overlays:
             key_to_overlays, properties = self.compile_overlays()
         ignore_list = [rk for rk in key_to_overlays]
 
-        old_overlays = [la for la in self.library.Plex.listFilterChoices("label") if str(la.title).lower().endswith(" overlay")]
+        # Plex exposes old overlay labels through listFilterChoices. Emby's
+        # overlay item lookup currently cannot filter by an individual label,
+        # so running this cleanup there would target every library item.
+        old_overlays = [] if self.library.is_emby else [la for la in self.library.Plex.listFilterChoices("label") if str(la.title).lower().endswith(" overlay")]
         if old_overlays:
             logger.separator(f"Removing Old Overlays for the {self.library.name} Library")
             logger.info("")
@@ -160,6 +164,7 @@ class Overlays:
                     special_text_cache = self.cache.query_overlay_special_text(item.ratingKey) if self.cache else {}
                     compare_names = {properties[ov].get_overlay_compare(): ov for ov in over_names}
                     overlay_change = self.get_overlay_change_reason(item, over_names, properties, overlay_compare, compare_names, has_overlay, special_text_cache)
+                    current_hashes = {properties[ov].mapping_name: properties[ov].get_overlay_compare() for ov in over_names}
 
                     blur_num = 0
                     applied_names = []
@@ -180,15 +185,23 @@ class Overlays:
                         else:
                             applied_names.append(over_name)
 
+                    poster = background = logo = square_art = None
+                    item_dir = name = None
                     try:
                         # todo: for Emby transparent PNG, ignore existing poster files
-                        poster, background, logo, item_dir, name = self.library.find_item_assets(item)
-                        if self.library.EmbyServer:
-                            poster: ImageData = ImageData("asset_directory", my_overlay_path if has_overlay else "", is_url=False)
+                        asset_result = self.library.find_item_assets(item)
+                        if len(asset_result) == 6:
+                            poster, background, logo, square_art, item_dir, name = asset_result
+                        else:
+                            poster, background, logo, item_dir, name = asset_result
+                            square_art = None
+                        if self.library.EmbyServer and has_overlay:
+                            poster = ImageData("asset_directory", my_overlay_path, is_url=False)
                         # poster = ImageData("asset_directory", emby_poster.get("Path"), is_url=False, compare=poster_compare)
                         # background = ImageData("asset_directory", emby_thumb.get("Path"), compare=emby_item.get("ImageTags").get("Thumb"))
-                        item_dir = os.path.dirname(poster.location)
-                        name = str(item_dir).split("\\")[-1]
+                        if poster:
+                            item_dir = os.path.dirname(poster.location)
+                            name = os.path.basename(item_dir)
 
                         # poster, background, item_dir, name = self.library.find_item_assets(item)
 
@@ -214,6 +227,8 @@ class Overlays:
 
                     changed_image = False
                     poster_compare = None
+                    resolved_values = {}
+                    unresolved = set()
                     if self.library.mc_type == "emby" and has_overlay:
                         try:
                             if str(os.stat(my_overlay_path).st_size) != str(image_compare):

@@ -1703,7 +1703,7 @@ class MetadataFile(DataFile):
                             raise Failed(f"{self.type_str} Error: {library_type} is invalid. Options: true, false, {', '.join(plex.library_types)}")
                         elif library_type == "false":
                             raise NotScheduled("Skipped because run_definition is false")
-                        elif library_type != "true" and self.library and library_type != self.library.Plex.type:
+                        elif library_type != "true" and self.library and library_type != self.library.type.lower():
                             raise NotScheduled(f"Skipped because run_definition library_type: {library_type} doesn't match")
 
                 match_data: dict = {}
