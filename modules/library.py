@@ -180,6 +180,25 @@ class Library(ABC):
         """Check if this library is an Emby library."""
         return self.mc_type == "emby"
 
+    def scan_configured_collection_names(self):
+        """Load configured collection names for every media-server backend."""
+        for file_type, metadata_file, temp_vars, asset_directory in self.configured_collection_files:
+            try:
+                meta_obj = MetadataFile(
+                    self.config,
+                    self,
+                    file_type,
+                    metadata_file,
+                    temp_vars,
+                    asset_directory,
+                    "collection",
+                    configured_names_only=True,
+                )
+                if meta_obj.collections:
+                    self.collection_names.extend([c for c in meta_obj.collections if c not in self.collection_names])
+            except Failed as e:
+                logger.debug(f"Configured collection names failed to load from {metadata_file}: {e}")
+
     def scan_files(self, operations_only, overlays_only, collection_only, metadata_only):
         self.scan_configured_collection_names()
         if not operations_only and not overlays_only and not metadata_only:
