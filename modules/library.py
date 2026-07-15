@@ -184,6 +184,29 @@ class Library(ABC):
         """Check if this library is an Emby library."""
         return self.mc_type == "emby"
 
+    def item_is_ignored(self, item, tmdb_id=None, tvdb_id=None, imdb_id=None):
+        """Return whether an item matches a configured external ID ignore list."""
+        if not self.ignore_ids and not self.ignore_imdb_ids:
+            return False
+        ignored_ids = {str(ignore_id) for ignore_id in self.ignore_ids}
+        if any(item_id is not None and str(item_id) in ignored_ids for item_id in [tmdb_id, tvdb_id]):
+            return True
+        if tmdb_id is None and tvdb_id is None and imdb_id is None:
+            try:
+                tmdb_id, tvdb_id, imdb_id = self.get_ids(item)
+            except Failed:
+                tmdb_id = tvdb_id = imdb_id = None
+        if any(item_id is not None and str(item_id) in ignored_ids for item_id in [tmdb_id, tvdb_id]):
+            return True
+        return imdb_id is not None and str(imdb_id).lower() in self.ignore_imdb_ids
+
+    def item_has_ignore_label(self, item, current_labels=None):
+        """Return whether an item has one of the configured ignore labels."""
+        if not self.ignore_labels:
+            return False
+        labels = current_labels if current_labels is not None else [la.tag for la in self.item_labels(item)]
+        return any(label in labels for label in self.ignore_labels)
+
     def scan_configured_collection_names(self):
         """Load configured collection names for every media-server backend."""
         for file_type, metadata_file, temp_vars, asset_directory in self.configured_collection_files:
