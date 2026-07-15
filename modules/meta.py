@@ -15,7 +15,7 @@ logger = util.logger
 all_auto = ["genre", "number", "custom"]
 ms_auto = ["actor", "year", "content_rating", "original_language", "tmdb_popular_people", "trakt_user_lists", "studio", "trakt_liked_lists", "trakt_people_list", "subtitle_language", "audio_language", "resolution", "decade", "imdb_awards"]
 auto = {
-    "Movie": ["tmdb_collection", "edition", "country", "director", "producer", "writer", "letterboxd_user_lists"] + all_auto + ms_auto,
+    "Movie": ["tmdb_collection", "edition", "country", "director", "producer", "writer", "composer", "letterboxd_user_lists"] + all_auto + ms_auto,
     "Show": ["edition", "network", "origin_country", "episode_year"] + all_auto + ms_auto,
     "Artist": ["mood", "style", "country", "album_genre", "album_mood", "album_style", "track_mood"] + all_auto,
     "Video": ["country", "content_rating"] + all_auto,
