@@ -34,6 +34,13 @@ def _setup_table(cache):
     return f"{table_name}_overlay_state"
 
 
+def test_overlay_poster_table_uses_its_two_column_cache_api(cache):
+    table_name = cache.get_image_table_name("TestLib")
+    poster_table = f"{table_name}_overlays"
+    cache.update_overlay_poster(5173, poster_table, "poster.jpg", "12345")
+    assert cache.query_overlay_poster(5173, poster_table) == ("poster.jpg", "12345")
+
+
 # ── Helpers that mirror what overlays.py does each run ────────────────────────
 
 

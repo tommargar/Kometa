@@ -15,6 +15,25 @@ from modules.util import Failed, FilterFailed, NotScheduled, OverlayError
 logger = util.logger
 
 
+def format_overlay_rating(actual_value, format_var, mod="", *, emby=False, literal_percent=False):
+    """Format a rating without mixing Emby's 0-100 critic scale with 0-10 ratings."""
+    value = float(actual_value)
+    is_emby_critic = emby and format_var == "critic_rating"
+
+    if mod == "%" or (not mod and literal_percent):
+        percent = value if is_emby_critic else value * 10
+        return str(int(percent)) if percent.is_integer() else f"{percent:.1f}"
+    if mod == "#":
+        rendered = f"{value / 10 if is_emby_critic else value:.1f}"
+        return rendered[:-2] if rendered.endswith(".0") else rendered
+    if mod == "/":
+        value = value / 10 if is_emby_critic else value
+        return f"{value / 2:.1f}"
+
+    value = value / 10 if is_emby_critic else value
+    return f"{value:.1f}"
+
+
 class Overlays:
     def __init__(self, config, library):
         from modules.config import ConfigFile  # avoid circle import
@@ -149,11 +168,11 @@ class Overlays:
                     cached_state = {}
                     poster = None
                     if self.cache:
-                        image, image_compare, overlay_compare = self.cache.query_image_map(item.ratingKey, f"{self.library.image_table_name}_overlays")
+                        _, image_compare = self.cache.query_overlay_poster(item.ratingKey, f"{self.library.image_table_name}_overlays")
+                        cached_state = self.cache.query_overlay_state(item.ratingKey, f"{self.library.image_table_name}_overlay_state")
                     # self.library.reload(item, force=True)
                     # not needed here for Emby
 
-                    overlay_compare = [] if overlay_compare is None else util.get_list(overlay_compare, split="|")
                     my_overlay_path = ""
                     if self.library.mc_type == "emby":
                         my_overlay_path = os.path.join(self.library.overlay_destination_folder, f"{item.ratingKey}.{self.library.overlay_artwork_filetype}")
@@ -162,9 +181,8 @@ class Overlays:
                         has_overlay = any([item_tag.tag.lower() == "overlay" for item_tag in self.library.item_labels(item)])
 
                     special_text_cache = self.cache.query_overlay_special_text(item.ratingKey) if self.cache else {}
-                    compare_names = {properties[ov].get_overlay_compare(): ov for ov in over_names}
-                    overlay_change = self.get_overlay_change_reason(item, over_names, properties, overlay_compare, compare_names, has_overlay, special_text_cache)
                     current_hashes = {properties[ov].mapping_name: properties[ov].get_overlay_compare() for ov in over_names}
+                    overlay_change = self.get_overlay_change_reason(item, over_names, properties, cached_state, current_hashes, has_overlay, special_text_cache)
 
                     blur_num = 0
                     applied_names = []
@@ -277,23 +295,6 @@ class Overlays:
                                     nonlocal native_emby_data
                                     fresh_emby_item = None
                                     full_text = text_overlay.name[5:-1]
-                                    # Detect Provider based on Overlay Image Path
-                                    provider = None
-                                    if text_overlay.path:
-                                        lower_path = text_overlay.path.lower()
-                                        if "letterboxd" in lower_path:
-                                            provider = "letterboxd"
-                                        elif "imdb" in lower_path:
-                                            provider = "imdb"
-                                        elif "tmdb" in lower_path:
-                                            provider = "tmdb"
-                                        elif "rotten" in lower_path or "rt_" in lower_path:
-                                            provider = "rt"
-                                        elif "metacritic" in lower_path:
-                                            provider = "metacritic"
-                                        elif "trakt" in lower_path:
-                                            provider = "trakt"
-
                                     for format_var in overlay.vars_by_type[text_overlay.level]:
                                         if f"<<{format_var}" in full_text and format_var == "originally_available[":
                                             mod = re.search("<<originally_available\\[(.+)]>>", full_text).group(1)  # type: ignore[union-attr]
@@ -429,17 +430,6 @@ class Overlays:
                                             cache_store = actual_value.strftime("%Y-%m-%d") if format_var in overlay.date_vars else actual_value
                                             self.cache.update_overlay_special_text(item.ratingKey, format_var, cache_store)
 
-                                        # Apply Provider Specific Scaling if using generic rating variables
-                                        if provider and actual_value is not None and format_var in ["critic_rating"]:
-                                            try:
-                                                val = float(actual_value)
-                                                # if provider == "letterboxd":
-                                                #     actual_value = val / 2 if format_var != "critic_rating" else val / 20 # Scale 0-10 to 0-5
-                                                if format_var == "critic_rating" and provider not in ["tmdb", "trakt", "rt", "metacritic"]:
-                                                    actual_value = val / 10
-                                            except (ValueError, TypeError):
-                                                pass
-
                                         sub_value = None
                                         if format_var == "originally_available":
                                             if mod:
@@ -454,13 +444,14 @@ class Overlays:
                                                 final_value = int((actual_value / 60000) % 60)  # type: ignore[operator]
                                             else:
                                                 final_value = int(actual_value / 60000)  # type: ignore[operator]
-                                        elif mod == "%":
-                                            final_value = int(float(actual_value) * 10)  # type: ignore[arg-type]
-                                        elif mod == "#":
-                                            actual_value = f"{float(actual_value):.1f}"  # type: ignore[arg-type]
-                                            final_value = actual_value[:-2] if actual_value.endswith(".0") else actual_value
-                                        elif mod == "/":
-                                            final_value = f"{float(actual_value) / 2:.1f}"  # type: ignore[arg-type]
+                                        elif format_var in overlay.float_vars:
+                                            final_value = format_overlay_rating(
+                                                actual_value,
+                                                format_var,
+                                                mod,
+                                                emby=self.library.mc_type == "emby",
+                                                literal_percent=mod == "" and f"<<{format_var}>>%" in full_text,
+                                            )
                                         elif mod == "W":
                                             final_value = num2words(int(actual_value))  # type: ignore[arg-type]
                                         elif mod == "WU":
@@ -477,8 +468,6 @@ class Overlays:
                                             final_value = str(actual_value).lower()
                                         elif mod == "P":
                                             final_value = str(actual_value).title()
-                                        elif format_var in overlay.rating_sources:
-                                            final_value = f"{float(actual_value):.1f}"  # type: ignore[arg-type]
                                         else:
                                             final_value = actual_value
                                         if sub_value:
@@ -619,58 +608,23 @@ class Overlays:
             self.library.EmbyServer.dirty_items.clear()
         return overlay_run_time
 
-    def get_overlay_change_reason(self, item, over_names, properties, overlay_compare, compare_names, has_overlay, special_text_cache):
+    def get_overlay_change_reason(self, item, over_names, properties, cached_state, current_hashes, has_overlay, special_text_cache):
         if not has_overlay:
             return "No Overlay Label"
 
-        for oc in overlay_compare:
-            if oc not in compare_names:
-                # Check for path mismatch (Drive letter vs UNC)
-                match_found = False
-                for cn in compare_names:
-                    if oc == cn:
-                        match_found = True
-                        break
-                    oc_norm = oc.replace("\\", "/")
-                    cn_norm = cn.replace("\\", "/")
-                    prefix_len = 0
-                    for i in range(min(len(oc_norm), len(cn_norm))):
-                        if oc_norm[i] != cn_norm[i]:
-                            break
-                        prefix_len = i
-                    if prefix_len > 10:
-                        oc_rest = oc_norm[prefix_len:]
-                        cn_rest = cn_norm[prefix_len:]
-                        if "/" in oc_rest and "/" in cn_rest and oc_rest.rsplit("/", 1)[-1] == cn_rest.rsplit("/", 1)[-1]:
-                            match_found = True
-                            break
-                if not match_found:
-                    return f"{oc} not in {compare_names}"
+        for cached_key in cached_state:
+            if cached_key not in current_hashes:
+                return f"Overlay Removed: {cached_key}"
 
-        for compare_name, original_name in compare_names.items():
-            if compare_name not in overlay_compare:
-                match_found = False
-                for oc in overlay_compare:
-                    if compare_name == oc:
-                        match_found = True
-                        break
-                    cn_norm = compare_name.replace("\\", "/")
-                    oc_norm = oc.replace("\\", "/")
-                    prefix_len = 0
-                    for i in range(min(len(cn_norm), len(oc_norm))):
-                        if cn_norm[i] != oc_norm[i]:
-                            break
-                        prefix_len = i
-                    if prefix_len > 10:
-                        cn_rest = cn_norm[prefix_len:]
-                        oc_rest = oc_norm[prefix_len:]
-                        if "/" in cn_rest and "/" in oc_rest and cn_rest.rsplit("/", 1)[-1] == oc_rest.rsplit("/", 1)[-1]:
-                            match_found = True
-                            break
-                if not match_found:
-                    return f"{compare_name} not in {overlay_compare}"
-            if properties[original_name].updated:
-                return f"{properties[original_name].updated}"
+        for over_name in over_names:
+            current_overlay = properties[over_name]
+            mapping_name = current_overlay.mapping_name
+            if mapping_name not in cached_state:
+                return f"New Overlay: {mapping_name}"
+            if cached_state[mapping_name][0] != current_hashes[mapping_name]:
+                return f"Overlay Changed: {mapping_name}"
+            if current_overlay.updated:
+                return f"Overlay Image Updated: {mapping_name}"
 
         if self.cache:
             for over_name in over_names:

@@ -7,6 +7,7 @@ CollectionBuilder and are tested through integration tests.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -94,3 +95,24 @@ class TestRemoveOverlay:
         item = MagicMock()
         overlay.remove_overlay(item, "Test", "Overlay", ["/nonexistent"])
         overlay.library.edit_tags.assert_not_called()
+
+
+class TestOverlayChangeReason:
+    @staticmethod
+    def _properties(updated=False):
+        return {"Rating": SimpleNamespace(mapping_name="Rating", name="image", updated=updated)}
+
+    def test_matching_state_needs_no_update(self):
+        o = make_overlays(cache=None)
+        result = o.get_overlay_change_reason(MagicMock(), ["Rating"], self._properties(), {"Rating": ("hash", None)}, {"Rating": "hash"}, True, {})
+        assert result == ""
+
+    def test_new_overlay_is_detected_from_state_table(self):
+        o = make_overlays(cache=None)
+        result = o.get_overlay_change_reason(MagicMock(), ["Rating"], self._properties(), {}, {"Rating": "hash"}, True, {})
+        assert result == "New Overlay: Rating"
+
+    def test_removed_overlay_is_detected_from_state_table(self):
+        o = make_overlays(cache=None)
+        result = o.get_overlay_change_reason(MagicMock(), ["Rating"], self._properties(), {"Old": ("hash", None)}, {"Rating": "hash"}, True, {})
+        assert result == "Overlay Removed: Old"
