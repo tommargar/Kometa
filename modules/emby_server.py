@@ -2253,16 +2253,18 @@ class EmbyServer:
             except (ValueError, TypeError):
                 pass
 
-        if "ForcedSortName" in data:
-            item["ForcedSortName"] = data["ForcedSortName"]
-            item["SortName"] = data["ForcedSortName"]
+        forced_sort_name = data.get("ForcedSortName")
+        sort_name_changed = forced_sort_name is not None and item.get("SortName") != forced_sort_name
+        unchanged = not sort_name_changed and all(item.get(k) == v for k, v in data.items() if k != "ForcedSortName")
+        if unchanged:
+            return None
+
+        if forced_sort_name is not None:
+            item["ForcedSortName"] = forced_sort_name
+            item["SortName"] = forced_sort_name
 
             if "SortName" not in item["LockedFields"]:
                 item["LockedFields"].append("SortName")
-
-        unchanged = all(item.get(k) == v for k, v in data.items())
-        if unchanged:
-            return None
 
         item.update(data)
 

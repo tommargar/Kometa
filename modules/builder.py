@@ -5500,7 +5500,9 @@ class CollectionBuilder:
             logger.error(f"Emby Error: Item {self.name} not found")
             return updated_details
 
-        locked_fields = emby_item.get("LockedFields", [])
+        # Work on a copy so the cached Emby item still represents server state
+        # until update_item has decided whether an API update is required.
+        locked_fields = list(emby_item.get("LockedFields") or [])
         new_properties = {}
 
         if "summary" in self.summaries:
