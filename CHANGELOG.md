@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add a central Emby item cache using one SQLite database per server under `emby_cache/<server-id>.db`, independent of the selected config file and Kometa's standard cache. Library manifests are synchronized by Emby `Etag`; only new, changed, or field-incomplete items are fetched in full, and library membership plus payloads are committed atomically. Poster, backdrop, and logo image tags participate in image-cache invalidation, and overlays refresh the Emby manifest before evaluation.
 - Add `value_filter` overlay-file attribute to filter items at selection time based on a runtime-fetched numeric value; supports comparators `gte`, `gt`, `lt`, `lte` on any `rating_sources` variable using the normalised 0–10 scale.
 - Add `overlay_value_cache` table (replaces `overlay_special_text2`) with a `UNIQUE(rating_key, type)` constraint and an `expiration_date` column; values refresh automatically after `cache_expiration` days.
 - Add `_overlay_state` and `_overlay_images` per-library tables replacing the dual-use `overlay TEXT` column in `_overlays`; one row per overlay per item, written only on successful resolution.
@@ -25,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add Plex show edition support wherever movie editions are supported, including edition filters, metadata matching/editing, overlays, dynamic collections, and `item_edition`.
 
 ### Fixed
+- Avoid repeated TVDb movie dereferrer lookups for numeric IDs, use the TVDb object cache first, and cap uncached movie retries so a failed lookup no longer stalls each library item for roughly 50 seconds. Preserve existing genres when TVDb is temporarily unavailable during a merged genre update.
+- Fix Emby library-operation edit tracking being initialized as a string, which caused successful MDBList rating and other metadata updates to fail with `'str' object has no attribute 'append'`.
+- Fix local Emby collection artwork uploads crashing when the image cache fingerprint was compared to the numeric upload-size limit; validation now uses the actual file size.
 - Fix Emby collection sort-title updates being discarded as unchanged before the API request was sent.
 - `modules/request.py`/`modules/plex.py`: fix `get_image()` and `delete_user_playlist()` crashing a collection or playlist sync outright on a transient network failure (connection reset, timeout, plex.tv DNS resolution). Both now catch the underlying `requests` exception and raise `Failed`, matching how every other network-facing call in these modules already degrades.
 - `modules/tvdb.py`: add a distinct `Unavailable` exception for TVDb requests that exhaust their retry budget without ever returning usable content (e.g. repeated HTTP 202/empty-body "still generating" responses), separate from `NotFound`'s definitive 4xx. Previously both were re-raised with the identical "No Series/Movie found" message, so a confirmed-dead TVDb ID and a transient TVDb hiccup were indistinguishable in the log. All `get_tvdb_obj()` call sites (`modules/builder.py`, `modules/operations.py`) now log `NotFound` at debug (unchanged), `Unavailable` at warning (previously logged at error via the generic `Failed` handler), and any other `Failed` at error (unchanged).

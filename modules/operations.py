@@ -195,8 +195,8 @@ class Operations:
 
             # Lookup-Tabelle aus bereits geladenen nativen Emby-Items für Studio-Check (O(1), kein HTTP-Call)
             _emby_native_by_id = {}
-            if hasattr(self.library, "EmbyServer") and hasattr(self.library, "_emby_all_items_native"):
-                native_list = self.library._emby_all_items_native or []
+            if hasattr(self.library, "EmbyServer"):
+                native_list = self.library.get_all_native() or []
                 _emby_native_by_id = {str(it.get("Id")): it for it in native_list if isinstance(it, dict) and it.get("Id")}
 
             radarr_adds = []
@@ -315,7 +315,7 @@ class Operations:
 
                 locked_fields = [f.name for f in item.fields if f.locked]
 
-                item_edits = ""
+                item_edits = []
 
                 if self.library.remove_title_parentheses:
                     if not any([f.name == "title" and f.locked for f in item.fields]) and item.title.endswith(")"):
@@ -465,9 +465,10 @@ class Operations:
                     return _omdb_obj
 
                 _tvdb_obj = None
+                _tvdb_error = None
 
                 def tvdb_obj():
-                    nonlocal _tvdb_obj
+                    nonlocal _tvdb_obj, _tvdb_error
                     if _tvdb_obj is None:
                         _tvdb_obj = False
                         item_tvdb_id = tvdb_id
@@ -486,6 +487,7 @@ class Operations:
                             except tvdb.NotFound as err:
                                 logger.debug(str(err))
                             except tvdb.Unavailable as err:
+                                _tvdb_error = err
                                 logger.warning(str(err))
                             except Failed as err:
                                 logger.error(str(err))
@@ -496,6 +498,8 @@ class Operations:
                         else:
                             logger.info(f"No TVDb ID for Guid: {item.guid}")
                     if not _tvdb_obj:
+                        if _tvdb_error:
+                            raise _tvdb_error
                         raise Failed
                     return _tvdb_obj
 
@@ -755,6 +759,7 @@ class Operations:
                 if self.library.mass_genre_update or self.library.genre_mapper:
                     new_genres = []
                     extra_option = None
+                    genre_source_unavailable = False
                     if self.library.mass_genre_update:
                         # Flatten list of lists from config
                         options = [item for sublist in self.library.mass_genre_update for item in (sublist if isinstance(sublist, list) else [sublist])]
@@ -792,6 +797,9 @@ class Operations:
                                 new_genres.extend(temp_genres)
                                 if not merge_genres:
                                     break
+                            except tvdb.Unavailable:
+                                genre_source_unavailable = True
+                                continue
                             except Failed:
                                 continue
                             except Exception as e:
@@ -802,7 +810,10 @@ class Operations:
                             new_genres = list(dict.fromkeys(new_genres))
 
                     item_genres = emby_item.get("Genres", []) if emby_item else []
-                    if not new_genres and extra_option not in ["remove", "reset"]:
+                    if genre_source_unavailable:
+                        logger.warning(f"Genre Update Skipped | TVDb was temporarily unavailable for {title}; existing genres preserved")
+                        new_genres = item_genres
+                    elif not new_genres and extra_option not in ["remove", "reset"]:
                         new_genres = item_genres
                     if self.library.genre_mapper:
                         mapped_genres = []
@@ -821,7 +832,7 @@ class Operations:
                                 if g not in genre_edits[edit_type]:
                                     genre_edits[edit_type][g] = []
                                 genre_edits[edit_type][g].append(item.ratingKey)
-                            item_edits += f"\nGenres {'Added' if edit_type == 'add' else 'Removed'} (Batched) | {', '.join(genre_list)}"
+                            item_edits.append(f"Genres {'Added' if edit_type == 'add' else 'Removed'} (Batched) | {', '.join(genre_list)}")
                     if extra_option in ["unlock", "reset"] and ("genre" in locked_fields or _add or _remove):
                         if "genre" not in unlock_edits:
                             unlock_edits["genre"] = []
@@ -937,7 +948,7 @@ class Operations:
                         if new_rating not in content_edits:
                             content_edits[new_rating] = []
                         content_edits[new_rating].append(item.ratingKey)
-                        item_edits += f"\nContent Rating (Batched) | {new_rating}"
+                        item_edits.append(f"Content Rating (Batched) | {new_rating}")
                         do_lock = False
 
                     if extra_option == "lock" or do_lock:
@@ -998,7 +1009,7 @@ class Operations:
                                     raise Failed
                                 if str(current_original) != str(new_original_title):
                                     item.editOriginalTitle(new_original_title)
-                                    item_edits += f"\nOriginal Title | {new_original_title}"
+                                    item_edits.append(f"Original Title | {new_original_title}")
                                 break
                             except Failed:
                                 continue
@@ -1059,7 +1070,7 @@ class Operations:
                                     if new_studio not in studio_edits:
                                         studio_edits[new_studio] = []
                                     studio_edits[new_studio].append(item.ratingKey)
-                                    item_edits += f"\nStudio (Batched) | {new_studio}"
+                                    item_edits.append(f"Studio (Batched) | {new_studio}")
                                 break
                             except Failed:
                                 continue
@@ -1122,7 +1133,7 @@ class Operations:
                                         if new_date not in date_edits[item_attr]:
                                             date_edits[item_attr][new_date] = []
                                         date_edits[item_attr][new_date].append(item.ratingKey)
-                                        item_edits += f"\n{name_display[item_attr]} (Batched) | {new_date}"
+                                        item_edits.append(f"{name_display[item_attr]} (Batched) | {new_date}")
                                     break
                                 except Failed:
                                     continue
@@ -1210,7 +1221,7 @@ class Operations:
                     logger.warning(f"[SLOW] {title}: TOTAL item processing took {_total_elapsed:.1f}s")
 
                 if len(item_edits) > 0:
-                    logger.info(f"{item_edits[1:]}")
+                    logger.info("\n".join(str(edit).lstrip("\n") for edit in item_edits))
                 else:
                     logger.info("No Item Edits")
 
@@ -1535,7 +1546,7 @@ class Operations:
                         if self.library.item_has_ignore_label(ep):
                             logger.info("Ignored by ignore_labels")
                             continue
-                        item_edits = ""
+                        item_edits = []
 
                         for attribute, item_attr in episode_ops:
                             if attribute:
@@ -1603,13 +1614,13 @@ class Operations:
                                                 if found_rating not in ep_rating_edits[item_attr]:
                                                     ep_rating_edits[item_attr][found_rating] = []
                                                 ep_rating_edits[item_attr][found_rating].append(ep)
-                                                item_edits += f"\n{name_display[item_attr]} (Batched) | {found_rating}"
+                                                item_edits.append(f"{name_display[item_attr]} (Batched) | {found_rating}")
                                             break
                                         except Failed:
                                             continue
 
                         if len(item_edits) > 0:
-                            logger.info(f"{item_edits[1:]}")
+                            logger.info("\n".join(str(edit).lstrip("\n") for edit in item_edits))
 
             logger.info("")
             logger.separator("Plex Updates", space=False, border=False)
@@ -1678,7 +1689,10 @@ class Operations:
                     if idx is not None:
                         refreshed = self.library.EmbyServer.get_item(item_id, force_refresh=True)
                         if refreshed:
-                            items[idx] = self.library.EmbyServer.convert_emby_to_plex([refreshed])[0]
+                            refreshed_item = self.library.EmbyServer.convert_emby_to_plex([refreshed])[0]
+                            items[idx] = refreshed_item
+                            self.library.cached_items[refreshed_item.ratingKey] = (refreshed_item, False)
+                            self.library.filter_items_cache.pop(refreshed_item.ratingKey, None)
 
             if hasattr(self.library, "EmbyServer"):
                 modified_ids = set()

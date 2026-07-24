@@ -579,6 +579,15 @@ class Emby(Library):
         # print(emby_library_names)
         if not self.Emby:
             raise Failed(f"Emby Error: Emby Library '{params['name']}' not found. Options: {emby_library_names}")
+
+        if getattr(self.EmbyServer, "_central_cache", None) is not None:
+            central_library_state = self.EmbyServer._central_cache.bind_library(
+                self.EmbyServer.cache_server_key,
+                self.Emby.get("Id"),
+            )
+            self.cached_items = central_library_state["object_cache"]
+            self.filter_items_cache = central_library_state["filter_cache"]
+            self._search_choices_cache = central_library_state["search_choices_cache"]
         # --------------
 
         self.type = self.Emby.get("CollectionType", "")
@@ -607,6 +616,8 @@ class Emby(Library):
         self._users = []
         self.emby_users = []
         self._all_items = []
+        # Compatibility attributes only. Emby item snapshots are owned by
+        # Config.EmbyCache and are not stored on individual Kometa libraries.
         self._emby_all_items = None
         self._emby_all_items_native = None
         self._account = None
@@ -743,8 +754,9 @@ class Emby(Library):
 
     def load_from_cache(self, rating_key):
         """Loads an item from the internal cache using its rating key."""
-        if rating_key in self.cached_items:
-            item, _ = self.cached_items[rating_key]
+        cache_key = str(rating_key)
+        if cache_key in self.cached_items:
+            item, _ = self.cached_items[cache_key]
             return item
 
     def load_list_from_cache(self, rating_keys):
@@ -1356,13 +1368,26 @@ class Emby(Library):
 
     def upload_images(self, item, poster=None, background=None, logo=None, overlay=False):
         """Manages the upload of multiple images for an item, checking against cache to avoid redundant uploads."""
+        emby_item = self.EmbyServer.get_item(item.ratingKey) or {}
+
+        def image_cache_key(image, image_type, native_item):
+            if image is None:
+                return ""
+            image_tags = native_item.get("ImageTags") or {}
+            if image_type == "poster":
+                server_tag = image_tags.get("Primary")
+            elif image_type == "background":
+                server_tag = "|".join(str(tag) for tag in native_item.get("BackdropImageTags") or [])
+            else:
+                server_tag = image_tags.get("Logo")
+            return f"{image.compare}-{server_tag}" if server_tag else image.compare
+
         poster_uploaded = False
         if poster is not None:
             try:
-                emby_item = self.EmbyServer.get_item(item.ratingKey)
-                emby_images = emby_item.get("ImageTags")
-                emby_poster_compare = emby_images.get("Primary") if emby_images else None
-                poster_key = f"{poster.compare}-{emby_poster_compare}" if emby_poster_compare else poster.compare
+                emby_images = emby_item.get("ImageTags") or {}
+                emby_poster_compare = emby_images.get("Primary")
+                poster_key = image_cache_key(poster, "poster", emby_item)
                 image_compare = None
                 if self.config.Cache:
                     _, image_compare, _ = self.config.Cache.query_image_map(item.ratingKey, self.image_table_name)
@@ -1382,10 +1407,11 @@ class Emby(Library):
         background_uploaded = False
         if background is not None:
             try:
+                background_key = image_cache_key(background, "background", emby_item)
                 image_compare = None
                 if self.config.Cache:
                     _, image_compare, _ = self.config.Cache.query_image_map(item.ratingKey, f"{self.image_table_name}_backgrounds")
-                if not image_compare or str(background.compare) != str(image_compare):
+                if not image_compare or str(background_key) != str(image_compare):
                     background_uploaded = self._upload_image(item, background)
                     logger.info(f"Metadata: {background.attribute} updated {background.message}")
                 elif self.show_asset_not_needed:
@@ -1397,10 +1423,11 @@ class Emby(Library):
         logo_uploaded = False
         if logo is not None:
             try:
+                logo_key = image_cache_key(logo, "logo", emby_item)
                 image_compare = None
                 if self.config.Cache:
                     _, image_compare, _ = self.config.Cache.query_image_map(item.ratingKey, f"{self.image_table_name}_logos")
-                if not image_compare or str(logo.compare) != str(image_compare):
+                if not image_compare or str(logo_key) != str(image_compare):
                     logo_uploaded = self._upload_image(item, logo)
                     logger.info(f"Metadata: {logo.attribute} updated {logo.message}")
                 elif self.show_asset_not_needed:
@@ -1410,18 +1437,17 @@ class Emby(Library):
                 logger.error(f"Metadata: {logo.attribute} failed to update {logo.message}")
 
         if self.config.Cache:
-
+            if poster_uploaded or background_uploaded or logo_uploaded:
+                emby_item = self.EmbyServer.get_item(item.ratingKey, force_refresh=True) or {}
             if poster_uploaded:
-                emby_item = self.EmbyServer.get_item(item.ratingKey, force_refresh=True)
-                emby_images = emby_item.get("ImageTags")
-                emby_poster_compare = emby_images.get("Primary") if emby_images else None
-                poster_key = f"{poster.compare}-{emby_poster_compare}" if emby_poster_compare else poster.compare
-
+                poster_key = image_cache_key(poster, "poster", emby_item)
                 self.config.Cache.update_image_map(item.ratingKey, self.image_table_name, "", poster_key if poster else "")
             if background_uploaded:
-                self.config.Cache.update_image_map(item.ratingKey, f"{self.image_table_name}_backgrounds", "", background.compare)
+                background_key = image_cache_key(background, "background", emby_item)
+                self.config.Cache.update_image_map(item.ratingKey, f"{self.image_table_name}_backgrounds", "", background_key)
             if logo_uploaded:
-                self.config.Cache.update_image_map(item.ratingKey, f"{self.image_table_name}_logos", "", logo.compare)
+                logo_key = image_cache_key(logo, "logo", emby_item)
+                self.config.Cache.update_image_map(item.ratingKey, f"{self.image_table_name}_logos", "", logo_key)
 
         return poster_uploaded, background_uploaded, logo_uploaded
 
@@ -1474,7 +1500,10 @@ class Emby(Library):
     def create_blank_collection(self, title):
         """Creates a blank collection in Emby."""
         # Create a blank collection for Emby, add at least one title
-        return self.EmbyServer.create_collection(title,[self._emby_all_items[0].ratingKey], self.Emby.get("Id"))
+        all_items = self.get_all()
+        if not all_items:
+            raise Failed(f"Emby Error: Cannot create collection '{title}' from an empty library")
+        return self.EmbyServer.create_collection(title, [all_items[0].ratingKey], self.Emby.get("Id"))
 
 
 
@@ -1993,6 +2022,17 @@ class Emby(Library):
             logger.warning(f"Collection Warning: {text} attribute will run as {final}")
         return attribute, modifier, final
 
+    def _cached_native_items(self, builder_level=None):
+        central_cache = getattr(self.EmbyServer, "_central_cache", None)
+        if central_cache is None:
+            return None
+        view_key = (builder_level or self.type).lower()
+        return central_cache.library_view(
+            self.EmbyServer.cache_server_key,
+            self.Emby.get("Id"),
+            view_key,
+        )
+
     def _can_use_emby_cache(self, emby_query_params):
         """Return True when the local cache can satisfy the requested filters."""
         if not emby_query_params:
@@ -2003,7 +2043,7 @@ class Emby(Library):
         # forces 12+ batched HTTP calls (250 IDs each) — pure waste.
         # Only bypass cache if Ids is set AND we don't have the native list yet.
         if emby_query_params.get("Ids"):
-            if not self._emby_all_items_native:
+            if self._cached_native_items() is None:
                 return False
             # Otherwise let _filter_emby_native_items handle it
 
@@ -2943,9 +2983,9 @@ class Emby(Library):
 
         items = None
         if self._can_use_emby_cache(emby_query_params):
-            if not self._emby_all_items_native:
-                self.get_all_native(builder_level=None)
-            native_source = self._emby_all_items_native or []
+            native_source = self._cached_native_items()
+            if native_source is None:
+                native_source = self.get_all_native(builder_level=None)
             filtered_items = self._filter_emby_native_items(list(native_source), emby_query_params)
             if filtered_items is not None:
                 items = filtered_items
@@ -3047,16 +3087,8 @@ class Emby(Library):
         Returns:
             list: A list of all items.
         """
-        # print(builder_level)
-        # if not native and load and builder_level in [None, "show", "artist", "movie"]:
-        #     self._emby_all_items = []
-        #     self._emby_all_items_native = []
         if builder_level:
             builder_level = builder_level.lower()
-        if not native and self._emby_all_items and builder_level in [None, "show", "artist", "movie"]:
-            return self._emby_all_items
-        if native and self._emby_all_items_native and builder_level in [None, "show", "artist", "movie"]:
-            return self._emby_all_items_native
 
         # builder_type = builder_level.lower() if builder_level else self.Plex.TYPE
 
@@ -3079,19 +3111,19 @@ class Emby(Library):
         elif builder_type == "artist":
             include_item_types = ["MusicArtist"]
 
-        items_data = self.EmbyServer.get_items(
-            params={"ParentId": self.Emby.get("Id")},
-            fields="Budget,Chapters,DateCreated,EndDate,Genres,HomePageUrl,IndexOptions,MediaStreams,Overview,ParentId,Path,People,ProductionYear,PremiereDate,ProviderIds,PrimaryImageAspectRatio,Revenue,SortName,Studios,Taglines,CriticRating,CommunityRating,OfficialRating,Tags,TagItems",
-            include_item_types=include_item_types,
-            getAll=True
-        ) or []
+        fields = list(self.EmbyServer.ITEM_CACHE_FIELDS)
+        items_data = self.EmbyServer.get_library_items_cached(
+            self.Emby.get("Id"),
+            include_item_types,
+            fields,
+            builder_type,
+            force_manifest=bool(load),
+        )
 
         self.EmbyServer.cache_filenames(items_data)
         self.EmbyServer.get_resolutions()
 
-        self.EmbyServer.update_cache_with_items(items_data)
         logger.info(f"Loaded {len(items_data)} {display_level}s from Emby")
-        self._emby_all_items_native = items_data
         if native:
             return items_data
         plex_items= self.EmbyServer.convert_emby_to_plex(items_data)
@@ -3102,14 +3134,26 @@ class Emby(Library):
             if str(item.ratingKey) in path_map and path_map[str(item.ratingKey)]:
                 item.locations = [path_map[str(item.ratingKey)]]
 
-        # if builder_level in [None, "show", "artist", "movie"]:
-        self._emby_all_items = plex_items
         return plex_items
 
     def get_all_collections(self, label=None):
-
         lib_id = self.Emby.get("Id")
-        return self.EmbyServer.get_boxsets_from_library(library_id = lib_id, label=label, native=True)
+        native_collections = self.EmbyServer.get_library_items_cached(
+            lib_id,
+            ["BoxSet"],
+            self.EmbyServer.ITEM_CACHE_FIELDS,
+            "collections",
+        )
+        if label:
+            label_lower = str(label).lower()
+            native_collections = [
+                item for item in native_collections
+                if label_lower in {
+                    str(tag.get("Name") if isinstance(tag, dict) else tag).lower()
+                    for tag in (item.get("TagItems") or item.get("Tags") or [])
+                }
+            ]
+        return self.EmbyServer.convert_emby_to_plex(native_collections, use_native_emby=True)
 
     def get_actor_id(self, name):
 
@@ -3123,7 +3167,7 @@ class Emby(Library):
     def fetch_item(self, item):
         if isinstance(item, (Movie, Show, Season, Episode, Artist, Album, Track)):
             return self.reload(item)
-        key = int(item)
+        key = str(item)
         if key in self.cached_items:
             return self.reload(self.cached_items[key][0])
         try:
@@ -3136,6 +3180,19 @@ class Emby(Library):
 
     def get_all_native(self, builder_level=None, load = False):
         return self.get_all(builder_level, load, native=True)
+
+    def refresh_item_cache(self):
+        """Refresh the Config-owned Emby manifest and rebuild this library's object view."""
+        central_cache = getattr(self.EmbyServer, "_central_cache", None)
+        if central_cache is not None:
+            central_cache.invalidate_library_views(
+                self.EmbyServer.cache_server_key,
+                self.Emby.get("Id"),
+            )
+        self.cached_items.clear()
+        self.filter_items_cache.clear()
+        self._search_choices_cache.clear()
+        return self.cache_items()
 
     def get_native_item(self, item_id):
         return self.EmbyServer.get_item(item_id)
@@ -3257,8 +3314,12 @@ class Emby(Library):
 
 
     def reload(self, item, force=False):
-        # For Emby, items are already fresh from the server when fetched
-        # No special reload needed like in Plex
+        if force and getattr(item, "ratingKey", None) is not None:
+            native_item = self.EmbyServer.get_item(item.ratingKey, force_refresh=True)
+            if native_item:
+                refreshed = self.EmbyServer.convert_emby_to_plex([native_item])
+                if refreshed:
+                    return refreshed[0]
         return item
     def upload_poster(self, item, image, url=""):
         if url:

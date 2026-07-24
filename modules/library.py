@@ -695,8 +695,13 @@ class Library(ABC):
         logger.info(f"Processed {len(items)} {self.type}s")
 
     def validate_image_size(self, image):
-        if image.compare < MAX_IMAGE_SIZE:
+        # ``compare`` is a cache fingerprint (path:size:mtime for local
+        # images), not the byte size. Emby uses this base implementation,
+        # so comparing it to an integer raises TypeError for every local
+        # collection image.
+        image_size = os.path.getsize(image.location)
+        if image_size < MAX_IMAGE_SIZE:
             return True
         else:
-            logger.error(f"Image too large: {image.location}, bytes {image.compare}, MAX {MAX_IMAGE_SIZE}")
+            logger.error(f"Image too large: {image.location}, bytes {image_size}, MAX {MAX_IMAGE_SIZE}")
             return False

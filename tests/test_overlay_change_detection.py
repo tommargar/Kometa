@@ -15,12 +15,14 @@ The actual change-detection comparisons in overlays.py are pure dict logic;
 these tests verify the cache layer produces the right state for those comparisons.
 """
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
 from modules import cache as cache_module
 from modules.cache import Cache
+from modules.overlays import Overlays
 
 
 @pytest.fixture
@@ -39,6 +41,34 @@ def test_overlay_poster_table_uses_its_two_column_cache_api(cache):
     poster_table = f"{table_name}_overlays"
     cache.update_overlay_poster(5173, poster_table, "poster.jpg", "12345")
     assert cache.query_overlay_poster(5173, poster_table) == ("poster.jpg", "12345")
+
+
+def test_text_change_detection_reads_master_overlay_value_cache(cache):
+    cache.update_overlay_value_cache(False, 5173, "audience_rating", 8.0)
+    engine = Overlays.__new__(Overlays)
+    engine.cache = cache
+    engine.library = SimpleNamespace(mc_type="plex", EmbyServer=None)
+    item = SimpleNamespace(ratingKey=5173, audienceRating=8.0)
+    properties = {
+        "Rating": SimpleNamespace(
+            mapping_name="Rating",
+            name="text(<<audience_rating>>)",
+            updated=False,
+            level="movie",
+        )
+    }
+
+    result = engine.get_overlay_change_reason(
+        item,
+        ["Rating"],
+        properties,
+        {"Rating": ("hash", None)},
+        {"Rating": "hash"},
+        True,
+        cache.query_overlay_value_cache_all(5173),
+    )
+
+    assert result == ""
 
 
 # ── Helpers that mirror what overlays.py does each run ────────────────────────

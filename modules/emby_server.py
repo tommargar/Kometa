@@ -188,6 +188,15 @@ class Person:
 class EmbyServer:
 
     CUSTOM_RATING_PROVIDER = "CustomRating"
+    ITEM_CACHE_FIELDS = (
+        "Budget", "Chapters", "DateCreated", "EndDate", "Genres", "HomePageUrl",
+        "IndexOptions", "MediaStreams", "Overview", "ParentId", "Path", "People",
+        "ProductionYear", "PremiereDate", "ProviderIds", "LockedFields",
+        "PrimaryImageAspectRatio", "Revenue", "SortName", "Studios", "Taglines",
+        "CriticRating", "CommunityRating", "OfficialRating", "Tags", "TagItems",
+        "RunTimeTicks", "ProductionLocations", "MediaSources", "OriginalTitle",
+        "ImageTags", "BackdropImageTags", "Etag",
+    )
 
     def __init__(self, server_url, user_id, api_key, config, library_name = None):
 
@@ -279,13 +288,35 @@ class EmbyServer:
                     # print(s)
                     break
 
+        self._central_cache = getattr(config, "EmbyCache", None)
+        self.cache_server_key = None
+        if self._central_cache is not None:
+            server_id = self.system_info.get("Id") or self.system_info.get("ServerId")
+            self.cache_server_key = self._central_cache.server_key(self.emby_server_url, server_id)
+            central_state = self._central_cache.bind_server(self.cache_server_key)
+            self._items_cache = central_state["items"]
+            self._items_cache_fields = central_state["fields"]
+            self._items_cache_ts = central_state["timestamps"]
+            self.item_cache = self._items_cache
+            self.cached_plex_objects = central_state["converted"]
+            self.dirty_items = central_state["dirty"]
+            self.cached_person_names = central_state["cached_person_names"]
+            self._person_name_cache = central_state["person_name_cache"]
+            self._bulk_person_cache = central_state["bulk_person_cache"]
+            self.people_index = central_state["people_index"]
+            self.cached_tmdb_ids = central_state["cached_tmdb_ids"]
+            self._roman_name_cache = central_state["roman_name_cache"]
+            self.people_cache = central_state["people_cache"]
+            self.people_lib_cache = central_state["people_lib_cache"]
+            self._person_name_fix_cache = central_state["person_name_fix_cache"]
+
         # self.get_resolutions()
 
 
     def _get_false_friend_names(self) -> set[str]:
         if self._false_friend_names is None:
             try:
-                self._false_friend_names = self.config.Cache.query_false_friend_names()
+                self._false_friend_names = self._central_cache.query_false_friend_names(self.cache_server_key)
             except Exception:
                 self._false_friend_names = set()
         return self._false_friend_names
@@ -296,7 +327,7 @@ class EmbyServer:
             return
         inserted = False
         try:
-            inserted = self.config.Cache.add_false_friend_name(nm)
+            inserted = self._central_cache.add_false_friend_name(self.cache_server_key, nm)
         except Exception:
             inserted = False
         if inserted:
@@ -563,6 +594,8 @@ class EmbyServer:
 
         # Use cached items to determine resolution from MediaStreams if available
         for item_id, item_data in self._items_cache.items():
+            if self.file_names and item_id not in self.file_names:
+                continue
             res_found = False
             # Try to find resolution in MediaStreams (More accurate)
             media_streams = item_data.get("MediaStreams", [])
@@ -1391,6 +1424,15 @@ class EmbyServer:
         Manually pushes a list of items into the cache.
         Useful when items are fetched via bulk queries (e.g. get_all).
         """
+        if getattr(self, "_central_cache", None) is not None and getattr(self, "cache_server_key", None) is not None:
+            self._central_cache.upsert_items(self.cache_server_key, items)
+            for it in items:
+                try:
+                    self.dirty_items.discard(int(it.get("Id")))
+                except (TypeError, ValueError):
+                    pass
+            return
+
         now = time.time()
         for it in items:
             it_id = str(it.get("Id") or "")
@@ -1414,6 +1456,10 @@ class EmbyServer:
 
     def invalidate_item(self, item_id: int | str) -> None:
         """Von außen aufrufen, wenn du ein Item (z.B. Genres) geändert hast."""
+
+        if getattr(self, "_central_cache", None) is not None and getattr(self, "cache_server_key", None) is not None:
+            self._central_cache.invalidate_item(self.cache_server_key, item_id)
+            return
 
         # Für Konsistenz sowohl int- als auch str-Repräsentationen behandeln.
         item_id_str = str(item_id)
@@ -1453,35 +1499,23 @@ class EmbyServer:
         cached_item = self.item_cache.get(item_id_str)
         
         if not force_refresh and not is_dirty and cached_item:
-            # Optional: Check TTL here if desired, currently assuming cache is valid unless dirty/forced
+            # Cache entries are published only after a successful Etag-manifest sync
+            # or a direct item refresh.
             return cached_item
 
         # Include all important fields explicitly - Emby's default response does NOT
         # include ProviderIds, LockedFields, etc. without explicit Fields parameter.
         # This was causing CustomRating from ProviderIds to be missing after refreshes,
         # leading to ratings not being visible in overlays during the same run.
-        fields = (
-            "Budget,Chapters,DateCreated,Genres,HomePageUrl,IndexOptions,MediaStreams,"
-            "Overview,ParentId,Path,People,ProductionYear,PremiereDate,ProviderIds,LockedFields,"
-            "PrimaryImageAspectRatio,Revenue,SortName,Studios,Taglines,CriticRating,"
-            "CommunityRating,OfficialRating,Tags,TagItems,RunTimeTicks,ProductionLocations,"
-            "MediaSources,OriginalTitle"
+        fields = ",".join(self.ITEM_CACHE_FIELDS)
+        endpoint = (
+            f"/emby/users/{self.user_id}/Items/{item_id_str}"
+            f"?api_key={self.api_key}&Fields={fields}&EnableUserData=false"
         )
-        endpoint = f"/emby/users/{self.user_id}/Items/{item_id_str}?api_key={self.api_key}&Fields={fields}"
         url = self.emby_server_url + endpoint
 
-        headers = self.headers.copy()
-        # Don't use Etag if force_refresh or item is dirty - we need actual fresh data
-        if cached_item and "Etag" in cached_item and not force_refresh and not is_dirty:
-            headers["If-None-Match"] = cached_item["Etag"]
-
         try:
-            resp = self.session.get(url, headers=headers)
-
-            if resp.status_code == 304:
-                self._items_cache_ts[item_id_str] = time.time()
-                self.dirty_items.discard(item_id_int)
-                return cached_item
+            resp = self.session.get(url, headers=self.headers)
 
             resp.raise_for_status()
             data = resp.json()
@@ -1491,9 +1525,8 @@ class EmbyServer:
             return data
         except Exception as e:
             logger.warning(f"Emby get_item({item_id_str}) failed/timed out: {e}")
-            # Return cached version if we have one, so the item can still be processed
-            # with stale data instead of being skipped entirely.
-            return cached_item if cached_item else None
+            # A forced/dirty read must never masquerade stale data as current.
+            return None if force_refresh or is_dirty else cached_item
 
     def get_item_images(self, item_id) -> dict:
         endpoint = f"/emby/Items/{item_id}/Images?api_key={self.api_key}"
@@ -1594,6 +1627,7 @@ class EmbyServer:
         if response.status_code != 204:
             logger.error(f"Error refreshing item {item_id}, response: {response}")
             return False
+        self.invalidate_item(item_id)
         return True
 
     def custom_encode(self, params):
@@ -1807,6 +1841,145 @@ class EmbyServer:
                 raise Failed(f"Invalid Limit value: {query_params['Limit']}")
         return filtered_results
 
+    def get_library_items_cached(
+            self,
+            library_id,
+            include_item_types,
+            fields,
+            view_key,
+            *,
+            force_manifest=False,
+    ):
+        """Synchronize a complete Emby library view against the central Etag cache."""
+        if getattr(self, "_central_cache", None) is None or not getattr(self, "cache_server_key", None):
+            items = self.get_items(
+                params={"ParentId": library_id, "EnableUserData": "false"},
+                fields=",".join(fields) if isinstance(fields, (list, tuple, set)) else fields,
+                include_item_types=include_item_types,
+                getAll=True,
+            ) or []
+            self.update_cache_with_items(items)
+            return items
+
+        cached_view = self._central_cache.library_view(
+            self.cache_server_key,
+            library_id,
+            view_key,
+        )
+        if cached_view is not None and not force_manifest:
+            return cached_view
+        previous_ids = {
+            str(item.get("Id"))
+            for item in cached_view or []
+            if isinstance(item, dict) and item.get("Id")
+        }
+
+        manifest = self.get_items(
+            params={
+                "ParentId": library_id,
+                "EnableUserData": "false",
+                "EnableImages": "false",
+            },
+            fields="Etag",
+            include_item_types=include_item_types,
+            getAll=True,
+        ) or []
+        manifest_by_id = {
+            str(item.get("Id")): item
+            for item in manifest
+            if isinstance(item, dict) and item.get("Id")
+        }
+        manifest_ids = list(manifest_by_id)
+        self._central_cache.hydrate(self.cache_server_key, manifest_ids)
+
+        if isinstance(fields, str):
+            required_fields = {field.strip() for field in fields.split(",") if field.strip()}
+        else:
+            required_fields = {str(field).strip() for field in fields or [] if str(field).strip()}
+        required_fields.add("Etag")
+
+        to_fetch = []
+        for item_id, manifest_item in manifest_by_id.items():
+            record = self._central_cache.item_record(self.cache_server_key, item_id)
+            manifest_etag = manifest_item.get("Etag")
+            if (
+                    record is None
+                    or not manifest_etag
+                    or record.get("etag") != manifest_etag
+                    or not required_fields.issubset(record.get("fields") or set())
+            ):
+                to_fetch.append(item_id)
+
+        fetched_items = {}
+        if to_fetch:
+            logger.info(
+                f"Emby Etag Sync: {len(manifest_ids)} current, "
+                f"{len(to_fetch)} new/changed/incomplete"
+            )
+            fetched_items = self.get_items_bulk(
+                to_fetch,
+                fields=sorted(required_fields),
+                force_refresh=True,
+                publish=False,
+            )
+        else:
+            logger.info(f"Emby Etag Sync: {len(manifest_ids)} current, no item payload changes")
+
+        synchronized_items = []
+        invalid_items = []
+        for item_id in manifest_ids:
+            fetched_item = fetched_items.get(item_id)
+            if fetched_item is not None:
+                record = {
+                    "etag": fetched_item.get("Etag"),
+                    "fields": set(required_fields) | set(fetched_item),
+                    "data": fetched_item,
+                }
+            else:
+                record = self._central_cache.item_record(self.cache_server_key, item_id)
+            manifest_etag = manifest_by_id[item_id].get("Etag")
+            if (
+                    record is None
+                    or not manifest_etag
+                    or record.get("etag") != manifest_etag
+                    or not required_fields.issubset(record.get("fields") or set())
+            ):
+                invalid_items.append(item_id)
+            else:
+                synchronized_items.append(record["data"])
+
+        if invalid_items:
+            preview = ", ".join(invalid_items[:10])
+            raise Failed(
+                f"Emby Cache Error: {len(invalid_items)} item payloads could not be synchronized "
+                f"with the current Etag manifest ({preview}{'...' if len(invalid_items) > 10 else ''})"
+            )
+
+        committed_items = self._central_cache.commit_library_snapshot(
+            self.cache_server_key,
+            library_id,
+            view_key,
+            synchronized_items,
+            declared_fields=required_fields,
+        )
+        for item_id in to_fetch:
+            try:
+                self.dirty_items.discard(int(item_id))
+            except (TypeError, ValueError):
+                pass
+        if to_fetch or previous_ids != set(manifest_ids):
+            self.file_names = {}
+            self._file_names_fetch_attempted = False
+            self.media_by_resolution = {}
+            self.production_countries = None
+            self.production_search = {}
+            self.emby_genres = None
+            self.studio_list = None
+            self._season_years_cache = None
+            if view_key == "collections":
+                self.invalidate_collection_cache()
+        return committed_items
+
     def get_seasons(self, series_id):
         return self.get_items(params={"ParentId": series_id}, include_item_types=["Season"])
 
@@ -1903,6 +2076,7 @@ class EmbyServer:
             )
 
             if response.status_code == 204:
+                self.invalidate_item(item_id)
                 return True
             else:
                 # logger.error(f"Error setting image for item {item_id}, response: {response}")
@@ -1965,6 +2139,7 @@ class EmbyServer:
             )
 
             if response.status_code == 204:
+                self.invalidate_item(item_id)
                 return True
             else:
                 logger.error(f"Error uploading image for item {item_id}, response: {response} - {response.text}")
@@ -2274,6 +2449,7 @@ class EmbyServer:
         my_= str(item)
         try:
             response = self.session.post(update_item_url, json=item)
+            response.raise_for_status()
             # print(
             #     f"Updated item {item_id} with {data}. Waiting {self.seconds_between_requests} seconds."
             # )
@@ -2330,6 +2506,7 @@ class EmbyServer:
 
         logger.exorcise()
         logger.info(f"Finished '{operation}' with {len(item_ids)} items in {collection_name}")
+        self.invalidate_item(collection_id)
 
         return affected_count
 
@@ -2382,6 +2559,7 @@ class EmbyServer:
 
         logger.exorcise()
         logger.info(f"Finished '{operation}' with {len(item_ids)} items in {collection_name}")
+        self.invalidate_item(collection_id)
 
         return affected_count
 
@@ -2743,19 +2921,31 @@ class EmbyServer:
 
     def _collect_cached_items_for_library(self, library_id: str = "") -> list[dict]:
         library_filter = str(library_id) if library_id else None
+        allowed_ids = None
+        if (
+                library_filter
+                and getattr(self, "_central_cache", None) is not None
+                and getattr(self, "cache_server_key", None)
+        ):
+            allowed_ids = self._central_cache.library_item_ids(
+                self.cache_server_key,
+                library_filter,
+            )
         merged: dict[str, dict] = {}
 
         def _merge_item(item: dict | None, fallback_key: str | None) -> None:
             if not isinstance(item, dict):
                 return
 
-            if library_filter:
+            if library_filter and allowed_ids is None:
                 lib_value = item.get("LibraryId") or item.get("ParentId") or ""
                 if str(lib_value) != library_filter:
                     return
 
             item_id = item.get("Id") or fallback_key
             if item_id in (None, ""):
+                return
+            if allowed_ids is not None and str(item_id) not in allowed_ids:
                 return
 
             key = str(item_id)
@@ -2869,8 +3059,15 @@ class EmbyServer:
             return sorted(studios)
 
         # 2) Aggregiert aus Cache (optional nach Library gefiltert)
+        allowed_ids = (
+            self._central_cache.library_item_ids(self.cache_server_key, library_id)
+            if library_id and getattr(self, "_central_cache", None) is not None
+            else None
+        )
         for it in self.item_cache.values():
-            if library_id and str(it.get("LibraryId") or it.get("ParentId") or "") != str(library_id):
+            if allowed_ids is not None and str(it.get("Id")) not in allowed_ids:
+                continue
+            if allowed_ids is None and library_id and str(it.get("LibraryId") or it.get("ParentId") or "") != str(library_id):
                 continue
             for s in self._studios_from_item_cached(it):
                 # TODO: Unicode-Trennung siehe oben:
@@ -2923,8 +3120,15 @@ class EmbyServer:
             return sorted(nets)
 
         # 2) Aggregiert aus Cache (optional nach Library gefiltert)
+        allowed_ids = (
+            self._central_cache.library_item_ids(self.cache_server_key, library_id)
+            if library_id and getattr(self, "_central_cache", None) is not None
+            else None
+        )
         for it in self.item_cache.values():
-            if library_id and str(it.get("LibraryId") or it.get("ParentId") or "") != str(library_id):
+            if allowed_ids is not None and str(it.get("Id")) not in allowed_ids:
+                continue
+            if allowed_ids is None and library_id and str(it.get("LibraryId") or it.get("ParentId") or "") != str(library_id):
                 continue
             for n in self._studios_from_item_cached(it):
                 # TODO: Unicode-Trennung aktivieren, wenn du echte Networks separierst:
@@ -2962,9 +3166,16 @@ class EmbyServer:
         """
         if not self.studio_list:
             studios = set()
+            allowed_ids = (
+                self._central_cache.library_item_ids(self.cache_server_key, self.library_id)
+                if self.library_id and getattr(self, "_central_cache", None) is not None
+                else None
+            )
             # 1) Aus Cache
             for it in self.item_cache.values():
-                if str(it.get("LibraryId") or it.get("ParentId") or "") != str(self.library_id):
+                if allowed_ids is not None and str(it.get("Id")) not in allowed_ids:
+                    continue
+                if allowed_ids is None and str(it.get("LibraryId") or it.get("ParentId") or "") != str(self.library_id):
                     continue
                 for s in self._studios_from_item_cached(it):
                     # Hinweis: Hier KEINE Trennung – dies sind „Studios“,
@@ -3463,11 +3674,12 @@ class EmbyServer:
                 cached_id = None
             if cached_id:
                 canonical_hints[tid_int] = str(cached_id)
-        if self.config and getattr(self.config, "Cache", None):
+        if self._central_cache is not None:
             try:
-                cached_map, _, _ = self.config.Cache.query_tmdb_person_map_bulk(
+                cached_map, _, _ = self._central_cache.query_tmdb_person_map_bulk(
+                    self.cache_server_key,
                     norm_ids,
-                    getattr(self.config.Cache, "expiration", 30)
+                    self._central_cache.persistent_cache.expiration,
                 )
                 for tid, rec in (cached_map or {}).items():
                     emby_id = rec.get("emby_id") if isinstance(rec, dict) else None
@@ -3566,11 +3778,12 @@ class EmbyServer:
 
                     # Persistentes Mapping (gewollt hart abbrechen auf Fehler)
                     try:
-                        self.config.Cache.update_tmdb_person_map(
+                        self._central_cache.update_tmdb_person_map(
+                            self.cache_server_key,
                             expired=False,
                             tmdb_id=int(tid),
                             emby_id=str(chosen),
-                            expiration=self.config.Cache.expiration
+                            expiration=self._central_cache.persistent_cache.expiration,
                         )
                     except Exception:
                         raise Failed
@@ -3820,10 +4033,11 @@ class EmbyServer:
         tmdb_ids = [int(t) for t in tmdb_ids if str(t).isdigit()]
 
         # --- 1) DB-Cache vorwärmen: emby_id + alias ---
-        db_map, db_missing, db_expired = (
-            self.config.Cache.query_tmdb_person_map_bulk(tmdb_ids, 3)
-            if self.config and self.config.Cache else ({}, set(tmdb_ids), set())
-        )
+        db_map, db_missing, db_expired = self._central_cache.query_tmdb_person_map_bulk(
+            self.cache_server_key,
+            tmdb_ids,
+            3,
+        ) if self._central_cache is not None else ({}, set(tmdb_ids), set())
         # for tid, rec in db_map.items():
         #     l = rec.get("emby_id")
         #     if l and tid not in self.cached_tmdb_ids.keys() and tid not in db_expired:
@@ -3888,9 +4102,13 @@ class EmbyServer:
             for tid in stale:
                 self.cached_tmdb_ids.pop(tid, None)
                 try:
-                    if self.config and self.config.Cache:
-                        self.config.Cache.update_tmdb_person_map(
-                            expired=True, tmdb_id=int(tid), emby_id=None, expiration=self.config.Cache.expiration
+                    if self._central_cache is not None:
+                        self._central_cache.update_tmdb_person_map(
+                            self.cache_server_key,
+                            expired=True,
+                            tmdb_id=int(tid),
+                            emby_id=None,
+                            expiration=self._central_cache.persistent_cache.expiration,
                         )
                 except Exception:
                     pass
@@ -4146,7 +4364,14 @@ class EmbyServer:
 
     # ==== Bulk-Fetch: /emby/Items?Ids=...&Fields=... ====
     # ==== Bulk-Fetch: /emby/Items?Ids=...&Fields=... ====
-    def get_items_bulk(self, ids: list[str], fields: list[str] | None = None, *, force_refresh: bool = False) -> dict[str, dict]:
+    def get_items_bulk(
+            self,
+            ids: list[str],
+            fields: list[str] | None = None,
+            *,
+            force_refresh: bool = False,
+            publish: bool = True,
+    ) -> dict[str, dict]:
         """
         Holt Emby-Items in Batches (Ids=...), gibt dict[id] -> item zurück.
         Nutzt einen lokalen Cache, lädt nur fehlende/abgelaufene/unvollständige Einträge nach.
@@ -4232,26 +4457,48 @@ class EmbyServer:
                             logger.warning(f"Emby bulk batch failed: {e}")
 
             now_fetch = time.time()
-            for it in all_fetched:
-                it_id = str(it.get("Id") or "")
-                if not it_id:
-                    continue
+            if (
+                    publish
+                    and getattr(self, "_central_cache", None) is not None
+                    and getattr(self, "cache_server_key", None)
+            ):
+                records = self._central_cache.upsert_items(
+                    self.cache_server_key,
+                    all_fetched,
+                    declared_fields=req_fields_set,
+                )
+                for it_id, record in records.items():
+                    out[it_id] = record["data"]
+                    try:
+                        self.dirty_items.discard(int(it_id))
+                    except (TypeError, ValueError):
+                        pass
+            elif publish:
+                for it in all_fetched:
+                    it_id = str(it.get("Id") or "")
+                    if not it_id:
+                        continue
 
-                # Bestehendes Cache-Objekt erweitern/überschreiben (merge)
-                if it_id in self._items_cache:
-                    self._items_cache[it_id].update(it)
-                    self._items_cache_fields[it_id] |= req_fields_set
-                else:
-                    self._items_cache[it_id] = it
-                    self._items_cache_fields[it_id] = set(req_fields_set)
+                    # Bestehendes Cache-Objekt erweitern/überschreiben (merge)
+                    if it_id in self._items_cache:
+                        self._items_cache[it_id].update(it)
+                        self._items_cache_fields[it_id] |= req_fields_set
+                    else:
+                        self._items_cache[it_id] = it
+                        self._items_cache_fields[it_id] = set(req_fields_set)
 
-                self._items_cache_ts[it_id] = now_fetch
-                out[it_id] = self._items_cache[it_id]
+                    self._items_cache_ts[it_id] = now_fetch
+                    out[it_id] = self._items_cache[it_id]
 
-                try:
-                    self.dirty_items.discard(int(it_id))
-                except (TypeError, ValueError):
-                    pass
+                    try:
+                        self.dirty_items.discard(int(it_id))
+                    except (TypeError, ValueError):
+                        pass
+            else:
+                for it in all_fetched:
+                    it_id = str(it.get("Id") or "")
+                    if it_id:
+                        out[it_id] = it
 
         return out
 
@@ -5150,9 +5397,15 @@ class EmbyServer:
                 # provider sofort an die Person hängen
                 if tmdb:
                     self._attach_tmdb_to_person(emby_existing or emby_existing_dupe, int(tmdb))
-                    if self.config.Cache:
-                        self.config.Cache.update_tmdb_person_map(False, int(tmdb), emby_id=emby_existing or emby_existing_dupe,
-                                                          name=nm_clean, alias=None,
-                                                          expiration=self.config.Cache.expiration)
+                    if self._central_cache is not None:
+                        self._central_cache.update_tmdb_person_map(
+                            self.cache_server_key,
+                            False,
+                            int(tmdb),
+                            emby_id=emby_existing or emby_existing_dupe,
+                            name=nm_clean,
+                            alias=None,
+                            expiration=self._central_cache.persistent_cache.expiration,
+                        )
                 changed = True
         return changed

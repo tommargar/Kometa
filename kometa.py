@@ -609,6 +609,8 @@ def start(attrs):
             # Close cache connection to clean up WAL/SHM files
             if config.Cache:
                 config.Cache.close()
+            if config.EmbyCache:
+                config.EmbyCache.close()
         version_line = f"Version: {my_requests.local}"
         if my_requests.newest:
             version_line = f"{version_line}        Newest Version: {my_requests.newest}"

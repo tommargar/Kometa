@@ -243,7 +243,7 @@ class TVDbObj:
         if expired or not data:
             item_url = f"{urls['movie_id' if is_movie else 'series_id']}{tvdb_id}"
             try:
-                data = self._tvdb.get_request(item_url)
+                data = self._tvdb.get_movie_request(item_url) if is_movie else self._tvdb.get_request(item_url)
             except NotFound:
                 raise NotFound(f"TVDb Error: No {'Movie' if is_movie else 'Series'} found for TVDb ID: {tvdb_id} at {item_url}")
             except Unavailable:
@@ -311,11 +311,16 @@ class TVDb:
         self.expiration = expiration
 
     def get_tvdb_obj(self, tvdb_url, is_movie=False):
-        tvdb_id, _, _ = self.get_id_from_url(tvdb_url, is_movie=is_movie)
+        try:
+            # A numeric value is already a TVDb ID. Resolving it through the
+            # movie dereferrer first bypasses the object cache and adds an
+            # unnecessary HTTP request for every movie.
+            tvdb_id = int(tvdb_url)
+        except (TypeError, ValueError):
+            tvdb_id, _, _ = self.get_id_from_url(tvdb_url, is_movie=is_movie)
         return TVDbObj(self, tvdb_id, is_movie=is_movie)
 
-    @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type(Failed), retry_error_callback=_tvdb_retry_exhausted)
-    def get_request(self, tvdb_url):
+    def _request(self, tvdb_url):
         response = self.requests.get(tvdb_url, language=self.language)
         if response.status_code >= 400:
             # 4xx = definitive "gone" (NotFound); 5xx = transient (TVDbServerError, retried by tenacity)
@@ -323,6 +328,15 @@ class TVDb:
                 raise NotFound(f"({response.status_code}) {response.reason}")
             raise TVDbServerError(f"({response.status_code}) {response.reason}")
         return html.fromstring(response.content)
+
+    @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type(Failed), retry_error_callback=_tvdb_retry_exhausted)
+    def get_request(self, tvdb_url):
+        return self._request(tvdb_url)
+
+    @retry(stop=stop_after_attempt(2), wait=wait_fixed(0.25), retry=retry_if_not_exception_type(Failed), retry_error_callback=_tvdb_retry_exhausted)
+    def get_movie_request(self, tvdb_url):
+        """Fetch movie metadata without imposing a 50-second per-item retry delay."""
+        return self._request(tvdb_url)
 
     def get_id_from_url(self, tvdb_url, is_movie=False, ignore_cache=False):
         try:
@@ -347,6 +361,8 @@ class TVDb:
         logger.trace(f"URL: {tvdb_url}")
         try:
             response = self.get_request(tvdb_url)
+        except Unavailable:
+            raise
         except (ParserError, Failed, TVDbServerError):
             raise Failed(f"TVDb Error: Failed not parse {tvdb_url}")
         results = response.xpath(f"//*[text()='TheTVDB.com {media_type} ID']/parent::node()/span/text()")

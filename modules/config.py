@@ -7,6 +7,7 @@ from modules.anidb import AniDB
 from modules.anilist import AniList
 from modules.apprise_notify import AppriseNotify
 from modules.cache import Cache
+from modules.emby_cache import EmbyCacheCoordinator, EmbyCacheDatabase
 from modules.convert import Convert
 from modules.emby import Emby
 from modules.ergast import Ergast
@@ -899,6 +900,7 @@ class ConfigFile:
             self.Cache = Cache(self.config_path, self.general["cache_expiration"])
         else:
             self.Cache = None
+        self.EmbyCache = EmbyCacheCoordinator(EmbyCacheDatabase(self.default_dir, self.general["cache_expiration"]))
 
         self.GitHub = GitHub(self.Requests, {"token": check_for_attribute(self.data, "token", parent="github", default_is_none=True)})
 

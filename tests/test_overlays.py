@@ -73,6 +73,30 @@ class TestGetOverlayItems:
         result = o.get_overlay_items()
         assert result == []
 
+    def test_emby_items_use_central_etag_view(self):
+        server = MagicMock()
+        server.library_id = "library-1"
+        server.ITEM_CACHE_FIELDS = ("Etag", "ImageTags")
+        server.get_library_items_cached.return_value = [
+            {"Id": "10", "Etag": "etag-1"},
+            {"Id": "20", "Etag": "etag-2"},
+        ]
+        library = MagicMock()
+        library.mc_type = "emby"
+        library.EmbyServer = server
+        library.Emby = {"Id": "library-1"}
+        o = make_overlays(library=library)
+
+        result = o.get_overlay_items(libtype="episode", ignore=["20"])
+
+        assert result == ["10"]
+        server.get_library_items_cached.assert_called_once_with(
+            "library-1",
+            ["Episode"],
+            ("Etag", "ImageTags"),
+            "overlay_episode",
+        )
+
 
 class TestRemoveOverlay:
     @pytest.fixture

@@ -50,17 +50,33 @@ class Overlays:
         logger.info("")
         os.makedirs(self.library.overlay_backup, exist_ok=True)
 
+        if self.library.is_emby and not self.library.remove_overlays:
+            logger.info("Synchronizing Emby Etag cache before overlay evaluation")
+            self.library.refresh_item_cache()
+
         key_to_overlays = {}
         properties = {}
         pre_warmed_ids: set = set()
         if not self.library.remove_overlays:
             emby_server = getattr(self.library, "EmbyServer", None)
             if emby_server and emby_server.dirty_items:
-                dirty_list = list(emby_server.dirty_items)
-                pre_warmed_ids = set(emby_server.dirty_items)
-                logger.info("")
-                logger.separator(f"Refreshing {len(dirty_list)} Dirty Items for the {self.library.name} Library")
-                logger.info("")
+                allowed_ids = (
+                    emby_server._central_cache.library_item_ids(
+                        emby_server.cache_server_key,
+                        self.library.Emby.get("Id"),
+                    )
+                    if getattr(emby_server, "_central_cache", None) is not None
+                    else None
+                )
+                dirty_list = [
+                    item_id for item_id in emby_server.dirty_items
+                    if allowed_ids is None or str(item_id) in allowed_ids
+                ]
+                pre_warmed_ids = set(dirty_list)
+                if dirty_list:
+                    logger.info("")
+                    logger.separator(f"Refreshing {len(dirty_list)} Dirty Items for the {self.library.name} Library")
+                    logger.info("")
                 # Pop stale plex objects up front (set ops are cheap)
                 for item_id in dirty_list:
                     emby_server.cached_plex_objects.pop(str(item_id), None)
@@ -70,22 +86,23 @@ class Overlays:
                         pass
                 # Parallel pre-warm: hundreds of force_refresh get_item calls,
                 # serial = 100ms+ each = 30s+ for big runs. Threaded keeps it snappy.
-                from concurrent.futures import ThreadPoolExecutor, as_completed
-                emby_server._ensure_http_session()  # avoid race
-                max_workers = min(8, max(1, len(dirty_list)))
-                done_count = 0
-                with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="overlay-prewarm") as pool:
-                    futures = {pool.submit(emby_server.get_item, item_id, force_refresh=True): item_id for item_id in dirty_list}
-                    for fut in as_completed(futures):
-                        done_count += 1
-                        logger.ghost(f"Refreshing {done_count}/{len(dirty_list)} Item ID: {futures[fut]}")
-                if hasattr(self.library, "Plex") and self.library.Plex:
-                    logger.info(f"Refreshing library cache after {len(emby_server.dirty_items)} item updates")
-                    try:
-                        self.library.Plex.reload()
-                    except Exception as e:
-                        logger.warning(f"Overlay Warning: Failed to reload Plex library cache: {e}")
-                logger.info("")
+                if dirty_list:
+                    from concurrent.futures import ThreadPoolExecutor, as_completed
+                    emby_server._ensure_http_session()  # avoid race
+                    max_workers = min(8, len(dirty_list))
+                    done_count = 0
+                    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="overlay-prewarm") as pool:
+                        futures = {pool.submit(emby_server.get_item, item_id, force_refresh=True): item_id for item_id in dirty_list}
+                        for fut in as_completed(futures):
+                            done_count += 1
+                            logger.ghost(f"Refreshing {done_count}/{len(dirty_list)} Item ID: {futures[fut]}")
+                    if hasattr(self.library, "Plex") and self.library.Plex:
+                        logger.info(f"Refreshing library cache after {len(dirty_list)} item updates")
+                        try:
+                            self.library.Plex.reload()
+                        except Exception as e:
+                            logger.warning(f"Overlay Warning: Failed to reload Plex library cache: {e}")
+                    logger.info("")
             key_to_overlays, properties = self.compile_overlays()
         ignore_list = [rk for rk in key_to_overlays]
 
@@ -180,7 +197,7 @@ class Overlays:
                     else:
                         has_overlay = any([item_tag.tag.lower() == "overlay" for item_tag in self.library.item_labels(item)])
 
-                    special_text_cache = self.cache.query_overlay_special_text(item.ratingKey) if self.cache else {}
+                    special_text_cache = self.cache.query_overlay_value_cache_all(item.ratingKey) if self.cache else {}
                     current_hashes = {properties[ov].mapping_name: properties[ov].get_overlay_compare() for ov in over_names}
                     overlay_change = self.get_overlay_change_reason(item, over_names, properties, cached_state, current_hashes, has_overlay, special_text_cache)
 
@@ -426,9 +443,9 @@ class Overlays:
 
                                             if format_var == "versions":
                                                 actual_value = len(actual_value)
-                                        if self.cache:
+                                        if self.cache and (format_var not in overlay.rating_sources or self.library.mc_type == "emby"):
                                             cache_store = actual_value.strftime("%Y-%m-%d") if format_var in overlay.date_vars else actual_value
-                                            self.cache.update_overlay_special_text(item.ratingKey, format_var, cache_store)
+                                            self.cache.update_overlay_value_cache(False, item.ratingKey, format_var, cache_store)
 
                                         sub_value = None
                                         if format_var == "originally_available":
@@ -603,9 +620,6 @@ class Overlays:
         overlay_run_time = str(datetime.now() - overlay_start).split(".")[0]
         logger.info("")
         logger.separator(f"Finished {self.library.name} Library Overlays\nOverlays Run Time: {overlay_run_time}")
-        # Clear dirty_items after overlay run so subsequent operations start fresh
-        if hasattr(self.library, "EmbyServer") and hasattr(self.library.EmbyServer, "dirty_items"):
-            self.library.EmbyServer.dirty_items.clear()
         return overlay_run_time
 
     def get_overlay_change_reason(self, item, over_names, properties, cached_state, current_hashes, has_overlay, special_text_cache):
@@ -859,9 +873,25 @@ class Overlays:
     def get_overlay_items(self, label="Overlay", libtype=None, ignore=None):
         if getattr(self.library, "mc_type", None) == "emby":
             if libtype:
-                emby_items = self.library.EmbyServer.get_items(include_item_types=[libtype], params={"ParentId": self.library.EmbyServer.library_id, "Recursive": "True"})
+                normalized_type = {
+                    "show": "Series",
+                    "series": "Series",
+                    "movie": "Movie",
+                    "season": "Season",
+                    "episode": "Episode",
+                }.get(str(libtype).lower(), str(libtype))
+                include_types = [normalized_type]
             else:
-                emby_items = self.library.EmbyServer.get_items(params={"ParentId": self.library.EmbyServer.library_id, "Recursive": "True"}, include_item_types=["Series,Movie,Season,Episode"])
+                include_types = ["Series", "Movie", "Season", "Episode"]
+            view_key = f"overlay_{str(libtype).lower() if libtype else 'all'}"
+            emby_items = self.library.EmbyServer.get_library_items_cached(
+                self.library.EmbyServer.library_id,
+                include_types,
+                self.library.EmbyServer.ITEM_CACHE_FIELDS,
+                view_key,
+            )
+            self.library.EmbyServer.cache_filenames(emby_items)
+            self.library.EmbyServer.get_resolutions()
             all_emby_ids = [item.get("Id") for item in emby_items]
             all_emby_ids = all_emby_ids if not ignore else [o for o in all_emby_ids if o not in ignore]
             return all_emby_ids
