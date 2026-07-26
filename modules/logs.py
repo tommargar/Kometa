@@ -103,9 +103,20 @@ class MyLogger:
         _handler.namer = log_namer
         self._formatter(handler=_handler)
         if os.path.isfile(log_file):
-            self._logger.removeHandler(_handler)
-            _handler.doRollover()
-            self._logger.addHandler(_handler)
+            try:
+                _handler.doRollover()
+            except PermissionError as error:
+                # Windows does not allow renaming a log file while another
+                # Kometa process still has it open. Keep both processes
+                # operational and, importantly, do not reopen in ``w`` mode
+                # because that would truncate the active log.
+                _handler.close()
+                _handler = RotatingFileHandler(log_file, delay=True, mode="a", backupCount=count, encoding="utf-8")
+                _handler.namer = log_namer
+                self._formatter(handler=_handler)
+                self._logger.warning(
+                    f"Log rollover skipped because the file is in use; appending to {log_file}: {error}"
+                )
         return _handler
 
     def _formatter(self, handler=None, border=True, trace=False, log_only=False, space=False):
@@ -261,14 +272,25 @@ class MyLogger:
             try:
                 print(self._space(f"| {text}"), end="\r")
             except UnicodeEncodeError:
-                text = text.encode("utf-8")
-                print(self._space(f"| {text}"), end="\r")
-            self.spacing = len(text) + 2
+                try:
+                    text = text.encode("utf-8")
+                    print(self._space(f"| {text}"), end="\r")
+                except OSError:
+                    self.ignore_ghost = True
+            except OSError:
+                # Progress output is cosmetic. A detached or closed Windows
+                # console handle must never abort the actual Kometa run.
+                self.ignore_ghost = True
+            self.spacing = 0 if self.ignore_ghost else len(text) + 2
 
     def exorcise(self):
         if not self.ignore_ghost:
-            print(self._space(" "), end="\r")
-            self.spacing = 0
+            try:
+                print(self._space(" "), end="\r")
+            except OSError:
+                self.ignore_ghost = True
+            finally:
+                self.spacing = 0
 
     def secret(self, text):
         if not text:

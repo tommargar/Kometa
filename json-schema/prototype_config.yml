@@ -132,6 +132,8 @@ libraries:
       - 2.0
       split_duplicates: false
       assets_for_all: false
+      mass_cast_and_crew_update: false
+      movie_cast_source: tmdb
       genre_mapper:
         Anime: Animation
         Children: Family
@@ -277,6 +279,7 @@ libraries:
     operations:
       split_duplicates: false
       assets_for_all: false
+      mass_cast_and_crew_update: false
 
   TV Shows:                                         # Must match a library name in your Plex
     report_path: config/missing/TV_missing.yml
@@ -387,6 +390,7 @@ libraries:
     operations:
       split_duplicates: false
       assets_for_all: false
+      mass_cast_and_crew_update: false
       delete_collections:
         managed: false
         configured: true
@@ -471,6 +475,11 @@ tmdb:                            # REQUIRED for the script to run
   apikey: Enter TMDb API Key
   language: en
   cache_expiration: 60
+tvdb:                            # Required for Cast & Crew updates on show libraries
+  apikey: Enter TVDb API Key
+  pin:
+  cache_expiration: 60
+  language: eng
 tautulli:                        # Can be individually specified per library as well
   url: http://192.168.1.12:8181
   apikey: Enter Tautulli API Key

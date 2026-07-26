@@ -65,6 +65,7 @@
         operations:
           split_duplicates: false
           assets_for_all: false
+          mass_cast_and_crew_update: false
     
       TV Shows:                                         # Must match a library name in your Plex
         report_path: config/missing/TV_missing.yml
@@ -135,6 +136,7 @@
         operations:
           split_duplicates: false
           assets_for_all: false
+          mass_cast_and_crew_update: false
     playlist_files:
       - default: playlist
         template_variables:

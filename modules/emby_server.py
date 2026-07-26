@@ -17,6 +17,7 @@ logger = util.logger
 
 # import emby_client
 import unicodedata
+
 # from emby_client.rest import ApiException
 
 # bugs: razzie + berlinale year no poster
@@ -29,6 +30,7 @@ import unicodedata
 # https://dev.emby.media/doc/restapi/Browsing-the-Library.html
 # https://docs.mdblist.com/docs/api
 
+
 class Movie(Movie):
     def __init__(self, data):
         xml_data = self._dict_to_xml(data)
@@ -37,14 +39,15 @@ class Movie(Movie):
 
     @staticmethod
     def _dict_to_xml(data_dict):
-        element = Element('Video')
+        element = Element("Video")
         for key, value in data_dict.items():
             if value is not None:
                 element.set(key, str(value))
-        if 'agent' not in data_dict or not data_dict['agent']:
-            element.set('agent', 'com.plexapp.agents.imdb')  # Oder den entsprechenden Agenten
+        if "agent" not in data_dict or not data_dict["agent"]:
+            element.set("agent", "com.plexapp.agents.imdb")  # Oder den entsprechenden Agenten
 
         return element
+
 
 class FilterChoiceEmby:
     def __init__(self, key, title, thumb=None):
@@ -59,69 +62,68 @@ class Show(Show):
         super().__init__(None, xml_data)
         self._loadData(xml_data)
 
-
     @staticmethod
     def _dict_to_xml(data_dict):
-        element = Element('Directory')
+        element = Element("Directory")
         for key, value in data_dict.items():
             if value is not None:
                 element.set(key, str(value))
-        if 'agent' not in data_dict or not data_dict['agent']:
-            element.set('agent', 'com.plexapp.agents.thetvdb')  # Oder den entsprechenden Agenten
+        if "agent" not in data_dict or not data_dict["agent"]:
+            element.set("agent", "com.plexapp.agents.thetvdb")  # Oder den entsprechenden Agenten
 
         return element
 
 
 class Season(Season):
     def __init__(self, data):
-        self._series_id = data.get('seriesId')
-        self._series_name = data.get('parentTitle', '')
+        self._series_id = data.get("seriesId")
+        self._series_name = data.get("parentTitle", "")
         xml_data = self._dict_to_xml(data)
         super().__init__(None, xml_data)
         self._loadData(xml_data)
 
     def show(self):
         show_data = {
-            'ratingKey': self._series_id or self.ratingKey,
-            'title': self._series_name,
-            'titleSort': self._series_name,
-            'guid': self._series_id or self.ratingKey,
-            'type': 'series',
+            "ratingKey": self._series_id or self.ratingKey,
+            "title": self._series_name,
+            "titleSort": self._series_name,
+            "guid": self._series_id or self.ratingKey,
+            "type": "series",
         }
         return Show(show_data)
 
     @staticmethod
     def _dict_to_xml(data_dict):
-        element = Element('Directory')
+        element = Element("Directory")
         for key, value in data_dict.items():
             if value is not None:
                 element.set(key, str(value))
-        if 'agent' not in data_dict or not data_dict['agent']:
-            element.set('agent', 'com.plexapp.agents.thetvdb')
+        if "agent" not in data_dict or not data_dict["agent"]:
+            element.set("agent", "com.plexapp.agents.thetvdb")
         return element
 
 
 class Episode(Episode):
     def __init__(self, data):
-        self._series_id = data.get('seriesId')
-        self._series_name = data.get('seriesName') or data.get('grandparentTitle', '')
+        self._series_id = data.get("seriesId")
+        self._series_name = data.get("seriesName") or data.get("grandparentTitle", "")
         xml_data = self._dict_to_xml(data)
         super().__init__(None, xml_data)
         self._loadData(xml_data)
 
     def show(self):
         show_data = {
-            'ratingKey': self._series_id or self.ratingKey,
-            'title': self._series_name,
-            'titleSort': self._series_name,
-            'guid': self._series_id or self.ratingKey,
-            'type': 'series',
+            "ratingKey": self._series_id or self.ratingKey,
+            "title": self._series_name,
+            "titleSort": self._series_name,
+            "guid": self._series_id or self.ratingKey,
+            "type": "series",
         }
         return Show(show_data)
 
     @staticmethod
     def _dict_to_xml(data_dict):
-        element = Element('Video')
+        element = Element("Video")
         for key, value in data_dict.items():
             if value is not None:
                 element.set(key, str(value))
@@ -141,17 +143,16 @@ class Collection(Collection):
         return len(self.items())
 
     def items(self):
-        """ Returns a list of all items in the collection. """
+        """Returns a list of all items in the collection."""
         return self._items
 
     @staticmethod
     def _dict_to_xml(data_dict):
-        element = Element('Directory')
+        element = Element("Directory")
         for key, value in data_dict.items():
             if value is not None:
                 element.set(key, str(value))
         return element
-
 
 
 class Audio:
@@ -163,7 +164,7 @@ class Audio:
 
     @staticmethod
     def _dict_to_xml(data_dict):
-        element = Element('Audio')
+        element = Element("Audio")
         for key, value in data_dict.items():
             if value is not None:
                 element.set(key, str(value))
@@ -176,29 +177,57 @@ class Person:
     Does NOT inherit from PlexAPI Movie to avoid isinstance(person, Movie) being True,
     which would cause person objects to be processed as movies throughout builder/operations.
     """
+
     def __init__(self, data):
-        self.ratingKey = data.get('ratingKey')
-        self.title = data.get('title', '')
-        self.titleSort = data.get('titleSort') or self.title
-        self.guid = data.get('guid', self.ratingKey)
-        self.year = data.get('year')
-        self.type = 'person'
-        self.thumb = data.get('posterUrl', '')
+        self.ratingKey = data.get("ratingKey")
+        self.title = data.get("title", "")
+        self.titleSort = data.get("titleSort") or self.title
+        self.guid = data.get("guid", self.ratingKey)
+        self.year = data.get("year")
+        self.type = "person"
+        self.thumb = data.get("posterUrl", "")
+
 
 class EmbyServer:
 
     CUSTOM_RATING_PROVIDER = "CustomRating"
     ITEM_CACHE_FIELDS = (
-        "Budget", "Chapters", "DateCreated", "EndDate", "Genres", "HomePageUrl",
-        "IndexOptions", "MediaStreams", "Overview", "ParentId", "Path", "People",
-        "ProductionYear", "PremiereDate", "ProviderIds", "LockedFields",
-        "PrimaryImageAspectRatio", "Revenue", "SortName", "Studios", "Taglines",
-        "CriticRating", "CommunityRating", "OfficialRating", "Tags", "TagItems",
-        "RunTimeTicks", "ProductionLocations", "MediaSources", "OriginalTitle",
-        "ImageTags", "BackdropImageTags", "Etag",
+        "Budget",
+        "Chapters",
+        "DateCreated",
+        "EndDate",
+        "Genres",
+        "HomePageUrl",
+        "IndexOptions",
+        "MediaStreams",
+        "Overview",
+        "ParentId",
+        "Path",
+        "People",
+        "ProductionYear",
+        "PremiereDate",
+        "ProviderIds",
+        "LockedFields",
+        "PrimaryImageAspectRatio",
+        "Revenue",
+        "SortName",
+        "Studios",
+        "Taglines",
+        "CriticRating",
+        "CommunityRating",
+        "OfficialRating",
+        "Tags",
+        "TagItems",
+        "RunTimeTicks",
+        "ProductionLocations",
+        "MediaSources",
+        "OriginalTitle",
+        "ImageTags",
+        "BackdropImageTags",
+        "Etag",
     )
 
-    def __init__(self, server_url, user_id, api_key, config, library_name = None):
+    def __init__(self, server_url, user_id, api_key, config, library_name=None):
 
         self._person_already_demoted = []
         self._items_cache: dict[str, dict] = {}
@@ -213,7 +242,7 @@ class EmbyServer:
         self._person_name_cache = {}
         self._bulk_person_cache = {}
         self.people_index = {}
-        self.platformVersion = "" # - undefined??
+        self.platformVersion = ""  # - undefined??
         self._person_dupe_redirect_last = {}
         self._person_dupes_last = {}
         self._person_dupes_choice_last = {}
@@ -238,7 +267,7 @@ class EmbyServer:
         self._file_names_fetch_attempted = False
         self._false_friend_names: set[str] | None = None
 
-        self.studio_list =None
+        self.studio_list = None
         self.media_by_resolution = {}
         self.production_countries = None
         self._person_name_fix_cache = set()
@@ -269,22 +298,15 @@ class EmbyServer:
             if user_id not in known_ids:
                 match = next((u for u in users if u.get("Name") == user_id), None)
                 if match:
-                    logger.warning(
-                        f"Emby user_id '{user_id}' is a username, not a User ID. "
-                        f"Automatically resolved to ID '{match['Id']}'. "
-                        f"Please update your config.yml to use the ID directly."
-                    )
+                    logger.warning(f"Emby user_id '{user_id}' is a username, not a User ID. " f"Automatically resolved to ID '{match['Id']}'. " f"Please update your config.yml to use the ID directly.")
                     self.user_id = match["Id"]
                 else:
-                    logger.warning(
-                        f"Emby user_id '{user_id}' was not found in the list of Emby users. "
-                        f"Available users: {[u.get('Name') for u in users]}"
-                    )
+                    logger.warning(f"Emby user_id '{user_id}' was not found in the list of Emby users. " f"Available users: {[u.get('Name') for u in users]}")
 
         if library_name:
             for s in self.get_libraries():
                 if s["Name"] == library_name:
-                    self.library_id = s['Id']
+                    self.library_id = s["Id"]
                     # print(s)
                     break
 
@@ -311,7 +333,6 @@ class EmbyServer:
             self._person_name_fix_cache = central_state["person_name_fix_cache"]
 
         # self.get_resolutions()
-
 
     def _get_false_friend_names(self) -> set[str]:
         if self._false_friend_names is None:
@@ -426,7 +447,7 @@ class EmbyServer:
         - linked_bool True, wenn wir im Person-Objekt eine fehlende ProviderId ergänzen mussten
           (nur intern markiert; hier KEIN Update-POST – das machst du weiterhin wo du willst).
         """
-        prov = (provider or "Tmdb")
+        prov = provider or "Tmdb"
         tmdb_id_str = str(tmdb_id)
         buckets = people_index.get(role) or {}
         by_tmdb = buckets.get("by_tmdb", {})
@@ -466,8 +487,7 @@ class EmbyServer:
             return f"{n} (Actor: {p['Role']})"
         return f"{n} ({t})" if t else n
 
-    def summarize_people_changes(self, current_people: list[dict], desired_people: list[dict],
-                                 reorder_preview_max: int = 6) -> str:
+    def summarize_people_changes(self, current_people: list[dict], desired_people: list[dict], reorder_preview_max: int = 6) -> str:
         """Schöner Klartext-Diff für Cast & Crew (inkl. Order-Check)."""
         cur_map = {self._pkey(p): p for p in current_people if p.get("Id") and p.get("Type")}
         des_map = {self._pkey(p): p for p in desired_people if p.get("Id") and p.get("Type")}
@@ -482,7 +502,7 @@ class EmbyServer:
         # Updates (Name/Role)
         updates = []
         for k in set(cur_map.keys()).intersection(des_map.keys()):
-            cur = cur_map[k];
+            cur = cur_map[k]
             des = des_map[k]
             if (cur.get("Name") or "") != (des.get("Name") or ""):
                 updates.append(f"Name: {cur.get('Name') or '?'} → {des.get('Name') or '?'} ({des.get('Type')})")
@@ -518,7 +538,6 @@ class EmbyServer:
 
         return " | ".join(parts) if parts else "no changes"
 
-
     def get_years(self, library_id: str):
         endpoint = f"/emby/Years?Recursive=True&ParentId={library_id}&api_key={self.api_key}"
         url = self.emby_server_url + endpoint
@@ -530,7 +549,6 @@ class EmbyServer:
         url = self.emby_server_url + endpoint
         response = self.session.get(url, headers=self.headers)
         return response.json().get("Items", [])
-
 
     # TODO: Check if we can use MediaStreams from cache instead of filenames for better accuracy
     def get_resolutions(self):
@@ -605,20 +623,25 @@ class EmbyServer:
                     h = stream.get("Height")
                     if w and h:
                         res = None
-                        if w >= 3800 or h >= 2100: res = "4k"
-                        elif w >= 1900 or h >= 1000: res = "1080p"
-                        elif w >= 1200 or h >= 700: res = "720p"
-                        elif w >= 700 or h >= 480: res = "480p"
-                        else: res = "sd" # 480p/576p bucket
-                        
+                        if w >= 3800 or h >= 2100:
+                            res = "4k"
+                        elif w >= 1900 or h >= 1000:
+                            res = "1080p"
+                        elif w >= 1200 or h >= 700:
+                            res = "720p"
+                        elif w >= 700 or h >= 480:
+                            res = "480p"
+                        else:
+                            res = "sd"  # 480p/576p bucket
+
                         if res:
                             self.media_by_resolution.setdefault(res, []).append(item_id)
                             if res not in found_canonical_keys:
                                 all_choices.append(FilterChoiceEmby(key=res, title=res))
                                 found_canonical_keys.add(res)
                             res_found = True
-                    break # Only check first video stream
-            
+                    break  # Only check first video stream
+
             # Fallback to filename regex if no MediaStream info
             if not res_found and item_id in self.file_names:
                 file_name = self.file_names[item_id]
@@ -643,12 +666,12 @@ class EmbyServer:
         for item in imported_items:
             # item_media_sources = item.get('MediaSources')
             # item_media_path = item.get('Path')
-            self.file_names[item.get('Id')] = os.path.basename(item.get('Path'))
+            self.file_names[item.get("Id")] = os.path.basename(item.get("Path"))
 
-            self.cached_studios[item.get('Id')] = item.get('Studios')
-            self.cached_people[item.get('Id')] = item.get('People')
-            self.cached_locations[item.get('Id')] = item.get('ProductionLocations')  # Meet english
-            self.cached_runtime[item.get('Id')] = item.get('RunTimeTicks')
+            self.cached_studios[item.get("Id")] = item.get("Studios")
+            self.cached_people[item.get("Id")] = item.get("People")
+            self.cached_locations[item.get("Id")] = item.get("ProductionLocations")  # Meet english
+            self.cached_runtime[item.get("Id")] = item.get("RunTimeTicks")
         return
         if not self.library_id:
             return
@@ -659,7 +682,7 @@ class EmbyServer:
                 "IncludeItemTypes": "Movie,Series,Episodes",
                 "ParentId": self.library_id,
                 "api_key": self.api_key,
-                "Fields": "Budget,Chapters,DateCreated,Genres,HomePageUrl,IndexOptions,MediaStreams,Overview,ParentId,Path,People,ProviderIds,PrimaryImageAspectRatio,Revenue,SortName,Studios,Taglines"
+                "Fields": "Budget,Chapters,DateCreated,Genres,HomePageUrl,IndexOptions,MediaStreams,Overview,ParentId,Path,People,ProviderIds,PrimaryImageAspectRatio,Revenue,SortName,Studios,Taglines",
             }
             try:
                 response = requests.get(endpoint, headers=self.headers, params=params)
@@ -669,12 +692,12 @@ class EmbyServer:
                 for item in items:
                     # item_media_sources = item.get('MediaSources')
                     # item_media_path = item.get('Path')
-                    self.file_names[item.get('Id')] = item.get('Path')
-                    self.cached_studios[item.get('Id')] = item.get('Studios')
-                    self.cached_people[item.get('Id')] = item.get('People')
-                    self.cached_locations[item.get('Id')] = item.get('ProductionLocations') # Meet english
-                    self.cached_runtime[item.get('Id')] = item.get('RunTimeTicks')
-                    self.cached_provider_ids[item.get('Id')] = item.get('ProviderIds')
+                    self.file_names[item.get("Id")] = item.get("Path")
+                    self.cached_studios[item.get("Id")] = item.get("Studios")
+                    self.cached_people[item.get("Id")] = item.get("People")
+                    self.cached_locations[item.get("Id")] = item.get("ProductionLocations")  # Meet english
+                    self.cached_runtime[item.get("Id")] = item.get("RunTimeTicks")
+                    self.cached_provider_ids[item.get("Id")] = item.get("ProviderIds")
                     # if _re.search('1080', item_media_path):
                     #     print(the_search)
                     #     print(item_media_path)
@@ -701,15 +724,9 @@ class EmbyServer:
         """
         if self.production_countries:
             return self.production_countries
-        self.production_countries=[]
+        self.production_countries = []
         endpoint = f"{self.emby_server_url}/emby/Items"
-        params = {
-            "Recursive": "true",
-            "IncludeItemTypes": "Movie,Series,MusicArtist",
-            "ParentId": library_id,
-            "Fields": "ProductionLocations",
-            "api_key": self.api_key
-        }
+        params = {"Recursive": "true", "IncludeItemTypes": "Movie,Series,MusicArtist", "ParentId": library_id, "Fields": "ProductionLocations", "api_key": self.api_key}
         try:
             response = self.session.get(endpoint, headers=self.headers, params=params)
             response.raise_for_status()
@@ -718,7 +735,7 @@ class EmbyServer:
             # Collect all IDs for batch year lookup
             self.production_countries += [item["ProductionLocations"] for item in items if "ProductionLocations" in item]
             for item in items:
-                self.production_search[item.get('Id')] = item.get('ProductionLocations', [])
+                self.production_search[item.get("Id")] = item.get("ProductionLocations", [])
             # Flache die Liste ab und entferne Duplikate mit Set-Comprehension
             unique_countries = {country for sublist in self.production_countries for country in sublist}
 
@@ -737,13 +754,13 @@ class EmbyServer:
         """
         if self.emby_genres:
             return self.emby_genres
-        self.emby_genres=[]
+        self.emby_genres = []
         endpoint = f"{self.emby_server_url}/emby/Genres"
         params = {
             "Recursive": "true",
             # "IncludeItemTypes": "Movie,Series,MusicArtist",
             "ParentId": library_id,
-            "api_key": self.api_key
+            "api_key": self.api_key,
         }
         try:
             response = self.session.get(endpoint, headers=self.headers, params=params)
@@ -769,9 +786,7 @@ class EmbyServer:
             response = self.session.get(url, headers=self.headers)
             return response.json()
         except Exception as e:
-            logger.error(
-                f"Error occurred while getting Emby system info, check your configuration. Check your Emby url and port, user ID and API key: {e}"
-            )
+            logger.error(f"Error occurred while getting Emby system info, check your configuration. Check your Emby url and port, user ID and API key: {e}")
             raise SystemExit
 
     def get_users(self):
@@ -797,7 +812,7 @@ class EmbyServer:
         response_name.raise_for_status()
         data_name = response_name.json()
 
-    #added
+    # added
     def get_actor_id(self, name):
         """
         Get the actor ID from Emby based on the actor's name.
@@ -809,11 +824,7 @@ class EmbyServer:
         search_url = self.emby_server_url + search_endpoint
 
         # Search parameters for Emby
-        params = {
-            "SearchTerm": name,
-            "IncludePeople": "true",
-            "Recursive": "true"
-        }
+        params = {"SearchTerm": name, "IncludePeople": "true", "Recursive": "true"}
 
         try:
             # Perform the GET request to search for the actor
@@ -822,7 +833,7 @@ class EmbyServer:
 
             # Parse the response JSON
             search_results = response.json()
-            for result in search_results.get('Items', []):
+            for result in search_results.get("Items", []):
                 # Check if the result is a person and matches the name
                 if result.get("Type") == "Person" and result.get("Name") == name:
                     # print(f"get_actor_id: {name} - {result.get('Id')}")
@@ -836,9 +847,10 @@ class EmbyServer:
         except requests.exceptions.RequestException as e:
             logger.error(f"Error occurred while searching for actor: {e}")
             return None
-    #added
 
-    def findItems(self, cls=None, initpath=None, parent_id=None,builder_type=None, **kwargs):
+    # added
+
+    def findItems(self, cls=None, initpath=None, parent_id=None, builder_type=None, **kwargs):
         """
         Find and build all items from the Emby library that match specified criteria.
 
@@ -852,14 +864,14 @@ class EmbyServer:
         """
         # Initial path to begin search, if specified, otherwise search all items
         if parent_id:
-            items = self.get_items(params={"ParentId": parent_id},include_item_types = [f"{builder_type.capitalize()}"] )
+            items = self.get_items(params={"ParentId": parent_id}, include_item_types=[f"{builder_type.capitalize()}"])
         else:
             # print(initpath)
             items = self.get_items()
 
         # If `cls` is specified, filter items by type (e.g., 'Movie', 'Series')
-        if cls and hasattr(cls, 'TYPE'):
-            items = [item for item in items if item.get('Type') == cls.TYPE]
+        if cls and hasattr(cls, "TYPE"):
+            items = [item for item in items if item.get("Type") == cls.TYPE]
 
         # Apply any additional filters specified in kwargs
         filtered_items = []
@@ -868,11 +880,8 @@ class EmbyServer:
             if match:
                 filtered_items.append(item)
 
-
         return self.convert_emby_to_plex(filtered_items)
         # Build list of EmbyCollection instances
-
-
 
     def get_items_starting_with_sort_name(self, filter, limit=20):
         """
@@ -921,21 +930,12 @@ class EmbyServer:
         if item_types is None:
             item_types = ["Movie", "Series"]
         else:
-            item_types = [
-                (
-                    "Series"
-                    if item_type.lower() in ["tv", "show"]
-                    else "Movie" if item_type.lower() == "movie" else item_type
-                )
-                for item_type in item_types
-            ]
+            item_types = [("Series" if item_type.lower() in ["tv", "show"] else "Movie" if item_type.lower() == "movie" else item_type) for item_type in item_types]
 
         for i in range(0, len(imdb_ids), batch_size):
             batch_imdb_ids = imdb_ids[i : i + batch_size]
             # Remove any ids from batch_imdb_ids that are None
-            batch_imdb_ids = [
-                imdb_id for imdb_id in batch_imdb_ids if imdb_id is not None
-            ]
+            batch_imdb_ids = [imdb_id for imdb_id in batch_imdb_ids if imdb_id is not None]
             if not batch_imdb_ids:
                 continue
             imdb_ids_str = ",".join(["imdb." + imdb_id for imdb_id in batch_imdb_ids])
@@ -1000,47 +1000,61 @@ class EmbyServer:
         """
         Setzt die Tags eines Items.
         """
-        return self.__update_item(item_id, {
-            "Tags": tags,
-            "TagItems": tags
-        }
-                                  )
+        return self.__update_item(item_id, {"Tags": tags, "TagItems": tags})
+
     def set_genres(self, item_id, tags: list):
         """
         Setzt die Tags eines Items.
         """
-        return self.__update_item(item_id, {
-            "Genres": tags,
-            "GenreItems": tags
-        }
-                                  )
-
-
-
+        return self.__update_item(item_id, {"Genres": tags, "GenreItems": tags})
 
     def is_in_filtertype(self, tag, libtype):
-        """ Returns a :class:`~plexapi.library.FilteringType` for a specified libtype.
+        """Returns a :class:`~plexapi.library.FilteringType` for a specified libtype.
 
-            Parameters:
-                libtype (str, optional): The library type to filter (movie, show, season, episode,
-                    artist, album, track, photoalbum, photo, collection).
+        Parameters:
+            libtype (str, optional): The library type to filter (movie, show, season, episode,
+                artist, album, track, photoalbum, photo, collection).
 
-            Raises:
-                :exc:`~plexapi.exceptions.NotFound`: Unknown libtype for this library.
+        Raises:
+            :exc:`~plexapi.exceptions.NotFound`: Unknown libtype for this library.
         """
 
-        #lib type show:
+        # lib type show:
         # ['genre', 'year', 'contentRating', 'studio', 'network', 'country', 'collection', 'director', 'actor', 'writer', 'producer', 'unwatchedLeaves', 'unmatched', 'label']
 
         # lib type movie:
         # ['genre', 'year', 'decade', 'contentRating', 'collection', 'director', 'actor', 'writer', 'producer', 'country', 'studio', 'resolution', 'hdr', 'unwatched', 'inProgress', 'unmatched', 'audioLanguage', 'subtitleLanguage', 'editionTitle', 'label', 'duplicate']
 
-        #lib type movie
+        # lib type movie
         my_list = []
         if libtype == "show":
-            my_list = ['genre', 'year', 'contentRating', 'studio', 'network', 'country', 'collection', 'director', 'actor', 'writer', 'producer', 'unwatchedLeaves', 'unmatched', 'label', 'show.label', 'show.studio']
+            my_list = ["genre", "year", "contentRating", "studio", "network", "country", "collection", "director", "actor", "writer", "producer", "unwatchedLeaves", "unmatched", "label", "show.label", "show.studio"]
         else:
-            my_list = ['genre', 'year', 'decade', 'contentRating', 'collection', 'director', 'actor', 'writer', 'producer', 'composer', 'country', 'studio', 'resolution', 'hdr', 'hlg', 'unwatched', 'inProgress', 'unmatched', 'audioLanguage', 'subtitleLanguage', 'editionTitle', 'label', 'duplicate']
+            my_list = [
+                "genre",
+                "year",
+                "decade",
+                "contentRating",
+                "collection",
+                "director",
+                "actor",
+                "writer",
+                "producer",
+                "composer",
+                "country",
+                "studio",
+                "resolution",
+                "hdr",
+                "hlg",
+                "unwatched",
+                "inProgress",
+                "unmatched",
+                "audioLanguage",
+                "subtitleLanguage",
+                "editionTitle",
+                "label",
+                "duplicate",
+            ]
 
         return tag in my_list
 
@@ -1049,10 +1063,8 @@ class EmbyServer:
         except StopIteration:
             availableLibtypes = [f.type for f in self.filterTypes()]
             from plexapi.exceptions import NotFound
-            raise NotFound(f'Unknown libtype "{libtype}" for this library. '
-                           f'Available libtypes: {availableLibtypes}') from None
 
-
+            raise NotFound(f'Unknown libtype "{libtype}" for this library. ' f"Available libtypes: {availableLibtypes}") from None
 
     def get_provider_ids(self, item):
 
@@ -1061,11 +1073,11 @@ class EmbyServer:
 
         normalized_prov_ids = {key.lower(): value for key, value in current_provider_ids.items()}
 
-        imdb = normalized_prov_ids.get("imdb",None)
-        tvdb = normalized_prov_ids.get("tvdb",None)
-        tmdb = normalized_prov_ids.get("tmdb",None)
+        imdb = normalized_prov_ids.get("imdb", None)
+        tvdb = normalized_prov_ids.get("tvdb", None)
+        tmdb = normalized_prov_ids.get("tmdb", None)
 
-        item_title = getattr(item, 'title', item)
+        item_title = getattr(item, "title", item)
         item_id = item.ratingKey
         is_show = emby_item.get("Type") == "Series" if emby_item else False
 
@@ -1098,7 +1110,6 @@ class EmbyServer:
         # item_type = "show" if emby_item.get('Type')=="Series" else "movie"
 
         return [imdb, tvdb, tmdb]
-
 
     def search(self, title=None, sort=None, maxresults=None, libtype=None, **kwargs):
         """
@@ -1137,7 +1148,7 @@ class EmbyServer:
                 "StartIndex": start_index,
                 "IncludeItemTypes": libtype,
                 "Tags": my_label,
-                "EnableImages": 'true',
+                "EnableImages": "true",
                 "api_key": self.api_key,
             }
             # Merge with any additional kwargs
@@ -1168,8 +1179,7 @@ class EmbyServer:
 
         return self.convert_emby_to_plex(all_results)
 
-
-    def get_boxsets_from_library(self, title=None, library_id= None, label = None, native = False) ->[Collection]:
+    def get_boxsets_from_library(self, title=None, library_id=None, label=None, native=False) -> [Collection]:
         """
         Retrieve all boxsets from the library with CollectionType 'boxsets'.
         Optionally, filter boxsets by a specific title.
@@ -1180,9 +1190,9 @@ class EmbyServer:
         Returns:
             list: A list of Plex-compatible boxset objects.
         """
-        search_title=""
-        search_tag=""
-        get_fields=f"&Fields=ParentId"
+        search_title = ""
+        search_tag = ""
+        get_fields = f"&Fields=ParentId"
         if title:
             search_title = f"&SearchTerm={urllib.parse.quote(title).replace('&', '%26')}"
         if label:
@@ -1198,14 +1208,13 @@ class EmbyServer:
         response = self.session.get(my_search)
         response.raise_for_status()
         title_response = response.json().get("Items", [])
-        
+
         my_return = list(title_response)
 
         plex_collections = self.convert_emby_to_plex(my_return, native)
         return plex_collections
 
-    def get_items_in_boxset(self, collection_id: str, include: str = "Movie,Series,Episode,MusicArtist",
-                            fields: str = "ProviderIds,ParentId,ProductionYear,People", native: bool = False):
+    def get_items_in_boxset(self, collection_id: str, include: str = "Movie,Series,Episode,MusicArtist", fields: str = "ProviderIds,ParentId,ProductionYear,People", native: bool = False):
         """
         Retrieves all items in a collection based on the provided collection ID in batches of 100 items.
 
@@ -1231,7 +1240,7 @@ class EmbyServer:
 
         while True:
             # Build the API endpoint with batching parameters
-            endpoint = (f"/emby/Items?ParentId={collection_id}&IncludeItemTypes={include}&Fields={fields}&StartIndex={start_index}&Limit={batch_size}&api_key={self.api_key}")
+            endpoint = f"/emby/Items?ParentId={collection_id}&IncludeItemTypes={include}&Fields={fields}&StartIndex={start_index}&Limit={batch_size}&api_key={self.api_key}"
             url = self.emby_server_url + endpoint
 
             try:
@@ -1281,13 +1290,11 @@ class EmbyServer:
         try:
             # item_ids = [str(item_id) for item_id in item_ids]
             # Format the collection name for the API
-            collection_name = collection_name.replace('+', '%2B').replace('&', '%26')
+            collection_name = collection_name.replace("+", "%2B").replace("&", "%26")
 
             # Create the collection with the first batch of items
             first_batch = item_ids[:100]  # Use the first 100 items for initial creation
-            response = self.session.post(
-                f"{self.emby_server_url}/Collections?api_key={self.api_key}&IsLocked=true&ParentId={parent_id}&Name={collection_name}&Ids={self.__ids_to_str(first_batch)}"
-            )
+            response = self.session.post(f"{self.emby_server_url}/Collections?api_key={self.api_key}&IsLocked=true&ParentId={parent_id}&Name={collection_name}&Ids={self.__ids_to_str(first_batch)}")
 
             if response.status_code != 200:
                 logger.error(f"create_collection: Error creating {collection_name}, response: {response.text}")
@@ -1295,21 +1302,18 @@ class EmbyServer:
 
             # Parse the response to get the collection ID
             data = response.json()
-            collection_id = data.get('Id')
+            collection_id = data.get("Id")
             logger.info(f"Successfully created collection {collection_name}")
 
             # Process remaining items in batches of 100
             batch_size = 100
             for i in range(batch_size, len(item_ids), batch_size):
-                batch = item_ids[i:i + batch_size]
+                batch = item_ids[i : i + batch_size]
                 # string_ids = ','.join(batch)
-                batch_response = self.session.post(
-                    f"{self.emby_server_url}/Collections/{collection_id}/Items?api_key={self.api_key}&Ids={self.__ids_to_str(batch)}"
-                )
+                batch_response = self.session.post(f"{self.emby_server_url}/Collections/{collection_id}/Items?api_key={self.api_key}&Ids={self.__ids_to_str(batch)}")
 
                 if batch_response.status_code != 204:
-                    logger.error(
-                        f"Error adding batch {i // batch_size + 1} to collection {collection_name}, response: {batch_response.text}")
+                    logger.error(f"Error adding batch {i // batch_size + 1} to collection {collection_name}, response: {batch_response.text}")
 
             # Lock the collection if specified
             if locked:
@@ -1342,8 +1346,6 @@ class EmbyServer:
         emby_query_params = {}
         unknown_params = {}
 
-
-
         if len(my_items) == 0:
             logger.info(f"No items found matching the criteria.")
             if not ignore_blank_results:
@@ -1355,6 +1357,7 @@ class EmbyServer:
             # Create collection with the found items
             return self.create_collection(title, item_ids, parent_id)
             print(f"Successfully created smart collection '{title}' with {len(item_ids)} items.")
+
     # Not tested and not working for collections.
     def delete_item(self, item_id) -> bool:
         """
@@ -1379,7 +1382,7 @@ class EmbyServer:
 
     @cached_property
     def library(self):
-        """ Library to browse or search your media. """
+        """Library to browse or search your media."""
         try:
             data = self.get_library_data(self.library_id)
         except Exception as e:
@@ -1392,7 +1395,7 @@ class EmbyServer:
         response = self.session.get(endpoint, headers=self.headers)
         response.raise_for_status()
         # ToDo: maybe add section as Fields
-        return response.json().get('Items', [])
+        return response.json().get("Items", [])
 
     def get_library_data(self, library_id):
         endpoint = f"{self.emby_server_url}/emby/Library/Sections/{library_id}"
@@ -1438,16 +1441,16 @@ class EmbyServer:
             it_id = str(it.get("Id") or "")
             if not it_id:
                 continue
-            
+
             keys = set(it.keys())
-            
+
             if it_id in self._items_cache:
                 self._items_cache[it_id].update(it)
                 self._items_cache_fields[it_id] |= keys
             else:
                 self._items_cache[it_id] = it
                 self._items_cache_fields[it_id] = keys
-            
+
             self._items_cache_ts[it_id] = now
             try:
                 self.dirty_items.discard(int(it_id))
@@ -1497,7 +1500,7 @@ class EmbyServer:
         # Check cache freshness
         is_dirty = item_id_int in self.dirty_items
         cached_item = self.item_cache.get(item_id_str)
-        
+
         if not force_refresh and not is_dirty and cached_item:
             # Cache entries are published only after a successful Etag-manifest sync
             # or a direct item refresh.
@@ -1508,10 +1511,7 @@ class EmbyServer:
         # This was causing CustomRating from ProviderIds to be missing after refreshes,
         # leading to ratings not being visible in overlays during the same run.
         fields = ",".join(self.ITEM_CACHE_FIELDS)
-        endpoint = (
-            f"/emby/users/{self.user_id}/Items/{item_id_str}"
-            f"?api_key={self.api_key}&Fields={fields}&EnableUserData=false"
-        )
+        endpoint = f"/emby/users/{self.user_id}/Items/{item_id_str}" f"?api_key={self.api_key}&Fields={fields}&EnableUserData=false"
         url = self.emby_server_url + endpoint
 
         try:
@@ -1519,6 +1519,10 @@ class EmbyServer:
 
             resp.raise_for_status()
             data = resp.json()
+            # Single user-item responses can expose representation-specific
+            # ETags (notably for Person items). Only list/bulk manifest ETags
+            # are published into the persistent cache.
+            data.pop("Etag", None)
             self.update_cache_with_items([data])
             self.cached_plex_objects.pop(item_id_str, None)
             self.cached_plex_objects.pop(item_id_int, None)
@@ -1527,6 +1531,71 @@ class EmbyServer:
             logger.warning(f"Emby get_item({item_id_str}) failed/timed out: {e}")
             # A forced/dirty read must never masquerade stale data as current.
             return None if force_refresh or is_dirty else cached_item
+
+    def get_items_direct_bulk(self, ids, fields=None, max_workers=1):
+        """Fetch complete user-item responses concurrently and publish once."""
+        self._ensure_http_session()
+        item_ids = sorted({str(item_id) for item_id in ids if str(item_id).isdigit()}, key=int)
+        if not item_ids:
+            return {}
+
+        fields_param = ",".join(fields or self.ITEM_CACHE_FIELDS)
+
+        def fetch(item_id):
+            endpoint = f"{self.emby_server_url}/emby/users/{self.user_id}/Items/{item_id}"
+            # Emby serializes this complete user-item endpoint internally.
+            # Parallel calls are dramatically slower and sharing self.session
+            # between them can leave every request established indefinitely.
+            # Keep one bounded independent connection in flight at a time.
+            with requests.get(
+                endpoint,
+                headers=self.headers,
+                params={
+                    "api_key": self.api_key,
+                    "Fields": fields_param,
+                    "EnableUserData": "false",
+                },
+                timeout=(10, 60),
+            ) as response:
+                response.raise_for_status()
+                item = response.json()
+            item.pop("Etag", None)
+            return item
+
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        fetched = []
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(item_ids)), thread_name_prefix="emby-direct") as pool:
+            futures = {pool.submit(fetch, item_id): item_id for item_id in item_ids}
+            for future in as_completed(futures):
+                item_id = futures[future]
+                try:
+                    fetched.append(future.result())
+                except Exception as error:
+                    logger.warning(f"Emby direct Person fetch failed for item {item_id}: {error}")
+
+        if fetched:
+            self.update_cache_with_items(fetched)
+            for item in fetched:
+                item_id = str(item.get("Id") or "")
+                self.cached_plex_objects.pop(item_id, None)
+                if item_id.isdigit():
+                    self.cached_plex_objects.pop(int(item_id), None)
+        return {str(item.get("Id")): item for item in fetched if item.get("Id") is not None}
+
+    def get_stable_item_etags(self, ids):
+        """Return ETags only from Emby's stable list/bulk representation."""
+        items = self.get_items_bulk(
+            list(ids),
+            fields=["Etag"],
+            force_refresh=True,
+            publish=False,
+        )
+        return {
+            str(item_id): item.get("Etag")
+            for item_id, item in (items or {}).items()
+            if item.get("Etag")
+        }
 
     def get_item_images(self, item_id) -> dict:
         endpoint = f"/emby/Items/{item_id}/Images?api_key={self.api_key}"
@@ -1547,11 +1616,7 @@ class EmbyServer:
         # on first lookup, firing 765+ sequential HTTP calls and hanging
         # for minutes before the first collection could even be processed.
         all_collections = self.get_boxsets_from_library(native=True)
-        self._collection_id_cache = {
-            c.title: c.ratingKey
-            for c in all_collections
-            if getattr(c, "title", None) and getattr(c, "ratingKey", None) is not None
-        }
+        self._collection_id_cache = {c.title: c.ratingKey for c in all_collections if getattr(c, "title", None) and getattr(c, "ratingKey", None) is not None}
 
     def get_show_season_years(self, series_id=None):
         """Returns a set of season production years per SeriesId. Cached per library.
@@ -1561,13 +1626,9 @@ class EmbyServer:
         """
         if self._season_years_cache is None:
             from datetime import datetime
+
             cache: dict[str, set[int]] = {}
-            url = (
-                f"{self.emby_server_url}/Users/{self.user_id}/Items"
-                f"?Recursive=true&IncludeItemTypes=Season"
-                f"&Fields=ProductionYear,PremiereDate,SeriesId"
-                f"&ParentId={self.library_id}&api_key={self.api_key}"
-            )
+            url = f"{self.emby_server_url}/Users/{self.user_id}/Items" f"?Recursive=true&IncludeItemTypes=Season" f"&Fields=ProductionYear,PremiereDate,SeriesId" f"&ParentId={self.library_id}&api_key={self.api_key}"
             try:
                 response = self.session.get(url)
                 response.raise_for_status()
@@ -1618,13 +1679,23 @@ class EmbyServer:
         # Returns the number of items deleted from the collection
         return self.__add_remove_from_collection(collection_name, item_ids, "delete")
 
-    def refresh_item(self, item_id):
-        # Refreshes metadata for a specific item
+    def refresh_item(self, item_id, *, replace_all_metadata=True, replace_all_images=False):
+        # Refreshes metadata and, when requested, replaces remote images for a
+        # specific item using Emby's FullRefresh modes.
+        self._ensure_http_session()
         response = self.session.post(
-            f"{self.emby_server_url}/Items/{item_id}/Refresh?api_key={self.api_key}&ReplaceAllMetadata=true"
+            f"{self.emby_server_url}/Items/{item_id}/Refresh",
+            params={
+                "api_key": self.api_key,
+                "Recursive": "false",
+                "MetadataRefreshMode": "FullRefresh" if replace_all_metadata else "Default",
+                "ImageRefreshMode": "FullRefresh" if replace_all_images else "Default",
+                "ReplaceAllMetadata": str(bool(replace_all_metadata)).lower(),
+                "ReplaceAllImages": str(bool(replace_all_images)).lower(),
+            },
         )
         time.sleep(self.seconds_between_requests)
-        if response.status_code != 204:
+        if response.status_code not in (200, 204):
             logger.error(f"Error refreshing item {item_id}, response: {response}")
             return False
         self.invalidate_item(item_id)
@@ -1641,15 +1712,15 @@ class EmbyServer:
         return "&".join(encoded_parts)
 
     def get_items(
-            self,
-            params=None,
-            fields=None,
-            include_item_types=None,
-            filters=None,
-            sort_by=None,
-            limit=None,
-            start_index=0,
-            getAll=True,
+        self,
+        params=None,
+        fields=None,
+        include_item_types=None,
+        filters=None,
+        sort_by=None,
+        limit=None,
+        start_index=0,
+        getAll=True,
     ):
         """
         Generic method to retrieve all items from Emby, querying in batches.
@@ -1691,7 +1762,6 @@ class EmbyServer:
         if "Tags" in query_params:
             query_params["Tags"] = query_params["Tags"].replace("&", "%26")
 
-
         if "Studios" in query_params:
             the_studio = self.get_library_studios(query_params["Studios"])
             if len(the_studio) == 0:
@@ -1706,7 +1776,7 @@ class EmbyServer:
 
         if "Ids" in query_params:
             ids = query_params["Ids"].split(",")
-            batches = [ids[i:i + limit_query] for i in range(0, len(ids), limit_query)]
+            batches = [ids[i : i + limit_query] for i in range(0, len(ids), limit_query)]
         else:
             batches = [None]  # Single batch when no Ids are specified
 
@@ -1732,9 +1802,7 @@ class EmbyServer:
                 try:
                     response_data = response.json()
                 except Exception as e:
-                    logger.error(
-                        f"Error getting items using URL {url} params {query_params} with response {response.content}. Error: {e}"
-                    )
+                    logger.error(f"Error getting items using URL {url} params {query_params} with response {response.content}. Error: {e}")
                     return None
 
                 if "Items" in response_data:
@@ -1767,10 +1835,7 @@ class EmbyServer:
             except Exception as e:
                 logger.error(f"Error during sorting by {sort_key}: {e}")
                 raise Failed(f"Sorting failed for key: {sort_key}")
-        if (
-                "MaxCriticRating" in query_params or "MaxCommunityRating" in query_params or "MaxCustomRating" in query_params or
-                "MinCriticRating" in query_params or "MinCommunityRating" in query_params or "MinCustomRating" in query_params
-        ):
+        if "MaxCriticRating" in query_params or "MaxCommunityRating" in query_params or "MaxCustomRating" in query_params or "MinCriticRating" in query_params or "MinCommunityRating" in query_params or "MinCustomRating" in query_params:
             updated_results = []
 
             for item in all_items:
@@ -1842,22 +1907,25 @@ class EmbyServer:
         return filtered_results
 
     def get_library_items_cached(
-            self,
-            library_id,
-            include_item_types,
-            fields,
-            view_key,
-            *,
-            force_manifest=False,
+        self,
+        library_id,
+        include_item_types,
+        fields,
+        view_key,
+        *,
+        force_manifest=False,
     ):
         """Synchronize a complete Emby library view against the central Etag cache."""
         if getattr(self, "_central_cache", None) is None or not getattr(self, "cache_server_key", None):
-            items = self.get_items(
-                params={"ParentId": library_id, "EnableUserData": "false"},
-                fields=",".join(fields) if isinstance(fields, (list, tuple, set)) else fields,
-                include_item_types=include_item_types,
-                getAll=True,
-            ) or []
+            items = (
+                self.get_items(
+                    params={"ParentId": library_id, "EnableUserData": "false"},
+                    fields=",".join(fields) if isinstance(fields, (list, tuple, set)) else fields,
+                    include_item_types=include_item_types,
+                    getAll=True,
+                )
+                or []
+            )
             self.update_cache_with_items(items)
             return items
 
@@ -1868,27 +1936,22 @@ class EmbyServer:
         )
         if cached_view is not None and not force_manifest:
             return cached_view
-        previous_ids = {
-            str(item.get("Id"))
-            for item in cached_view or []
-            if isinstance(item, dict) and item.get("Id")
-        }
+        previous_ids = {str(item.get("Id")) for item in cached_view or [] if isinstance(item, dict) and item.get("Id")}
 
-        manifest = self.get_items(
-            params={
-                "ParentId": library_id,
-                "EnableUserData": "false",
-                "EnableImages": "false",
-            },
-            fields="Etag",
-            include_item_types=include_item_types,
-            getAll=True,
-        ) or []
-        manifest_by_id = {
-            str(item.get("Id")): item
-            for item in manifest
-            if isinstance(item, dict) and item.get("Id")
-        }
+        manifest = (
+            self.get_items(
+                params={
+                    "ParentId": library_id,
+                    "EnableUserData": "false",
+                    "EnableImages": "false",
+                },
+                fields="Etag",
+                include_item_types=include_item_types,
+                getAll=True,
+            )
+            or []
+        )
+        manifest_by_id = {str(item.get("Id")): item for item in manifest if isinstance(item, dict) and item.get("Id")}
         manifest_ids = list(manifest_by_id)
         self._central_cache.hydrate(self.cache_server_key, manifest_ids)
 
@@ -1902,20 +1965,12 @@ class EmbyServer:
         for item_id, manifest_item in manifest_by_id.items():
             record = self._central_cache.item_record(self.cache_server_key, item_id)
             manifest_etag = manifest_item.get("Etag")
-            if (
-                    record is None
-                    or not manifest_etag
-                    or record.get("etag") != manifest_etag
-                    or not required_fields.issubset(record.get("fields") or set())
-            ):
+            if record is None or not manifest_etag or record.get("etag") != manifest_etag or not required_fields.issubset(record.get("fields") or set()):
                 to_fetch.append(item_id)
 
         fetched_items = {}
         if to_fetch:
-            logger.info(
-                f"Emby Etag Sync: {len(manifest_ids)} current, "
-                f"{len(to_fetch)} new/changed/incomplete"
-            )
+            logger.info(f"Emby Etag Sync: {len(manifest_ids)} current, " f"{len(to_fetch)} new/changed/incomplete")
             fetched_items = self.get_items_bulk(
                 to_fetch,
                 fields=sorted(required_fields),
@@ -1938,22 +1993,14 @@ class EmbyServer:
             else:
                 record = self._central_cache.item_record(self.cache_server_key, item_id)
             manifest_etag = manifest_by_id[item_id].get("Etag")
-            if (
-                    record is None
-                    or not manifest_etag
-                    or record.get("etag") != manifest_etag
-                    or not required_fields.issubset(record.get("fields") or set())
-            ):
+            if record is None or not manifest_etag or record.get("etag") != manifest_etag or not required_fields.issubset(record.get("fields") or set()):
                 invalid_items.append(item_id)
             else:
                 synchronized_items.append(record["data"])
 
         if invalid_items:
             preview = ", ".join(invalid_items[:10])
-            raise Failed(
-                f"Emby Cache Error: {len(invalid_items)} item payloads could not be synchronized "
-                f"with the current Etag manifest ({preview}{'...' if len(invalid_items) > 10 else ''})"
-            )
+            raise Failed(f"Emby Cache Error: {len(invalid_items)} item payloads could not be synchronized " f"with the current Etag manifest ({preview}{'...' if len(invalid_items) > 10 else ''})")
 
         committed_items = self._central_cache.commit_library_snapshot(
             self.cache_server_key,
@@ -1981,10 +2028,18 @@ class EmbyServer:
         return committed_items
 
     def get_seasons(self, series_id):
-        return self.get_items(params={"ParentId": series_id}, include_item_types=["Season"])
+        return self.get_items(
+            params={"ParentId": series_id},
+            fields="ProviderIds,People,ParentId,IndexNumber,SeriesId",
+            include_item_types=["Season"],
+        )
 
     def get_episodes(self, season_id):
-        return self.get_items(params={"ParentId": season_id}, include_item_types=["Episode"])
+        return self.get_items(
+            params={"ParentId": season_id},
+            fields="ProviderIds,People,ParentId,IndexNumber,ParentIndexNumber,SeriesId",
+            include_item_types=["Episode"],
+        )
 
     def set_item_as_played(self, user_id, item_id):
         """
@@ -2003,9 +2058,7 @@ class EmbyServer:
         if response.status_code == 200:
             return True
         else:
-            logger.error(
-                f"Error marking item {item_id} as played for user {user_id}: {response.content}"
-            )
+            logger.error(f"Error marking item {item_id} as played for user {user_id}: {response.content}")
             return False
 
     def set_item_as_favorite(self, user_id, item_id):
@@ -2025,22 +2078,14 @@ class EmbyServer:
         if response.status_code == 200:
             return True
         else:
-            logger.error(
-                f"Error marking item {item_id} as a favorite for user {user_id}: {response.content}"
-            )
+            logger.error(f"Error marking item {item_id} as a favorite for user {user_id}: {response.content}")
             return False
 
-    def set_image_smart(
-            self,
-            item_id: str,
-            image_path: str,
-            image_type: str = "Primary"
-    ) -> bool:
+    def set_image_smart(self, item_id: str, image_path: str, image_type: str = "Primary") -> bool:
         if image_path.startswith("http"):
             return self.__set_remote_image(item_id, image_path, image_type)
         else:
             return self.__upload_image(item_id, image_path, image_type)
-
 
     def __set_remote_image(
         self,
@@ -2103,7 +2148,6 @@ class EmbyServer:
             logger.error(f"Error: Image file not found: {image_path}")
             return False
 
-
         ext_to_content_type = {
             ".jpg": "image/jpeg",
             ".jpeg": "image/jpeg",
@@ -2123,9 +2167,7 @@ class EmbyServer:
 
             image_data_base64 = base64.b64encode(image_data)
 
-            endpoint = (
-                f"/emby/Items/{item_id}/Images/{image_type}?api_key={self.api_key}"
-            )
+            endpoint = f"/emby/Items/{item_id}/Images/{image_type}?api_key={self.api_key}"
             url = self.emby_server_url + endpoint
             headers = {
                 "Content-Type": ext_to_content_type[ext],
@@ -2150,7 +2192,7 @@ class EmbyServer:
             return False
 
     # Konvertierungsfunktion, um Emby-Daten in Plex-Klassenobjekte zu konvertieren
-    def convert_emby_to_plex(self, emby_data_list, use_native_emby = False):
+    def convert_emby_to_plex(self, emby_data_list, use_native_emby=False):
         plex_objects = []
         if not emby_data_list or len(emby_data_list) == 0:
             return []
@@ -2183,7 +2225,7 @@ class EmbyServer:
                 # if isinstance(item, str):
                 #     print("Ich bin string!!!")
                 name = item.get("Name")
-                studio_entries =item.get("Studios")
+                studio_entries = item.get("Studios")
                 studio = ""
                 if studio_entries:
                     # fix multiple studios when updating, only one allowed
@@ -2191,7 +2233,7 @@ class EmbyServer:
                         for entry in studio_entries:
                             studio += f"{entry.get('Name')}"
                     else:
-                        studio= studio_entries[0].get("Name")
+                        studio = studio_entries[0].get("Name")
 
                 genres = item.get("Genres")
                 server_id = item.get("ServerId")
@@ -2199,7 +2241,7 @@ class EmbyServer:
                 item_overview = item.get("Overview")
                 runtime_ticks = item.get("RunTimeTicks")
                 if runtime_ticks:
-                    runtime_ticks= int(runtime_ticks) / 10000
+                    runtime_ticks = int(runtime_ticks) / 10000
                 # provider_ids = item.get("ProviderIds", {})
                 media_type = item.get("Type")
                 image_tags = item.get("ImageTags", {})
@@ -2207,7 +2249,7 @@ class EmbyServer:
                 year = item.get("ProductionYear", None)
                 series_id = item.get("SeriesId")
                 if year:
-                    year= int(year)
+                    year = int(year)
                 people = item.get("People", [])
                 plex_actors = []
                 # for person in people:
@@ -2221,27 +2263,27 @@ class EmbyServer:
                 # {'Id': '12917', 'Name': 'Hideko Takamine', 'PrimaryImageTag': '243089fe465d5f5402eb21462e0d915e', 'Role': 'Keiko Yashiro', 'Type': 'Actor'}
                 # Erstelle ein Datenobjekt, das der Plex-API-Struktur ähnelt
                 crit_rat = item.get("CriticRating")
-                if crit_rat: # prevent constant updates, fake plex its original value
-                    crit_rat = float(crit_rat) /10
+                if crit_rat:  # prevent constant updates, fake plex its original value
+                    crit_rat = float(crit_rat) / 10
                 data = {
-                    'title': name,
-                    'ratingKey': item_id,
-                    'duration': runtime_ticks,
-                    'guid': item_id,
-                    'posterUrl': image_tags.get('Primary', ''),
-                    'thumbUrl': image_tags.get('Art', ''),
-                    'type': media_type.lower(),
-                    'backdrop': ','.join(backdrop_image_tags),
-                    'year': year,
-                    'summary':item_overview,
-                    'grandparentTitle':item.get('SeriesName'),
-                    'audienceRating': item.get("CommunityRating"),
-                    'rating': crit_rat,
-                    'userRating': self.get_custom_rating_from_item(item, raw=True),
-                    'studio': studio, # only one
-                    'genres': genres,
-                    'titleSort': item.get('SortName'),
-                    'contentRating': item.get('OfficialRating')
+                    "title": name,
+                    "ratingKey": item_id,
+                    "duration": runtime_ticks,
+                    "guid": item_id,
+                    "posterUrl": image_tags.get("Primary", ""),
+                    "thumbUrl": image_tags.get("Art", ""),
+                    "type": media_type.lower(),
+                    "backdrop": ",".join(backdrop_image_tags),
+                    "year": year,
+                    "summary": item_overview,
+                    "grandparentTitle": item.get("SeriesName"),
+                    "audienceRating": item.get("CommunityRating"),
+                    "rating": crit_rat,
+                    "userRating": self.get_custom_rating_from_item(item, raw=True),
+                    "studio": studio,  # only one
+                    "genres": genres,
+                    "titleSort": item.get("SortName"),
+                    "contentRating": item.get("OfficialRating"),
                     # not working
                     # 'media': [item.get('Path')],
                     # 'locations':[item.get('Path')] # todo: working?
@@ -2252,43 +2294,43 @@ class EmbyServer:
                     pass
                 elif item.get("Type") == "Season":
                     new_data = {
-                        'index': item.get('IndexNumber'),
-                        'parentTitle': item.get('SeriesName'),
-                        'seriesId': item.get('SeriesId'),
+                        "index": item.get("IndexNumber"),
+                        "parentTitle": item.get("SeriesName"),
+                        "seriesId": item.get("SeriesId"),
                     }
                     data.update(new_data)
                 elif item.get("Type") == "Episode":
                     new_data = {
-                        'index': item.get('IndexNumber'),
-                        'parentIndex': item.get('ParentIndexNumber'),
-                        'parentTitle': item.get('SeasonName'),
-                        'seriesId': item.get('SeriesId'),
-                        'seriesName': item.get('SeriesName'),
+                        "index": item.get("IndexNumber"),
+                        "parentIndex": item.get("ParentIndexNumber"),
+                        "parentTitle": item.get("SeasonName"),
+                        "seriesId": item.get("SeriesId"),
+                        "seriesName": item.get("SeriesName"),
                     }
                     data.update(new_data)
 
-            # print(media_type)
+                # print(media_type)
                 if media_type == "Movie":
                     plex_object = Movie(data)
                 elif media_type == "Series":
                     plex_object = Show(data)
                 elif media_type == "Season":
-                    plex_object= Season(data)
+                    plex_object = Season(data)
                 elif media_type == "Episode":
-                    plex_object=Episode(data)
+                    plex_object = Episode(data)
                 elif media_type == "BoxSet":
                     new_col = Collection(data)
                     if not use_native_emby:
                         allitems = self.get_items_in_boxset(new_col.ratingKey)
                         new_col._items = allitems
-                        new_col.childCount= len((allitems))
+                        new_col.childCount = len((allitems))
 
-                    plex_object=new_col
+                    plex_object = new_col
 
                 elif media_type == "Audio":
-                    plex_object=Audio(data)
+                    plex_object = Audio(data)
                 elif media_type == "Person":
-                    plex_object=Person(data)
+                    plex_object = Person(data)
                 else:
                     logger.error(f"error converting Emby object")
                     continue
@@ -2317,8 +2359,7 @@ class EmbyServer:
 
         return plex_objects
 
-
-    def add_tags(self, item_id:int, add_tags:[]):
+    def add_tags(self, item_id: int, add_tags: []):
         """
         Fügt einen Tag hinzu.
         """
@@ -2328,7 +2369,7 @@ class EmbyServer:
         current_tags = item.get("TagItems", [])
         new_tags = []
         for tag_item in current_tags:
-            new_tags.append(tag_item.get('Name'))
+            new_tags.append(tag_item.get("Name"))
 
         for tag in add_tags:
             if tag not in new_tags:
@@ -2336,9 +2377,7 @@ class EmbyServer:
 
         # db_tags = ",".join(new_tags)
 
-
         return self.__update_item(item_id, {"Tags": new_tags, "TagItems": new_tags}, item)
-
 
     def remove_tags(self, item_id, tags):
         """
@@ -2351,16 +2390,15 @@ class EmbyServer:
         current_tags = item.get("TagItems", [])
         new_tags = []
         for tag_item in current_tags:
-            if tag_item.get('Name') not in tags:
-                new_tags.append(tag_item.get('Name'))
-
+            if tag_item.get("Name") not in tags:
+                new_tags.append(tag_item.get("Name"))
 
         return self.__update_item(item_id, {"Tags": new_tags, "TagItems": new_tags}, item)
 
     def update_item(self, item_id, data):
-        return self.__update_item(item_id,data)
+        return self.__update_item(item_id, data)
 
-    def __update_item(self, item_id, data, item = None):
+    def __update_item(self, item_id, data, item=None):
         if not item:
             item = self.get_item(item_id)
         if item is None:
@@ -2368,6 +2406,7 @@ class EmbyServer:
         self._ensure_http_session()
 
         data = dict(data or {})
+        replace_provider_ids = bool(data.pop("_ReplaceProviderIds", False))
         custom_rating_update = data.pop("CustomRating", None)
 
         if "LockedFields" not in item:
@@ -2400,12 +2439,12 @@ class EmbyServer:
                 provider_ids_update = dict(provider_ids_update_raw)
             except (TypeError, ValueError):
                 provider_ids_update = {}
+            if replace_provider_ids:
+                provider_ids = {}
         if custom_rating_update is not None:
             provider_ids_update = provider_ids_update or {}
             provider_ids_update[self.CUSTOM_RATING_PROVIDER] = custom_rating_update
-            logger.warning(
-                "CustomRating provided as a top-level field; routing to ProviderIds[CustomRating]."
-            )
+            logger.warning("CustomRating provided as a top-level field; routing to ProviderIds[CustomRating].")
         if provider_ids_update:
             normalized_update = {}
             for key, value in provider_ids_update.items():
@@ -2443,10 +2482,8 @@ class EmbyServer:
 
         item.update(data)
 
-        update_item_url = (
-            f"{self.emby_server_url}/emby/Items/{item_id}?api_key={self.api_key}"
-        )
-        my_= str(item)
+        update_item_url = f"{self.emby_server_url}/emby/Items/{item_id}?api_key={self.api_key}"
+        my_ = str(item)
         try:
             response = self.session.post(update_item_url, json=item)
             response.raise_for_status()
@@ -2460,9 +2497,7 @@ class EmbyServer:
             logger.warning(f"Emby item error, not updated: {item_id}")
             return None
 
-    def __add_remove_from_collection(
-        self, collection_name: str, item_ids: list, operation: str
-    ) -> int:
+    def __add_remove_from_collection(self, collection_name: str, item_ids: list, operation: str) -> int:
 
         affected_count = 0
         if not item_ids:
@@ -2476,9 +2511,7 @@ class EmbyServer:
         batch_size = self.api_batch_size
         num_batches = (len(item_ids) + batch_size - 1) // batch_size
 
-        logger.info(
-            f"Processing {collection_name} with '{operation}' in {num_batches} batches"
-        )
+        logger.info(f"Processing {collection_name} with '{operation}' in {num_batches} batches")
 
         for i in range(num_batches):
             start_index = i * batch_size
@@ -2487,18 +2520,12 @@ class EmbyServer:
             logger.ghost(f"  Batch {i + 1}/{num_batches} ({len(batch_item_ids)} items) | {collection_name} | {operation}")
 
             if operation == "add":
-                response = self.session.post(
-                    f"{self.emby_server_url}/Collections/{collection_id}/Items/?api_key={self.api_key}&Ids={self.__ids_to_str(batch_item_ids)}"
-                )
+                response = self.session.post(f"{self.emby_server_url}/Collections/{collection_id}/Items/?api_key={self.api_key}&Ids={self.__ids_to_str(batch_item_ids)}")
             elif operation == "delete":
-                response = self.session.delete(
-                    f"{self.emby_server_url}/Collections/{collection_id}/Items/?api_key={self.api_key}&Ids={self.__ids_to_str(batch_item_ids)}"
-                )
+                response = self.session.delete(f"{self.emby_server_url}/Collections/{collection_id}/Items/?api_key={self.api_key}&Ids={self.__ids_to_str(batch_item_ids)}")
 
             if response.status_code != 204:
-                logger.error(
-                    f"Error processing collection with operation '{operation}', response: {response}"
-                )
+                logger.error(f"Error processing collection with operation '{operation}', response: {response}")
                 return affected_count
 
             affected_count += len(batch_item_ids)
@@ -2510,8 +2537,7 @@ class EmbyServer:
 
         return affected_count
 
-    def add_remove_plex_object_from_collection(
-        self, collection_name: str, plex_objects: list, operation: str, collection_id = None) -> int:
+    def add_remove_plex_object_from_collection(self, collection_name: str, plex_objects: list, operation: str, collection_id=None) -> int:
         item_ids = []
         for item in plex_objects:
             item_ids.append(item.ratingKey)
@@ -2529,9 +2555,7 @@ class EmbyServer:
         batch_size = self.api_batch_size
         num_batches = (len(item_ids) + batch_size - 1) // batch_size
 
-        logger.info(
-            f"Processing {collection_name} with '{operation}' in {num_batches} batches"
-        )
+        logger.info(f"Processing {collection_name} with '{operation}' in {num_batches} batches")
 
         for i in range(num_batches):
             start_index = i * batch_size
@@ -2540,18 +2564,12 @@ class EmbyServer:
             logger.ghost(f"  Batch {i + 1}/{num_batches} ({len(batch_item_ids)} items) | {collection_name} | {operation}")
 
             if operation == "add":
-                response = self.session.post(
-                    f"{self.emby_server_url}/Collections/{collection_id}/Items/?api_key={self.api_key}&Ids={self.__ids_to_str(batch_item_ids)}"
-                )
+                response = self.session.post(f"{self.emby_server_url}/Collections/{collection_id}/Items/?api_key={self.api_key}&Ids={self.__ids_to_str(batch_item_ids)}")
             elif operation == "delete":
-                response = self.session.delete(
-                    f"{self.emby_server_url}/Collections/{collection_id}/Items/?api_key={self.api_key}&Ids={self.__ids_to_str(batch_item_ids)}"
-                )
+                response = self.session.delete(f"{self.emby_server_url}/Collections/{collection_id}/Items/?api_key={self.api_key}&Ids={self.__ids_to_str(batch_item_ids)}")
 
             if response.status_code != 204:
-                logger.error(
-                    f"Error processing collection with operation '{operation}', response: {response}"
-                )
+                logger.error(f"Error processing collection with operation '{operation}', response: {response}")
                 return affected_count
 
             affected_count += len(batch_item_ids)
@@ -2568,8 +2586,8 @@ class EmbyServer:
             collection_id = collection
         else:
             collection_id = collection.ratingKey
-        delete_url = f'{self.emby_server_url}/Items/{collection_id}/Delete?api_key={self.api_key}'
-        headers = { 'accept': '*/*'}
+        delete_url = f"{self.emby_server_url}/Items/{collection_id}/Delete?api_key={self.api_key}"
+        headers = {"accept": "*/*"}
         response = self.session.post(delete_url, headers=headers)
         if response.status_code == 204:
             self.invalidate_collection_cache()
@@ -2579,24 +2597,23 @@ class EmbyServer:
             # response = requests.get(f"{self.emby_server_url}/Items?Recursive=true&ParentId={collection_id}", headers=self.headers)
             # response.raise_for_status()
             # all_items = response.json().get("Items", [])
-            all_items = self.get_items_in_boxset(collection_id,native=True)
+            all_items = self.get_items_in_boxset(collection_id, native=True)
             batch_size = 100  # Größe der Batches
             all_ids = [item.get("Id") for item in all_items]
             # Teile `all_ids` in Batches auf
             for i in range(0, len(all_ids), batch_size):
-                batch_ids = all_ids[i:i + batch_size]  # Nimm einen Batch von 100 IDs
-                string_ids = ','.join(batch_ids)  # Verbinde die IDs zu einem String
-                response = self.session.delete(
-                    f"{self.emby_server_url}/emby/Collections/{collection_id}/Items?Ids={string_ids}&api_key={self.api_key}"
-                )
+                batch_ids = all_ids[i : i + batch_size]  # Nimm einen Batch von 100 IDs
+                string_ids = ",".join(batch_ids)  # Verbinde die IDs zu einem String
+                response = self.session.delete(f"{self.emby_server_url}/emby/Collections/{collection_id}/Items?Ids={string_ids}&api_key={self.api_key}")
 
                 # Optional: Überprüfe die Antwort und logge den Status
                 if response.status_code == 204:
                     logger.ghost(f"Batch {i // batch_size + 1}: Erfolgreich gelöscht")
                 else:
                     logger.ghost(f"Batch {i // batch_size + 1}: Fehler beim Löschen - {response.status_code} - {response.text}")
-                                # all_ids = [item.get("Id") for item in all_items]
+                    # all_ids = [item.get("Id") for item in all_items]
             # print(f'Error deleting collection with ID "{collection_id}": {response.text}')
+
     # def remove_tags_from_collection(
     #         self, collection_name: str, tags_to_remove: list
     # ) -> int:
@@ -2846,8 +2863,6 @@ class EmbyServer:
     #     if locked:
     #         self.lock_collection(collection_id)
 
-
-
     def lock_collection(self, collection_id: str) -> None:
         """
         Lock a collection in Emby.
@@ -2858,19 +2873,12 @@ class EmbyServer:
         Returns:
             None
         """
-        response = self.session.post(
-            f"{self.emby_server_url}/Items/{collection_id}?api_key={self.api_key}",
-            json={"LockData": True}
-        )
+        response = self.session.post(f"{self.emby_server_url}/Items/{collection_id}?api_key={self.api_key}", json={"LockData": True})
 
         if response.status_code != 204:
-            raise Exception(
-                f"Failed to lock collection ID {collection_id}. "
-                f"Response: {response.status_code} - {response.text}"
-            )
+            raise Exception(f"Failed to lock collection ID {collection_id}. " f"Response: {response.status_code} - {response.text}")
 
-
-    def remove_boxset(self, collection_name, collection_id = None):
+    def remove_boxset(self, collection_name, collection_id=None):
         """
         Remove a BoxSet collection from Emby.
 
@@ -2884,16 +2892,13 @@ class EmbyServer:
             collection_id = self.get_collection_id(collection_name)
         try:
             # API-Endpunkt für das Löschen einer Sammlung
-            response = self.session.delete(
-                f"{self.emby_server_url}/Items/{collection_id}?api_key={self.api_key}"
-            )
+            response = self.session.delete(f"{self.emby_server_url}/Items/{collection_id}?api_key={self.api_key}")
 
             if response.status_code == 204:
                 logger.info(f"BoxSet with ID '{collection_id}' successfully removed.")
                 return True
             else:
-                logger.error(
-                    f"Failed to remove BoxSet with ID '{collection_id}'. Response: {response.status_code} - {response.text}")
+                logger.error(f"Failed to remove BoxSet with ID '{collection_id}'. Response: {response.status_code} - {response.text}")
                 return False
 
         except Exception as e:
@@ -2922,11 +2927,7 @@ class EmbyServer:
     def _collect_cached_items_for_library(self, library_id: str = "") -> list[dict]:
         library_filter = str(library_id) if library_id else None
         allowed_ids = None
-        if (
-                library_filter
-                and getattr(self, "_central_cache", None) is not None
-                and getattr(self, "cache_server_key", None)
-        ):
+        if library_filter and getattr(self, "_central_cache", None) is not None and getattr(self, "cache_server_key", None):
             allowed_ids = self._central_cache.library_item_ids(
                 self.cache_server_key,
                 library_filter,
@@ -2962,8 +2963,7 @@ class EmbyServer:
 
         return list(merged.values())
 
-    def get_emby_item_tags(self, plex_object, library_id: str = "", search_all: bool = False,
-                           from_cache: bool = True) -> list[str]:
+    def get_emby_item_tags(self, plex_object, library_id: str = "", search_all: bool = False, from_cache: bool = True) -> list[str]:
         # Item-spezifisch (häufigster Fall)
         if not search_all:
             item_id = self._resolve_item_id(plex_object)
@@ -2986,8 +2986,7 @@ class EmbyServer:
         data = self.session.get(url, headers=self.headers).json()
         return sorted({it.get("Name") for it in data.get("Items", []) if it.get("Name")})
 
-    def get_emby_item_genres(self, plex_object, library_id: str = "", search_all: bool = False,
-                             from_cache: bool = True) -> list[str]:
+    def get_emby_item_genres(self, plex_object, library_id: str = "", search_all: bool = False, from_cache: bool = True) -> list[str]:
         if not search_all:
             item_id = self._resolve_item_id(plex_object)
             item = self.get_item(item_id, force_refresh=(item_id in self.dirty_items))
@@ -3021,7 +3020,7 @@ class EmbyServer:
         #     return None  # bedeutet: Library-weit arbeiten
         # raise WARNING(f"Emby item object is not configured {plex_object!r}")
 
-    def _studios_from_item_cached(self,item: dict) -> list[str]:
+    def _studios_from_item_cached(self, item: dict) -> list[str]:
         """Extrahiert Studio-Namen robust aus einem gecachten Emby-Item."""
         studios = item.get("Studios") or []
         out = []
@@ -3029,10 +3028,12 @@ class EmbyServer:
             for s in studios:
                 if isinstance(s, dict):
                     n = s.get("Name") or s.get("name")
-                    if n: out.append(str(n).strip())
+                    if n:
+                        out.append(str(n).strip())
                 elif isinstance(s, str):
                     n = s.strip()
-                    if n: out.append(n)
+                    if n:
+                        out.append(n)
         elif isinstance(studios, str):
             out.extend([p.strip() for p in studios.split(",") if p.strip()])
         return out
@@ -3059,11 +3060,7 @@ class EmbyServer:
             return sorted(studios)
 
         # 2) Aggregiert aus Cache (optional nach Library gefiltert)
-        allowed_ids = (
-            self._central_cache.library_item_ids(self.cache_server_key, library_id)
-            if library_id and getattr(self, "_central_cache", None) is not None
-            else None
-        )
+        allowed_ids = self._central_cache.library_item_ids(self.cache_server_key, library_id) if library_id and getattr(self, "_central_cache", None) is not None else None
         for it in self.item_cache.values():
             if allowed_ids is not None and str(it.get("Id")) not in allowed_ids:
                 continue
@@ -3082,10 +3079,7 @@ class EmbyServer:
         url = f"{self.emby_server_url}/emby/Studios?Recursive=true&ParentId={library_id}&api_key={self.api_key}"
         response = self.session.get(url, headers=self.headers)
         if response.status_code != 200:
-            raise Failed(
-                f"Failed to retrieve studios for library {library_id}. "
-                f"Response: {response.status_code} - {response.text}"
-            )
+            raise Failed(f"Failed to retrieve studios for library {library_id}. " f"Response: {response.status_code} - {response.text}")
 
         for item in response.json().get("Items", []):
             name = str(item.get("Name", "")).strip()
@@ -3120,11 +3114,7 @@ class EmbyServer:
             return sorted(nets)
 
         # 2) Aggregiert aus Cache (optional nach Library gefiltert)
-        allowed_ids = (
-            self._central_cache.library_item_ids(self.cache_server_key, library_id)
-            if library_id and getattr(self, "_central_cache", None) is not None
-            else None
-        )
+        allowed_ids = self._central_cache.library_item_ids(self.cache_server_key, library_id) if library_id and getattr(self, "_central_cache", None) is not None else None
         for it in self.item_cache.values():
             if allowed_ids is not None and str(it.get("Id")) not in allowed_ids:
                 continue
@@ -3144,8 +3134,7 @@ class EmbyServer:
         url = f"{self.emby_server_url}/emby/Studios?Recursive=true&ParentId={library_id}&api_key={self.api_key}"
         response = self.session.get(url, headers=self.headers)
         if response.status_code != 200:
-            raise Failed(f"Failed to retrieve studios for library {library_id}. "
-                         f"Response: {response.status_code} - {response.text}")
+            raise Failed(f"Failed to retrieve studios for library {library_id}. " f"Response: {response.status_code} - {response.text}")
         for item in response.json().get("Items", []):
             name = str(item.get("Name", "")).strip()
             if not name:
@@ -3166,11 +3155,7 @@ class EmbyServer:
         """
         if not self.studio_list:
             studios = set()
-            allowed_ids = (
-                self._central_cache.library_item_ids(self.cache_server_key, self.library_id)
-                if self.library_id and getattr(self, "_central_cache", None) is not None
-                else None
-            )
+            allowed_ids = self._central_cache.library_item_ids(self.cache_server_key, self.library_id) if self.library_id and getattr(self, "_central_cache", None) is not None else None
             # 1) Aus Cache
             for it in self.item_cache.values():
                 if allowed_ids is not None and str(it.get("Id")) not in allowed_ids:
@@ -3189,8 +3174,7 @@ class EmbyServer:
                 url = f"{self.emby_server_url}/emby/Studios?ParentId={self.library_id}&api_key={self.api_key}"
                 response = self.session.get(url, headers=self.headers)
                 if response.status_code != 200:
-                    raise Failed(f"Failed to retrieve studios for library {self.library_id}. "
-                                 f"Response: {response.status_code} - {response.text}")
+                    raise Failed(f"Failed to retrieve studios for library {self.library_id}. " f"Response: {response.status_code} - {response.text}")
                 for item in response.json().get("Items", []):
                     n = str(item.get("Name", "")).strip()
                     if n:
@@ -3234,7 +3218,7 @@ class EmbyServer:
                     if field_attr == "audienceRating":
                         update_items[item_id]["CommunityRating"] = rating_value
                     elif field_attr == "rating":
-                        update_items[item_id]["CriticRating"] = float(rating_value) * 10 if rating_value else ''
+                        update_items[item_id]["CriticRating"] = float(rating_value) * 10 if rating_value else ""
                     elif field_attr == "userRating":
                         provider_map = update_items[item_id].setdefault("ProviderIds", {})
                         provider_map[self.CUSTOM_RATING_PROVIDER] = rating_value
@@ -3247,14 +3231,12 @@ class EmbyServer:
             if "CommunityRating" in rating_data:
                 updates["CommunityRating"] = rating_data["CommunityRating"]
             if "CriticRating" in rating_data:
-                updates["CriticRating"] = float(rating_data["CriticRating"])*10
+                updates["CriticRating"] = float(rating_data["CriticRating"]) * 10
             provider_ids = rating_data.get("ProviderIds")
             if provider_ids:
                 provider_ids_payload = dict(provider_ids)
                 if self.CUSTOM_RATING_PROVIDER in provider_ids_payload:
-                    normalized_rating = self.normalize_custom_rating_input(
-                        provider_ids_payload[self.CUSTOM_RATING_PROVIDER]
-                    )
+                    normalized_rating = self.normalize_custom_rating_input(provider_ids_payload[self.CUSTOM_RATING_PROVIDER])
                     if normalized_rating is None:
                         provider_ids_payload.pop(self.CUSTOM_RATING_PROVIDER, None)
                     else:
@@ -3262,28 +3244,24 @@ class EmbyServer:
                 if provider_ids_payload:
                     updates["ProviderIds"] = provider_ids_payload
 
-            self.__update_item(
-                item_id,
-                updates
-            )
+            self.__update_item(item_id, updates)
         return update_items
 
     # ToDo: Implementation
-    def multiEditField(self, rating_keys,field_attr=None, new_value=None, locked=False):
+    def multiEditField(self, rating_keys, field_attr=None, new_value=None, locked=False):
         # raise Warning(f"multiEditField not implemented for {rating_keys} - {field_attr} - {new_value} {locked}")
         # return
 
         self._ensure_http_session()
 
-
         for item in rating_keys:
             item_id = item.ratingKey
-            changes ={}
+            changes = {}
             if field_attr == "audienceRating":
                 changes["CommunityRating"] = new_value
                 item.audienceRating = new_value
             elif field_attr == "rating":
-                changes["CriticRating"] = float(new_value)*10
+                changes["CriticRating"] = float(new_value) * 10
                 item.rating = new_value
                 # self.__update_item(item_id,{"CriticRating": new_value})
             elif field_attr == "userRating":
@@ -3299,7 +3277,7 @@ class EmbyServer:
                         item.userRating = None
             elif field_attr == "contentRating":
                 changes["OfficialRating"] = new_value
-                item.contentRating = new_value # item update still needed?
+                item.contentRating = new_value  # item update still needed?
             elif field_attr == "studio":
                 # id = self.get
 
@@ -3317,21 +3295,20 @@ class EmbyServer:
                     studio_id = new_value
                 else:
                     item_details = response.json()
-                    studio_id = item_details.get('Id')
+                    studio_id = item_details.get("Id")
 
-
-                changes["Studios"] = {"Name":new_value, "Id": studio_id}
+                changes["Studios"] = {"Name": new_value, "Id": studio_id}
                 item.studio = new_value
                 # self.__update_item(item_id,{"CustomRating": new_value})
-            self.__update_item(item_id,changes)
+            self.__update_item(item_id, changes)
 
-        if field_attr in ["audienceRating","rating","userRating","studio","contentRating"]:
+        if field_attr in ["audienceRating", "rating", "userRating", "studio", "contentRating"]:
             # CustomRating ?
             return
 
         raise Warning(f"multiEditField not implemented for {rating_keys} - {field_attr} - {new_value} {locked}")
 
-    def multi_edit(self,rating_keys, **kwargs):
+    def multi_edit(self, rating_keys, **kwargs):
         raise Warning(f"multi_edit not implemented for {rating_keys} - {kwargs}")
 
         # raise Warning(f"multi_edit not implemented for {new_studio}")
@@ -3354,12 +3331,7 @@ class EmbyServer:
         # transient blip. Also: only retry idempotent methods (GET/HEAD) by
         # default to avoid duplicate writes on POST/PUT/PATCH (Emby creates
         # collections, posts metadata edits — duplicates can be very bad).
-        retries = Retry(
-            total=2,
-            backoff_factor=0.25,
-            status_forcelist=(429, 500, 502, 503, 504),
-            allowed_methods=frozenset(["GET", "HEAD"])
-        )
+        retries = Retry(total=2, backoff_factor=0.25, status_forcelist=(429, 500, 502, 503, 504), allowed_methods=frozenset(["GET", "HEAD"]))
         adapter = HTTPAdapter(max_retries=retries, pool_connections=20, pool_maxsize=40)
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
@@ -3372,12 +3344,7 @@ class EmbyServer:
         """
         norm = []
         for p in people_list or []:
-            norm.append((
-                str(p.get("Id") if p.get("Id") is not None else p.get("Name", "")).strip().casefold(),
-                (p.get("Name") or "").strip().casefold(),
-                p.get("Type") or "",
-                (p.get("Role") or "").strip()
-            ))
+            norm.append((str(p.get("Id") if p.get("Id") is not None else p.get("Name", "")).strip().casefold(), (p.get("Name") or "").strip().casefold(), p.get("Type") or "", (p.get("Role") or "").strip()))
         return norm
 
     # ==== zentraler Personen-Index je Library+Rolle ====
@@ -3496,7 +3463,7 @@ class EmbyServer:
                     results_by_id[it["Id"]] = it
 
         return list(results_by_id.values())
-    
+
     def get_person_by_name(self, person_name):
         """
         - Ohne person_list: komplette (gecachte) Liste via Index (ein Request pro Library+Rolle).
@@ -3524,6 +3491,32 @@ class EmbyServer:
 
         return items
 
+    def get_person_by_exact_name(self, person_name):
+        """Resolve the Person name through Emby's exact name route.
+
+        ``/Persons?SearchTerm=...`` is not a reliable publication check: on
+        current Emby servers it can omit an existing exact Person (notably
+        names containing apostrophes or freshly changed indexed names) while
+        ``/Persons/{Name}`` already resolves the name correctly.
+        """
+        clean_name = str(person_name or "").strip()
+        if not clean_name:
+            return None
+        self._ensure_http_session()
+        encoded_name = urllib.parse.quote(clean_name, safe="")
+        url = f"{self.emby_server_url}/emby/Persons/{encoded_name}"
+        params = {
+            "Fields": "ProviderIds,ImageTags,LockedFields,SortName",
+            "api_key": self.api_key,
+        }
+        try:
+            response = self.session.get(url, headers=self.headers, params=params, timeout=20)
+            response.raise_for_status()
+            person = response.json()
+        except Exception:
+            return None
+        return person if person.get("Type") == "Person" or person.get("Id") else None
+
     def _get_person_by_name_cached(self, clean_name: str) -> list[dict]:
         key = (clean_name or "").strip()
         hit = self.cached_person_names.get(key)
@@ -3537,8 +3530,7 @@ class EmbyServer:
             #     self.cached_person_names.clear()
         return hit
 
-    def get_person_info_via_library(self, role: str, provider: str, tmdb_id: int | str,
-                                    person_name: str):
+    def get_person_info_via_library(self, role: str, provider: str, tmdb_id: int | str, person_name: str):
         """
         STRIKTE Disambiguierung für Massenlauf:
           1) exakte Provider-ID im Index? -> sofortiger Treffer
@@ -3549,7 +3541,7 @@ class EmbyServer:
              - sonst: KEIN Auto-Link (Platzhalter verwenden)
         Liefert (emby_person_id, linked_bool[=müsste ProviderId gesetzt/ergänzt werden]) oder (None, False).
         """
-        prov = (provider or "Tmdb")
+        prov = provider or "Tmdb"
         prov_key = prov.casefold()
         tmdb_id_str = str(tmdb_id)
         cache_key = f"{prov}-{tmdb_id_str}"
@@ -3563,7 +3555,7 @@ class EmbyServer:
             for it in items or []:
                 pid = it.get("Id")
                 if pid and pid not in seen:
-                    seen.add(pid);
+                    seen.add(pid)
                     out.append(it)
             return out
 
@@ -3646,6 +3638,8 @@ class EmbyServer:
         if not tmdb_ids:
             return {}
 
+        provider_name = str(provider or "tmdb")
+        is_tmdb_provider = provider_name.casefold() == "tmdb"
 
         # IDs normalisieren
         try:
@@ -3669,12 +3663,12 @@ class EmbyServer:
             if tid_int is None:
                 continue
             try:
-                cached_id = self.cached_tmdb_ids.get(tid_int)
+                cached_id = self.cached_tmdb_ids.get(tid_int) if is_tmdb_provider else None
             except Exception:
                 cached_id = None
             if cached_id:
                 canonical_hints[tid_int] = str(cached_id)
-        if self._central_cache is not None:
+        if self._central_cache is not None and is_tmdb_provider:
             try:
                 cached_map, _, _ = self._central_cache.query_tmdb_person_map_bulk(
                     self.cache_server_key,
@@ -3693,11 +3687,20 @@ class EmbyServer:
                 pass
 
         base_url = f"{self.emby_server_url}/emby/Users/{self.user_id}/Items"
+        lookup_started = time.monotonic()
 
         # In Batches abfragen und JE Batch separat bewerten/demoten
         for i in range(0, len(norm_ids), chunk_size):
-            batch = norm_ids[i:i + chunk_size]
-            provider_ids = ",".join(f"{provider}.{pid}" for pid in batch)
+            batch = norm_ids[i : i + chunk_size]
+            batch_number = i // chunk_size + 1
+            batch_total = (len(norm_ids) + chunk_size - 1) // chunk_size
+            elapsed = max(time.monotonic() - lookup_started, 0.001)
+            completed = i
+            speed = completed / elapsed
+            eta_seconds = int((len(norm_ids) - completed) / speed) if speed > 0 else 0
+            eta = f"{eta_seconds // 60}m {eta_seconds % 60:02d}s" if speed > 0 else "calculating"
+            logger.ghost(f"Emby {provider_name} People Lookup | Batch {batch_number}/{batch_total} | {len(batch)} IDs | {speed:.1f} IDs/s | ETA {eta}")
+            provider_ids = ",".join(f"{provider_name}.{pid}" for pid in batch)
 
             params = {
                 "Recursive": "true",
@@ -3731,10 +3734,9 @@ class EmbyServer:
                 prov = item.get("ProviderIds") or {}
 
                 # Provider-ID robust lesen (tmdb/Tmdb/TMDb)
-                tmdb_id_raw = (
-                        prov.get(provider.lower())
-                        or prov.get(provider.capitalize())
-                        or prov.get("TMDb")
+                tmdb_id_raw = next(
+                    (value for key, value in prov.items() if str(key).casefold() == provider_name.casefold()),
+                    None,
                 )
                 if tmdb_id_raw is None:
                     continue
@@ -3777,30 +3779,30 @@ class EmbyServer:
                     self._person_dupes_choice_last[tid_int] = chosen
 
                     # Persistentes Mapping (gewollt hart abbrechen auf Fehler)
-                    try:
-                        self._central_cache.update_tmdb_person_map(
-                            self.cache_server_key,
-                            expired=False,
-                            tmdb_id=int(tid),
-                            emby_id=str(chosen),
-                            expiration=self._central_cache.persistent_cache.expiration,
-                        )
-                    except Exception:
-                        raise Failed
-                        pass  # bewusst beibehalten
+                    if is_tmdb_provider:
+                        try:
+                            self._central_cache.update_tmdb_person_map(
+                                self.cache_server_key,
+                                expired=False,
+                                tmdb_id=int(tid),
+                                emby_id=str(chosen),
+                                expiration=self._central_cache.persistent_cache.expiration,
+                            )
+                        except Exception:
+                            raise Failed
 
                     # Zusammenfassung loggen
                     wrong_ids = [pid for pid in ids_sorted if pid != chosen]
                     pname = tid_to_name.get(tid)
                     label = f"{tid} - {pname}" if pname else f"{tid}"
                     try:
-                        logger.warning(
-                            f"[get_person_info_bulk] TMDb-Person-ID {label} ist mehreren Emby-IDs zugeordnet: "
-                            f"{ids_sorted}. Verwende niedrigste ID {chosen}; ignoriere {wrong_ids}"
-                        )
+                        logger.warning(f"[get_person_info_bulk] {provider_name}-Person-ID {label} ist mehreren Emby-IDs zugeordnet: " f"{ids_sorted}. Verwende niedrigste ID {chosen}; ignoriere {wrong_ids}")
                     except Exception:
                         pass
 
+        lookup_elapsed = max(time.monotonic() - lookup_started, 0.001)
+        logger.exorcise()
+        logger.info(f"Emby {provider_name} People Lookup Complete | {len(norm_ids)} IDs | {len(result)} Matches | " f"{lookup_elapsed:.1f}s | {len(norm_ids) / lookup_elapsed:.1f} IDs/s")
         return result
 
     def _strip_alias_suffix(self, name: str, tmdb_id) -> str:
@@ -3808,11 +3810,12 @@ class EmbyServer:
         if not s or not s.endswith(tmdb_id):
             return s
         while s.endswith(tmdb_id):
-            s = s[:-len(tmdb_id)]
+            s = s[: -len(tmdb_id)]
         return s.strip()
 
     def _norm_name(self, s: str) -> str:
         import unicodedata
+
         s = unicodedata.normalize("NFKD", s or "")
         s = "".join(c for c in s if not unicodedata.combining(c))
         return _re.sub(r"\s+", " ", s).strip().casefold()
@@ -3843,9 +3846,7 @@ class EmbyServer:
 
         if current_name == "John Doe" and not current_provider_ids:
             try:
-                logger.info(
-                    f"[demote_duplicate_person] Emby person {emby_person_id} already cleared; skipping"
-                )
+                logger.info(f"[demote_duplicate_person] Emby person {emby_person_id} already cleared; skipping")
             except Exception:
                 pass
             return
@@ -3868,9 +3869,7 @@ class EmbyServer:
             raise Failed(f"Failed to demote Emby person {emby_person_id}: {err}") from err
 
         try:
-            logger.info(
-                f"[demote_duplicate_person] Cleared provider IDs and renamed Emby person {emby_person_id}"
-            )
+            logger.info(f"[demote_duplicate_person] Cleared provider IDs and renamed Emby person {emby_person_id}")
         except Exception:
             pass
 
@@ -3883,12 +3882,15 @@ class EmbyServer:
         Gibt die Anzahl bereinigter Einträge zurück.
         """
         import re as _re_alias
+
         self._ensure_http_session()
         params = {"Fields": "ProviderIds", "api_key": self.api_key}
         try:
             r = self.session.get(
                 f"{self.emby_server_url}/emby/Persons",
-                headers=self.headers, params=params, timeout=60,
+                headers=self.headers,
+                params=params,
+                timeout=60,
             )
             r.raise_for_status()
             items = r.json().get("Items", [])
@@ -3941,7 +3943,6 @@ class EmbyServer:
         job_to_type_role = {
             # Director
             "director": ("Director", None),
-
             # Writers
             "writer": ("Writer", "Autor"),
             "screenplay": ("Writer", None),
@@ -3955,14 +3956,12 @@ class EmbyServer:
             "characters": ("Writer", "Charaktere"),
             "original story": ("Writer", "Story"),
             "theatre play": ("Writer", "Theaterstück"),
-
             # Music
             "composer": ("Composer", None),
             "original music composer": ("Composer", "Filmmusik"),
             "lyricist": ("Lyricist", None),
             "songs": ("Lyricist", "Songs"),  # dein Beispiel
             "theme song performance": ("Lyricist", "Theme Song"),  # dein Beispiel
-
             # Other crew types you already support
             "producer": ("Producer", None),
             "conductor": ("Conductor", None),
@@ -3998,10 +3997,7 @@ class EmbyServer:
             "Conductor": [None],
             "Lyricist": ["Songs", "Theme Song", None],
         }
-        crew_role_priority_index = {
-            bucket_type: {role: idx for idx, role in enumerate(order)}
-            for bucket_type, order in crew_role_priority.items()
-        }
+        crew_role_priority_index = {bucket_type: {role: idx for idx, role in enumerate(order)} for bucket_type, order in crew_role_priority.items()}
 
         def crew_bucket_sort_key(entry: dict):
             bucket_type = entry.get("Type")
@@ -4019,25 +4015,23 @@ class EmbyServer:
             )
 
         # --- Robuste Filter ---
-        cast_filtered = [
-            a for a in (my_cast or [])
-            if not _re.search(r"\buncredited\b", (a.get("character") or ""), flags=_re.IGNORECASE)
-        ]
-        crew_filtered = [
-            m for m in (my_crew or [])
-            if (m.get("job") and (m.get("job").strip().lower() in allowed_jobs))
-        ]
+        cast_filtered = [a for a in (my_cast or []) if not _re.search(r"\buncredited\b", (a.get("character") or ""), flags=_re.IGNORECASE)]
+        crew_filtered = [m for m in (my_crew or []) if (m.get("job") and (m.get("job").strip().lower() in allowed_jobs))]
 
         # --- IDs sammeln (aus bereits gecachten Listen) ---
         tmdb_ids = [c.get("id") for c in (cast_filtered + crew_filtered) if c.get("id")]
         tmdb_ids = [int(t) for t in tmdb_ids if str(t).isdigit()]
 
         # --- 1) DB-Cache vorwärmen: emby_id + alias ---
-        db_map, db_missing, db_expired = self._central_cache.query_tmdb_person_map_bulk(
-            self.cache_server_key,
-            tmdb_ids,
-            3,
-        ) if self._central_cache is not None else ({}, set(tmdb_ids), set())
+        db_map, db_missing, db_expired = (
+            self._central_cache.query_tmdb_person_map_bulk(
+                self.cache_server_key,
+                tmdb_ids,
+                3,
+            )
+            if self._central_cache is not None
+            else ({}, set(tmdb_ids), set())
+        )
         # for tid, rec in db_map.items():
         #     l = rec.get("emby_id")
         #     if l and tid not in self.cached_tmdb_ids.keys() and tid not in db_expired:
@@ -4051,7 +4045,7 @@ class EmbyServer:
             items = []
             CHUNK = 100
             for i in range(0, len(emby_ids), CHUNK):
-                chunk = ",".join(emby_ids[i:i + CHUNK])
+                chunk = ",".join(emby_ids[i : i + CHUNK])
                 endpoint = f"/emby/Items?Ids={chunk}&Fields=ProviderIds,Type,Id&api_key={self.api_key}"
                 url = self.emby_server_url + endpoint
                 try:
@@ -4070,7 +4064,7 @@ class EmbyServer:
             for tid, eid in t2e.items():
                 it = by_id.get(str(eid))
                 if not it or it.get("Type") != "Person":
-                    stale.add(tid);
+                    stale.add(tid)
                     continue
                 prov = it.get("ProviderIds") or {}
                 prov_norm, tmdb_norm = self._norm_provider_ids(prov)
@@ -4118,10 +4112,7 @@ class EmbyServer:
         stale_due_validation = _validate_cached_person_mappings_local(needed_cached_map)
 
         # --- 2) Nur fehlende/abgelaufene gegen Emby auflösen ---
-        to_resolve = sorted({
-            tid for tid in tmdb_ids
-            if (tid not in self.cached_tmdb_ids) or (tid in db_expired)
-        })
+        to_resolve = sorted({tid for tid in tmdb_ids if (tid not in self.cached_tmdb_ids) or (tid in db_expired)})
         to_resolve = sorted(set(to_resolve) | set(stale_due_validation))
         # to_resolve = tmdb_ids
         resolved = {}
@@ -4134,7 +4125,7 @@ class EmbyServer:
         if resolved:
             self.cached_tmdb_ids.update({int(k): str(v) for k, v in resolved.items()})
         # === Aktuelle Emby-Namen prefetchen ===
-        needed_emby_ids =[]
+        needed_emby_ids = []
         for my_tmdb_id in tmdb_ids:
             if int(my_tmdb_id) in self.cached_tmdb_ids.keys():
                 needed_emby_ids.append(self.cached_tmdb_ids.get(int(my_tmdb_id), ""))
@@ -4164,9 +4155,7 @@ class EmbyServer:
         # ----- CAST ------
         # =================
 
-
-
-        for c in (cast_filtered or []):
+        for c in cast_filtered or []:
             tmdb_id = c.get("id")
             name = c.get("name")
             role = c.get("character") or None
@@ -4236,7 +4225,7 @@ class EmbyServer:
         # =================
         # ----- CREW ------
         # =================
-        for m in (crew_filtered or []):
+        for m in crew_filtered or []:
             tmdb_id = m.get("id")
             name = m.get("name")
             mapped = map_job(m.get("job"))
@@ -4289,7 +4278,7 @@ class EmbyServer:
         desired = []
         desired.extend(ordered_cast)
 
-        for t in crew_buckets.keys(): # ("Director", "Writer", "Producer", "Composer", "Conductor", "Lyricist"):
+        for t in crew_buckets.keys():  # ("Director", "Writer", "Producer", "Composer", "Conductor", "Lyricist"):
             bucket = crew_buckets[t]
             if bucket:
                 bucket.sort(key=crew_bucket_sort_key)
@@ -4309,24 +4298,13 @@ class EmbyServer:
 
     # --- Helfer: Vergleichssignatur ohne Name (nur Id/Type/Role & Reihenfolge) ---
     def _people_signature_no_name(self, people_list):
-        return [
-            (
-                str(p.get("Id") or ""),
-                p.get("Type") or "",
-                (p.get("Role") or None)
-            )
-            for p in (people_list or [])
-        ]
+        return [(str(p.get("Id") or ""), p.get("Type") or "", (p.get("Role") or None)) for p in (people_list or [])]
 
     # --- Helfer: Finde reine Namens-Abweichungen (mapping über Id) ---
     def _collect_person_name_fixes(self, current_people, desired_people):
-        desired_by_id = {
-            str(p.get("Id")): (p.get("Name") or "")
-            for p in (desired_people or [])
-            if p.get("Id") is not None
-        }
+        desired_by_id = {str(p.get("Id")): (p.get("Name") or "") for p in (desired_people or []) if p.get("Id") is not None}
         fixes = []  # [(person_id:str, desired_name:str)]
-        for p in (current_people or []):
+        for p in current_people or []:
             pid = str(p.get("Id") or "")
             if not pid or pid not in desired_by_id:
                 continue
@@ -4365,12 +4343,12 @@ class EmbyServer:
     # ==== Bulk-Fetch: /emby/Items?Ids=...&Fields=... ====
     # ==== Bulk-Fetch: /emby/Items?Ids=...&Fields=... ====
     def get_items_bulk(
-            self,
-            ids: list[str],
-            fields: list[str] | None = None,
-            *,
-            force_refresh: bool = False,
-            publish: bool = True,
+        self,
+        ids: list[str],
+        fields: list[str] | None = None,
+        *,
+        force_refresh: bool = False,
+        publish: bool = True,
     ) -> dict[str, dict]:
         """
         Holt Emby-Items in Batches (Ids=...), gibt dict[id] -> item zurück.
@@ -4386,6 +4364,12 @@ class EmbyServer:
         fetch_ids_all = [str(i) for i in ids if str(i).isdigit()]
         if not fetch_ids_all:
             return {}
+
+        # Load persisted item details before validating them through the bulk
+        # endpoint. This preserves fields such as Person LockedFields that Emby
+        # omits from bulk responses even when explicitly requested.
+        if getattr(self, "_central_cache", None) is not None and getattr(self, "cache_server_key", None):
+            self._central_cache.hydrate(self.cache_server_key, fetch_ids_all)
 
         # Felder normalisieren (Mengenvergleich), Request-Parameter aber in stabiler Reihenfolge senden
         fields = fields or []
@@ -4431,7 +4415,7 @@ class EmbyServer:
         # 2) Fehlende/nicht vollständige Items in Batches nachladen — parallel
         if to_fetch:
             url = f"{self.emby_server_url}/emby/Items"
-            batches = [to_fetch[i:i + CHUNK] for i in range(0, len(to_fetch), CHUNK)]
+            batches = [to_fetch[i : i + CHUNK] for i in range(0, len(to_fetch), CHUNK)]
 
             def _fetch_batch(batch):
                 params = {"Ids": ",".join(batch), "api_key": self.api_key}
@@ -4443,6 +4427,7 @@ class EmbyServer:
                 return data.get("Items") or data.get("items") or []
 
             from concurrent.futures import ThreadPoolExecutor, as_completed
+
             max_workers = min(6, max(1, len(batches)))
             all_fetched: list[dict] = []
             if len(batches) == 1:
@@ -4457,11 +4442,7 @@ class EmbyServer:
                             logger.warning(f"Emby bulk batch failed: {e}")
 
             now_fetch = time.time()
-            if (
-                    publish
-                    and getattr(self, "_central_cache", None) is not None
-                    and getattr(self, "cache_server_key", None)
-            ):
+            if publish and getattr(self, "_central_cache", None) is not None and getattr(self, "cache_server_key", None):
                 records = self._central_cache.upsert_items(
                     self.cache_server_key,
                     all_fetched,
@@ -4511,7 +4492,6 @@ class EmbyServer:
         tmdb_str = str(tmdb_val) if tmdb_val not in (None, "", 0) else None
         return d, tmdb_str
 
-
     def sync_people(self, emby_item: dict, my_cast: list, my_crew: list):
         # ---------- Init ----------
         changed = False
@@ -4533,7 +4513,7 @@ class EmbyServer:
         def _cheap_key(lst, with_id=False):
             # Multiset über (Type, Role, BaseName) – optional mit Id
             key = {}
-            for p in (lst or []):
+            for p in lst or []:
                 typ = p.get("Type") or ""
                 role = p.get("Role") or None
                 name = (p.get("Name") or "").strip()
@@ -4546,12 +4526,10 @@ class EmbyServer:
         desired_people = self.build_emby_people_from_tmdb(my_cast, my_crew, provider="Tmdb")
         # return False, [], []
         # 1) Alias/ID-unabhängige Struktur (Type, Role, BaseName)
-        names_eq = (_cheap_key(current_people, with_id=False) ==
-                    _cheap_key(desired_people, with_id=False))
+        names_eq = _cheap_key(current_people, with_id=False) == _cheap_key(desired_people, with_id=False)
 
         # 2) Streng inkl. Id (falls du unterscheiden willst, ob nur Id/Name abweichen)
-        full_eq = (_cheap_key(current_people, with_id=True) ==
-                   _cheap_key(desired_people, with_id=True))
+        full_eq = _cheap_key(current_people, with_id=True) == _cheap_key(desired_people, with_id=True)
 
         if names_eq and full_eq:
             # wirklich gar nichts zu tun
@@ -4623,8 +4601,6 @@ class EmbyServer:
 
         # ---- EARLY PATH 2: gleiche Struktur (Type,Role,Basename), aber Id/Name differieren ----
 
-
-
         people_alias_revert = []  # (pid, (alias_name/old_name, clean_name/new_name, tmdb_id))
         _seen_alias_reverts = set()  # (pid, alias_or_old_name)
         _pending_alias_revert = []
@@ -4695,7 +4671,7 @@ class EmbyServer:
             self.update_item(item_id, {"People": people})
 
         # ---------- Crash-Recovery: vorhandene Aliase vormerken (sehr billig) ----------
-        for p in (current_people or []):
+        for p in current_people or []:
             nm = (p.get("Name") or "").strip()
             clean, tid = _alias_parts(nm)
             if not (clean and tid):
@@ -4714,13 +4690,15 @@ class EmbyServer:
         def _cheap_key(lst):
             # (Type, Id, Role, BaseName(Name)) -> Set
             out = set()
-            for p in (lst or []):
-                out.add((
-                    p.get("Type") or "",
-                    str(p.get("Id") or ""),
-                    p.get("Role") or None,
-                    _base_name(p.get("Name")),
-                ))
+            for p in lst or []:
+                out.add(
+                    (
+                        p.get("Type") or "",
+                        str(p.get("Id") or ""),
+                        p.get("Role") or None,
+                        _base_name(p.get("Name")),
+                    )
+                )
             return out
 
         if _cheap_key(current_people) == _cheap_key(desired_people):
@@ -4728,10 +4706,7 @@ class EmbyServer:
             return False, "", []
 
         # ---------- PHASE A: Duplikate (gleiche TMDb) vorbereiten (per Cache) ----------
-        numeric_pids = set(
-            [str(p.get("Id")) for p in current_people if str(p.get("Id") or "").isdigit()] +
-            [str(p.get("Id")) for p in desired_people if str(p.get("Id") or "").isdigit()]
-        )
+        numeric_pids = set([str(p.get("Id")) for p in current_people if str(p.get("Id") or "").isdigit()] + [str(p.get("Id")) for p in desired_people if str(p.get("Id") or "").isdigit()])
         missing = [pid for pid in numeric_pids if pid not in self._bulk_person_cache]
         if missing:
             fetched = self.get_items_bulk(sorted(missing), fields=["ProviderIds", "Name"]) or {}
@@ -4742,7 +4717,7 @@ class EmbyServer:
         id_to_item = {pid: self._bulk_person_cache.get(pid, {}) for pid in numeric_pids}
 
         desired_pid_by_tmdb = {}
-        for dp in (desired_people or []):
+        for dp in desired_people or []:
             tid = dp.get("Tmdb") or dp.get("tmdb")
             pid = str(dp.get("Id") or "")
             if tid and str(pid).isdigit() and (tid not in desired_pid_by_tmdb):
@@ -4767,10 +4742,7 @@ class EmbyServer:
         des_sig = self._people_signature_no_name(desired_people)
 
         # Index aktuelle Personen nach (Type,Role,BaseName)
-        cur_idx = {
-            (p.get("Type") or "", p.get("Role") or None, _base_name(p.get("Name"))): p
-            for p in current_people_norm
-        }
+        cur_idx = {(p.get("Type") or "", p.get("Role") or None, _base_name(p.get("Name"))): p for p in current_people_norm}
 
         # ---------- PHASE C: TMDb an bestehender Person ergänzen (idempotent) ----------
         for dp in desired_people:
@@ -4795,7 +4767,7 @@ class EmbyServer:
         # ---------- PHASE D: temporäre Aliase nur wenn nötig ----------
         # Name->PID Index (Alias + Basename mappen)
         cur_by_name = {}
-        for p in (current_people or []):
+        for p in current_people or []:
             nm = (p.get("Name") or "").strip()
             pid = str(p.get("Id") or "")
             if not nm:
@@ -4836,7 +4808,7 @@ class EmbyServer:
 
         # Name -> Menge unterschiedlicher Ziel-IDs
         name_to_target_ids = {}
-        for dp in (desired_people or []):
+        for dp in desired_people or []:
             tid = dp.get("Tmdb") or dp.get("tmdb")
             clean = _strip_alias_suffix(dp.get("Name") or "", tid)
             pid = str(dp.get("Id") or "")
@@ -4862,7 +4834,7 @@ class EmbyServer:
         temp_renames = {}  # emby_pid -> (alias_name, clean_name, tmdb)
         people_payload = []  # gewünschte Liste (ohne Tmdb-Key)
 
-        for dp in (desired_people or []):
+        for dp in desired_people or []:
             pid = str(dp.get("Id") or "")
             typ = dp.get("Type") or ""
             role = dp.get("Role")
@@ -4901,8 +4873,7 @@ class EmbyServer:
                                 self._demote_duplicate_person(cur_pid)
                                 demoted_pids_local.add(cur_pid)
                                 try:
-                                    logger.info(
-                                        f"[sync_people] Demoted duplicate person pid={cur_pid} (name='{clean}', tmdb={cur_tmdb})")
+                                    logger.info(f"[sync_people] Demoted duplicate person pid={cur_pid} (name='{clean}', tmdb={cur_tmdb})")
                                 except Exception:
                                     pass
                         else:
@@ -4930,16 +4901,19 @@ class EmbyServer:
 
         # ----- Update-Entscheidung (idempotent) -----
         def _namekey(lst):
-            def _norm_role(r): return "" if r is None else str(r)
+            def _norm_role(r):
+                return "" if r is None else str(r)
 
             out = []
-            for p in (lst or []):
-                out.append((
-                    str(p.get("Type") or ""),
-                    str(p.get("Id") or ""),
-                    _norm_role(p.get("Role")),
-                    (p.get("Name") or "").strip(),
-                ))
+            for p in lst or []:
+                out.append(
+                    (
+                        str(p.get("Type") or ""),
+                        str(p.get("Id") or ""),
+                        _norm_role(p.get("Role")),
+                        (p.get("Name") or "").strip(),
+                    )
+                )
             out.sort()
             return out
 
@@ -4947,7 +4921,7 @@ class EmbyServer:
         desired_namekey = _namekey(people_payload)
 
         need_struct_update = (cur_sig != des_sig) or any(not str(p.get("Id") or "").isdigit() for p in people_payload)
-        need_name_update = (current_namekey != desired_namekey)
+        need_name_update = current_namekey != desired_namekey
         need_item_update = need_struct_update or need_name_update
 
         # 3) Demote jetzt, aber nie PIDs demoten, die wir eben verwenden
@@ -5017,7 +4991,6 @@ class EmbyServer:
                     except Exception as _e_revert:
                         logger.warning(f"[sync_people] Alias-Revert fehlgeschlagen pid={emby_pid}: {_e_revert}")
 
-
         # ---------- PHASE E: Name-Fixes (nur sammeln; keine Sofort-Updates) ----------
         def _is_alias_name(nm: str) -> bool:
             s = (nm or "").strip()
@@ -5031,18 +5004,14 @@ class EmbyServer:
         des_sig2 = self._people_signature_no_name(desired_people)
 
         if (cur_sig2 == des_sig2) and not has_aliases:
-            tmdb_by_pid = {
-                str(p.get("Id")): p.get("Tmdb")
-                for p in desired_people
-                if str(p.get("Id") or "").isdigit() and p.get("Tmdb")
-            }
+            tmdb_by_pid = {str(p.get("Id")): p.get("Tmdb") for p in desired_people if str(p.get("Id") or "").isdigit() and p.get("Tmdb")}
             desired_for_namefix = []
             for dp in desired_people:
                 nm = dp.get("Name") or ""
                 tid = dp.get("Tmdb")
                 if tid and str(nm).endswith(f"-{tid}"):
                     dp2 = dict(dp)
-                    dp2["Name"] = nm[:-(len(str(tid)) + 1)]
+                    dp2["Name"] = nm[: -(len(str(tid)) + 1)]
                     desired_for_namefix.append(dp2)
                 else:
                     desired_for_namefix.append(dp)
@@ -5060,7 +5029,7 @@ class EmbyServer:
 
         # ---------- Defensiver Fallback: finalen Payload scannen ----------
         try:
-            for p in (people_payload or []):
+            for p in people_payload or []:
                 pid = str(p.get("Id") or "")
                 nm = (p.get("Name") or "").strip()
                 clean, tid = _alias_parts(nm)
@@ -5085,7 +5054,7 @@ class EmbyServer:
                 return p.get("Role") or None
 
             def _type(p):
-                return (p.get("Type") or "")
+                return p.get("Type") or ""
 
             def _pkey(p):
                 return (_type(p), str(p.get("Id") or ""), _role(p))
@@ -5125,6 +5094,7 @@ class EmbyServer:
             removed_people = [prev_map[k] for k in removed_keys]
 
             from collections import defaultdict
+
             add_by_tr = defaultdict(list)
             rem_by_tr = defaultdict(list)
             for p in added_people:
@@ -5145,7 +5115,7 @@ class EmbyServer:
 
             def _group_by_type(lst):
                 g = defaultdict(list)
-                for p in (lst or []):
+                for p in lst or []:
                     g[_type(p)].append(p)
                 return g
 
@@ -5161,17 +5131,13 @@ class EmbyServer:
                 credited = [p for p in persons if not _is_uncredited(p)]
                 uncred = [p for p in persons if _is_uncredited(p)]
                 if credited:
-                    events.append(
-                        f"REMOVE {typ}: " + _fmt_people_list(credited, limit=6, with_pid=True, with_role=True))
+                    events.append(f"REMOVE {typ}: " + _fmt_people_list(credited, limit=6, with_pid=True, with_role=True))
                 if uncred:
                     events.append(f"REMOVE {typ} (uncredited): {len(uncred)} entfernt")
 
             for r, a in replaced_pairs:
                 role_txt = f" role={_role(a)}" if _role(a) else ""
-                events.append(
-                    f"REPLACE {_type(a)}{role_txt}: {_nm(r)} (pid={r.get('Id')}) -> {_nm(a)} (pid={a.get('Id')})"
-                    + (f", tmdb={a.get('Tmdb')}" if a.get('Tmdb') else "")
-                )
+                events.append(f"REPLACE {_type(a)}{role_txt}: {_nm(r)} (pid={r.get('Id')}) -> {_nm(a)} (pid={a.get('Id')})" + (f", tmdb={a.get('Tmdb')}" if a.get("Tmdb") else ""))
 
             tmdb_added = log.get("tmdb_added") or []
             if tmdb_added:
@@ -5215,11 +5181,7 @@ class EmbyServer:
         if not changed:
             return False, "", people_alias_revert
 
-        item_edits = build_people_change_events(
-            current_people=current_people,
-            desired_people=people_payload,  # gegen tatsächlichen Schreibzustand diffen
-            log=log
-        )
+        item_edits = build_people_change_events(current_people=current_people, desired_people=people_payload, log=log)  # gegen tatsächlichen Schreibzustand diffen
         return True, "; ".join(item_edits), people_alias_revert
 
     # --- Zeichentests / Normalisierung ---
@@ -5227,13 +5189,10 @@ class EmbyServer:
         if not s:
             return False
         # akzeptiere Basis- und erweiterte Latin-Blocks + übliche Satzzeichen/Leerzeichen
-        return all(
-            (('LATIN' in unicodedata.name(ch, '')) or not ch.isalpha())
-            for ch in s
-        )
+        return all((("LATIN" in unicodedata.name(ch, "")) or not ch.isalpha()) for ch in s)
 
     def _ascii_sort(self, s: str) -> str:
-        return self._strip_accents(s or '').strip()
+        return self._strip_accents(s or "").strip()
 
     # --- TMDb: helper, robust gegen fehlende Felder ---
     def _tmdb_person_translated_name_en(self, person_id: int | str) -> str | None:
@@ -5242,14 +5201,13 @@ class EmbyServer:
         """
         try:
             # tmdbapis RAW-V3: person_get_translations
-            my_tmdb= self.config.TMDb
+            my_tmdb = self.config.TMDb
             data = my_tmdb.API3.person_get_translations(int(person_id))
             trs = (data or {}).get("translations") or []
             # erst en-US, dann en
             for pref in ("en-US", "en"):
                 for t in trs:
-                    if (t.get("iso_639_1") == "en" and (t.get("iso_3166_1") in (None, "", "US"))) or \
-                            (f'{t.get("iso_639_1", "")}-{t.get("iso_3166_1", "")}' == pref):
+                    if (t.get("iso_639_1") == "en" and (t.get("iso_3166_1") in (None, "", "US"))) or (f'{t.get("iso_639_1", "")}-{t.get("iso_3166_1", "")}' == pref):
                         name = ((t.get("data") or {}).get("name") or "").strip()
                         if name:
                             return name
@@ -5269,7 +5227,7 @@ class EmbyServer:
         """
         try:
             # RAW-V3: person_get_details; language hier egal, Name/Aliase sind nicht lokalisiert
-            my_tmdb= self.config.TMDb
+            my_tmdb = self.config.TMDb
             p = my_tmdb.API3.person_get_details(int(person_id))
             aliases = (p or {}).get("also_known_as") or []
             for alias in aliases:
@@ -5286,12 +5244,12 @@ class EmbyServer:
         """
         try:
             from unidecode import unidecode
+
             r = unidecode(name or "").strip()
             return r if r else name
         except Exception:
             # notfalls Akzente nur strippen
             return self._strip_accents(name or "").strip()
-
 
     def get_romanized_person_name(self, tmdb_person_id: int | str, original_name: str) -> str | None:
         """
@@ -5364,7 +5322,6 @@ class EmbyServer:
         print(f"Changed person name '{current_name}' to '{latin}'")
         return self.update_item(emby_person_id, payload)
 
-
     def _bind_placeholders_to_existing(self, current_people: list[dict], desired_people: list[dict]) -> bool:
         """
         Sucht in current_people (ohne Alias) passende Personen per Name+Type und
@@ -5373,14 +5330,14 @@ class EmbyServer:
         """
         # Index: (etype, norm_name) -> emby_id
         by_name = {}
-        for p in (current_people or []):
+        for p in current_people or []:
             et = p.get("Type") or ""
             nm = self._norm_name(p.get("Name") or "")
             if et and nm:
                 by_name[(et, nm)] = str(p.get("Id") or "")
 
         changed = False
-        for dp in (desired_people or []):
+        for dp in desired_people or []:
             et = dp.get("Type") or ""
             tmdb = dp.get("Tmdb")
             nm_clean = self._strip_alias_suffix(dp.get("Name") or "", tmdb)

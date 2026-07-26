@@ -20,6 +20,30 @@ def test_notfound_is_failed_subclass():
     assert issubclass(tmdb.NotFound, Failed)
 
 
+def test_wikidata_person_ids_extract_tmdb_tvdb_and_imdb_claims(monkeypatch):
+    t = _bare_tmdb(monkeypatch)
+    t.requests = MagicMock()
+    t.requests.get_json.return_value = {
+        "entities": {
+            "Q92404": {
+                "claims": {
+                    "P4985": [{"mainsnak": {"datavalue": {"value": "1041578"}}}],
+                    "P7920": [{"mainsnak": {"datavalue": {"value": "8237646"}}}],
+                    "P345": [{"mainsnak": {"datavalue": {"value": "nm0460177"}}}],
+                }
+            }
+        }
+    }
+
+    assert t.get_wikidata_person_ids("q92404") == {
+        "wikidata_id": "Q92404",
+        "tmdb_id": 1041578,
+        "tvdb_id": "8237646",
+        "imdb_id": "nm0460177",
+    }
+    assert t.requests.get_json.call_args.kwargs["params"]["ids"] == "Q92404"
+
+
 def test_get_collection_raises_notfound_for_deleted_collection(monkeypatch):
     t = _bare_tmdb(monkeypatch)
 

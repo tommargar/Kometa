@@ -124,8 +124,8 @@ class Library(ABC):
         self.mass_background_update = params["mass_background_update"]
         self.mass_logo_update = params["mass_logo_update"]
         self.mass_square_art_update = params["mass_square_art_update"]
-        # Experimental Emby Cast & Crew updates are intentionally disabled.
-        self.mass_cast_and_crew_update = False
+        self.mass_cast_and_crew_update = params["mass_cast_and_crew_update"]
+        self.movie_cast_source = params["movie_cast_source"] or "tmdb"
         self.radarr_add_all_existing = params["radarr_add_all_existing"]
         self.radarr_remove_by_tag = params["radarr_remove_by_tag"]
         self.sonarr_add_all_existing = params["sonarr_add_all_existing"]
@@ -465,7 +465,8 @@ class Library(ABC):
                     # New code to catch errors for TMDB images
                     ok = True
                     if attr != f"file_{image_type}":
-                        import urllib.request, urllib.error
+                        import urllib.error
+                        import urllib.request
                         try:
                             ok = urllib.request.urlopen(urllib.request.Request(images[attr], method='HEAD'), timeout=5).status != 404
                         except urllib.error.HTTPError as e:

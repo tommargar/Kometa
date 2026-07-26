@@ -10,6 +10,9 @@
     "tmdb": {
       "$ref": "#/definitions/tmdb-api"
     },
+    "tvdb": {
+      "$ref": "#/definitions/tvdb-api"
+    },
     "tautulli": {
       "$ref": "#/definitions/tautulli-api"
     },
@@ -947,6 +950,38 @@
       },
       "required": [],
       "title": "webhooks"
+    },
+    "tvdb-api": {
+      "description": "API information used to load TVDb Cast and Crew for Emby libraries.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "apikey": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pin": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cache_expiration": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "An integer greater than 0 in days"
+        },
+        "language": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [],
+      "title": "tvdb"
     },
     "omdb-api": {
       "type": "object",
@@ -4785,6 +4820,19 @@
             },
             "split_duplicates": {
               "type": "boolean"
+            },
+            "mass_cast_and_crew_update": {
+              "description": "Synchronize Emby Cast and Crew from an external credit source using provider-backed person identities.",
+              "type": "boolean"
+            },
+            "movie_cast_source": {
+              "description": "Select the movie Cast source. TVDb changes only Cast; movie Crew continues to come from TMDb.",
+              "type": "string",
+              "enum": [
+                "tmdb",
+                "tvdb"
+              ],
+              "default": "tmdb"
             },
             "radarr_add_all": {
               "type": "boolean"

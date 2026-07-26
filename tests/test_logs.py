@@ -40,6 +40,34 @@ class TestMyLogger:
         # somehow pollute it by tripping over a recorded value.
         assert logger.info_center not in ["x"]
 
+    def test_closed_console_does_not_abort_ghost_or_exorcise(self, logger, monkeypatch):
+        monkeypatch.setattr("builtins.print", MagicMock(side_effect=OSError(22, "Invalid argument")))
+
+        logger.ghost("still working")
+        logger.exorcise()
+
+        assert logger.ignore_ghost is True
+        assert logger.spacing == 0
+
+    def test_locked_log_rollover_falls_back_to_append(self, logger, monkeypatch, tmp_path):
+        from modules import logs
+
+        log_file = tmp_path / "meta.log"
+        log_file.write_text("active log\n", encoding="utf-8")
+
+        def locked_rollover(handler):
+            raise PermissionError(32, "file is in use", str(log_file))
+
+        monkeypatch.setattr(logs.RotatingFileHandler, "doRollover", locked_rollover)
+
+        handler = logger._get_handler(str(log_file), count=9)
+        try:
+            assert handler.mode == "a"
+            logger._logger.warning.assert_called_once()
+            assert log_file.read_text(encoding="utf-8") == "active log\n"
+        finally:
+            handler.close()
+
 
 class TestSecretRedaction:
     @pytest.fixture

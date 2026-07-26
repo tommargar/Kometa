@@ -802,6 +802,8 @@ class Emby(Library):
             _collect_ids(edits)
         
         if all_ids_to_fetch:
+            bulk_started = time.monotonic()
+            logger.info(f"Emby batch metadata cache warmup | {len(all_ids_to_fetch)} Items")
             # Ensure we fetch all fields needed to preserve item state during update
             fields = [
                 "Budget", "Chapters", "DateCreated", "Genres", "HomePageUrl", "IndexOptions", "MediaStreams",
@@ -811,6 +813,7 @@ class Emby(Library):
                 "MediaSources", "OriginalTitle"
             ]
             self.EmbyServer.get_items_bulk(list(all_ids_to_fetch), fields=fields)
+            logger.info(f"Emby batch metadata cache warmup complete | {len(all_ids_to_fetch)} Items | {time.monotonic() - bulk_started:.1f}s")
 
         def log_batch(display_attr, total_count, display_value=None, out_type=None, tag_type=None, is_episode=False):
             logger.info(

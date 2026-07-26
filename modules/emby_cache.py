@@ -18,6 +18,7 @@ class EmbyCacheCoordinator:
 
     def __init__(self, persistent_cache):
         self.persistent_cache = persistent_cache
+        self.expiration = persistent_cache.expiration
         self._lock = threading.RLock()
         self._db_lock = threading.Lock()
         self._servers = {}
@@ -170,13 +171,7 @@ class EmbyCacheCoordinator:
             library_state["views"][view_key] = current_ids
             if changed_ids or removed_ids or added_ids:
                 library_state["search_choices_cache"].clear()
-            referenced_ids = {
-                str(view_item_id)
-                for (bound_server, _), bound_library in self._libraries.items()
-                if bound_server == str(server_key)
-                for view_ids in bound_library["views"].values()
-                for view_item_id in view_ids
-            }
+            referenced_ids = {str(view_item_id) for (bound_server, _), bound_library in self._libraries.items() if bound_server == str(server_key) for view_ids in bound_library["views"].values() for view_item_id in view_ids}
             for item_id in removed_ids:
                 if item_id not in referenced_ids:
                     state["items"].pop(item_id, None)
@@ -207,11 +202,7 @@ class EmbyCacheCoordinator:
     def library_item_ids(self, server_key, library_id):
         library_state = self.bind_library(server_key, library_id)
         with self._lock:
-            return {
-                str(item_id)
-                for view_ids in library_state["views"].values()
-                for item_id in view_ids
-            }
+            return {str(item_id) for view_ids in library_state["views"].values() for item_id in view_ids}
 
     def invalidate_item(self, server_key, item_id, dirty=True):
         state = self.bind_server(server_key)
@@ -243,6 +234,42 @@ class EmbyCacheCoordinator:
         with self._db_lock:
             return self.persistent_cache.update_tmdb_person_map(server_key, expired, tmdb_id, **kwargs)
 
+    def query_emby_person_identities(self, server_key, tmdb_ids=None):
+        with self._db_lock:
+            return self.persistent_cache.query_emby_person_identities(server_key, tmdb_ids)
+
+    def update_emby_person_identity(self, server_key, *args, **kwargs):
+        with self._db_lock:
+            return self.persistent_cache.update_emby_person_identity(server_key, *args, **kwargs)
+
+    def update_emby_person_identities(self, server_key, identities):
+        with self._db_lock:
+            return self.persistent_cache.update_emby_person_identities(server_key, identities)
+
+    def update_emby_person_verifications(self, server_key, identities):
+        with self._db_lock:
+            return self.persistent_cache.update_emby_person_verifications(server_key, identities)
+
+    def clear_emby_person_identity_mapping(self, server_key, tmdb_id):
+        with self._db_lock:
+            return self.persistent_cache.clear_emby_person_identity_mapping(server_key, tmdb_id)
+
+    def query_emby_people_item_states(self, server_key, item_ids):
+        with self._db_lock:
+            return self.persistent_cache.query_emby_people_item_states(server_key, item_ids)
+
+    def update_emby_people_item_state(self, server_key, *args):
+        with self._db_lock:
+            return self.persistent_cache.update_emby_people_item_state(server_key, *args)
+
+    def replace_emby_item_people_links(self, server_key, item_id, tmdb_ids):
+        with self._db_lock:
+            return self.persistent_cache.replace_emby_item_people_links(server_key, item_id, tmdb_ids)
+
+    def query_emby_items_for_people(self, server_key, tmdb_ids):
+        with self._db_lock:
+            return self.persistent_cache.query_emby_items_for_people(server_key, tmdb_ids)
+
     def query_false_friend_names(self, server_key):
         state = self.bind_server(server_key)
         with self._lock:
@@ -270,6 +297,21 @@ class EmbyCacheCoordinator:
                     state["false_friend_names"] = set()
                 state["false_friend_names"].add(normalized)
         return inserted
+
+    def query_tvdb_people_external_ids(self, tvdb_ids, expiration):
+        with self._db_lock:
+            return self.persistent_cache.query_tvdb_people_external_ids(
+                "external-providers",
+                tvdb_ids,
+                expiration,
+            )
+
+    def update_tvdb_people_external_ids(self, external_ids):
+        with self._db_lock:
+            return self.persistent_cache.update_tvdb_people_external_ids(
+                "external-providers",
+                external_ids,
+            )
 
     def close(self):
         self.persistent_cache.close()
@@ -325,6 +367,63 @@ class EmbyCacheDatabase:
                     alias TEXT,
                     meta_json TEXT,
                     expiration_date TEXT)""")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS tvdb_people_external_ids (
+                    tvdb_id INTEGER PRIMARY KEY,
+                    tmdb_id INTEGER,
+                    imdb_id TEXT,
+                    wikidata_id TEXT,
+                    expiration_date TEXT)""")
+                cursor.execute("PRAGMA table_info(tvdb_people_external_ids)")
+                if "wikidata_id" not in {row[1] for row in cursor.fetchall()}:
+                    cursor.execute("ALTER TABLE tvdb_people_external_ids ADD COLUMN wikidata_id TEXT")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS emby_person_identity (
+                    tmdb_id INTEGER PRIMARY KEY,
+                    imdb_id TEXT,
+                    tvdb_id TEXT,
+                    wikidata_id TEXT,
+                    base_name TEXT NOT NULL,
+                    normalized_name TEXT NOT NULL,
+                    name_index INTEGER,
+                    display_name TEXT NOT NULL,
+                    emby_id TEXT,
+                    emby_etag TEXT,
+                    emby_signature TEXT,
+                    duplicate_emby_ids TEXT,
+                    verified_at TEXT,
+                    external_verified_at TEXT,
+                    canonical_id INTEGER)""")
+                cursor.execute("PRAGMA table_info(emby_person_identity)")
+                identity_columns = [row[1] for row in cursor.fetchall()]
+                if "emby_etag" not in identity_columns:
+                    cursor.execute("ALTER TABLE emby_person_identity ADD COLUMN emby_etag TEXT")
+                if "emby_signature" not in identity_columns:
+                    cursor.execute("ALTER TABLE emby_person_identity ADD COLUMN emby_signature TEXT")
+                if "duplicate_emby_ids" not in identity_columns:
+                    cursor.execute("ALTER TABLE emby_person_identity ADD COLUMN duplicate_emby_ids TEXT")
+                if "canonical_id" not in identity_columns:
+                    cursor.execute("ALTER TABLE emby_person_identity ADD COLUMN canonical_id INTEGER")
+                if "external_verified_at" not in identity_columns:
+                    cursor.execute("ALTER TABLE emby_person_identity ADD COLUMN external_verified_at TEXT")
+                if "wikidata_id" not in identity_columns:
+                    cursor.execute("ALTER TABLE emby_person_identity ADD COLUMN wikidata_id TEXT")
+                cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_emby_person_identity_name_index " "ON emby_person_identity(normalized_name, name_index) " "WHERE name_index IS NOT NULL")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_emby_person_identity_emby ON emby_person_identity(emby_id)")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS emby_people_item_state (
+                    library_id TEXT NOT NULL,
+                    item_id TEXT PRIMARY KEY,
+                    tmdb_id INTEGER NOT NULL,
+                    emby_etag TEXT,
+                    credits_source TEXT NOT NULL DEFAULT 'tmdb',
+                    source_credits_hash TEXT,
+                    applied_hash TEXT,
+                    sync_version INTEGER NOT NULL,
+                    last_success TEXT)""")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_emby_people_item_state_library ON emby_people_item_state(library_id)")
+                cursor.execute("""CREATE TABLE IF NOT EXISTS emby_item_person (
+                    item_id TEXT NOT NULL,
+                    tmdb_id INTEGER NOT NULL,
+                    PRIMARY KEY(item_id, tmdb_id))""")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_emby_item_person_tmdb ON emby_item_person(tmdb_id)")
                 cursor.execute("CREATE TABLE IF NOT EXISTS false_friend_names (name TEXT PRIMARY KEY)")
             connection.commit()
             self._connections[server_key] = connection
@@ -347,11 +446,10 @@ class EmbyCacheDatabase:
         with self.connection(server_key) as connection:
             with closing(connection.cursor()) as cursor:
                 for start in range(0, len(normalized_ids), 500):
-                    batch = normalized_ids[start:start + 500]
+                    batch = normalized_ids[start : start + 500]
                     placeholders = ",".join("?" for _ in batch)
                     cursor.execute(
-                        f"SELECT item_id, etag, fields_json, item_json FROM emby_item_cache "
-                        f"WHERE item_id IN ({placeholders})",
+                        f"SELECT item_id, etag, fields_json, item_json FROM emby_item_cache " f"WHERE item_id IN ({placeholders})",
                         batch,
                     )
                     for row in cursor.fetchall():
@@ -430,20 +528,15 @@ class EmbyCacheDatabase:
                 )
                 cursor.executemany(
                     "INSERT INTO emby_library_items(library_id, view_key, item_id, etag, updated_at) VALUES(?, ?, ?, ?, ?)",
-                    [
-                        (library_id, view_key, str(item_id), record.get("etag"), now)
-                        for item_id, record in records.items()
-                    ],
+                    [(library_id, view_key, str(item_id), record.get("etag"), now) for item_id, record in records.items()],
                 )
-                cursor.execute(
-                    """
+                cursor.execute("""
                     DELETE FROM emby_item_cache
                     WHERE NOT EXISTS (
                         SELECT 1 FROM emby_library_items
                         WHERE emby_library_items.item_id = emby_item_cache.item_id
                     )
-                    """
-                )
+                    """)
 
     def delete_emby_item(self, server_key, item_id):
         with self.connection(server_key) as connection:
@@ -502,15 +595,322 @@ class EmbyCacheDatabase:
                     ),
                 )
 
+    def query_emby_person_identities(self, server_key, tmdb_ids=None):
+        identities = {}
+        with self.connection(server_key) as connection:
+            with closing(connection.cursor()) as cursor:
+                params = []
+                sql = "SELECT * FROM emby_person_identity"
+                if tmdb_ids is not None:
+                    normalized_ids = sorted({int(tmdb_id) for tmdb_id in tmdb_ids if str(tmdb_id).lstrip("-").isdigit()})
+                    if not normalized_ids:
+                        return identities
+                    sql += f" WHERE tmdb_id IN ({','.join('?' for _ in normalized_ids)})"
+                    params.extend(normalized_ids)
+                cursor.execute(sql, tuple(params))
+                for row in cursor.fetchall():
+                    identities[int(row["tmdb_id"])] = {
+                        "tmdb_id": int(row["tmdb_id"]),
+                        "imdb_id": row["imdb_id"],
+                        "tvdb_id": row["tvdb_id"],
+                        "wikidata_id": row["wikidata_id"],
+                        "base_name": row["base_name"],
+                        "normalized_name": row["normalized_name"],
+                        "name_index": row["name_index"],
+                        "display_name": row["display_name"],
+                        "emby_id": row["emby_id"],
+                        "emby_etag": row["emby_etag"],
+                        "emby_signature": row["emby_signature"],
+                        "duplicate_emby_ids": json.loads(row["duplicate_emby_ids"]) if row["duplicate_emby_ids"] else [],
+                        "verified_at": row["verified_at"],
+                        "external_verified_at": row["external_verified_at"],
+                        "canonical_id": row["canonical_id"],
+                    }
+        return identities
+
+    def update_emby_person_identity(
+        self,
+        server_key,
+        tmdb_id,
+        base_name,
+        normalized_name,
+        display_name,
+        name_index=None,
+        emby_id=None,
+        imdb_id=None,
+        tvdb_id=None,
+        wikidata_id=None,
+        emby_etag=None,
+        emby_signature=None,
+        duplicate_emby_ids=None,
+        verified_at=None,
+        external_verified_at=None,
+        canonical_id=None,
+    ):
+        with self.connection(server_key) as connection:
+            with closing(connection.cursor()) as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO emby_person_identity(
+                        tmdb_id, imdb_id, tvdb_id, wikidata_id, base_name, normalized_name,
+                        name_index, display_name, emby_id, emby_etag, emby_signature, duplicate_emby_ids, verified_at, external_verified_at, canonical_id
+                    ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(tmdb_id) DO UPDATE SET
+                        imdb_id = excluded.imdb_id,
+                        tvdb_id = excluded.tvdb_id,
+                        wikidata_id = excluded.wikidata_id,
+                        base_name = excluded.base_name,
+                        normalized_name = excluded.normalized_name,
+                        name_index = excluded.name_index,
+                        display_name = excluded.display_name,
+                        emby_id = excluded.emby_id,
+                        emby_etag = excluded.emby_etag,
+                        emby_signature = excluded.emby_signature,
+                        duplicate_emby_ids = excluded.duplicate_emby_ids,
+                        verified_at = excluded.verified_at,
+                        external_verified_at = excluded.external_verified_at,
+                        canonical_id = excluded.canonical_id
+                    """,
+                    (
+                        int(tmdb_id),
+                        imdb_id,
+                        tvdb_id,
+                        wikidata_id,
+                        base_name,
+                        normalized_name,
+                        name_index,
+                        display_name,
+                        str(emby_id) if emby_id is not None else None,
+                        emby_etag,
+                        emby_signature,
+                        json.dumps(sorted({str(value) for value in (duplicate_emby_ids or []) if str(value).isdigit()}, key=int)),
+                        verified_at,
+                        external_verified_at,
+                        int(canonical_id) if canonical_id is not None else None,
+                    ),
+                )
+
+    def update_emby_person_identities(self, server_key, identities):
+        rows = list(identities or [])
+        if not rows:
+            return
+        with self.connection(server_key) as connection:
+            with closing(connection.cursor()) as cursor:
+                cursor.execute("UPDATE emby_person_identity SET name_index = NULL")
+                cursor.executemany(
+                    """
+                    INSERT INTO emby_person_identity(
+                        tmdb_id, imdb_id, tvdb_id, wikidata_id, base_name, normalized_name,
+                        name_index, display_name, emby_id, emby_etag, emby_signature, duplicate_emby_ids, verified_at, external_verified_at, canonical_id
+                    ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(tmdb_id) DO UPDATE SET
+                        imdb_id = excluded.imdb_id,
+                        tvdb_id = excluded.tvdb_id,
+                        wikidata_id = excluded.wikidata_id,
+                        base_name = excluded.base_name,
+                        normalized_name = excluded.normalized_name,
+                        name_index = excluded.name_index,
+                        display_name = excluded.display_name,
+                        emby_id = excluded.emby_id,
+                        emby_etag = excluded.emby_etag,
+                        emby_signature = excluded.emby_signature,
+                        duplicate_emby_ids = excluded.duplicate_emby_ids,
+                        verified_at = excluded.verified_at,
+                        external_verified_at = excluded.external_verified_at,
+                        canonical_id = excluded.canonical_id
+                    """,
+                    [
+                        (
+                            int(identity["tmdb_id"]),
+                            identity.get("imdb_id"),
+                            identity.get("tvdb_id"),
+                            identity.get("wikidata_id"),
+                            identity["base_name"],
+                            identity["normalized_name"],
+                            identity.get("name_index"),
+                            identity["display_name"],
+                            str(identity["emby_id"]) if identity.get("emby_id") is not None else None,
+                            identity.get("emby_etag"),
+                            identity.get("emby_signature"),
+                            json.dumps(sorted({str(value) for value in (identity.get("duplicate_emby_ids") or []) if str(value).isdigit()}, key=int)),
+                            identity.get("verified_at"),
+                            identity.get("external_verified_at"),
+                            int(identity["canonical_id"]) if identity.get("canonical_id") is not None else None,
+                        )
+                        for identity in rows
+                    ],
+                )
+
+    def update_emby_person_verifications(self, server_key, identities):
+        rows = list(identities or [])
+        if not rows:
+            return
+        with self.connection(server_key) as connection:
+            with closing(connection.cursor()) as cursor:
+                cursor.executemany(
+                    """
+                    UPDATE emby_person_identity
+                    SET emby_etag = ?, emby_signature = ?, verified_at = COALESCE(?, verified_at)
+                    WHERE tmdb_id = ?
+                    """,
+                    [
+                        (
+                            identity.get("emby_etag"),
+                            identity.get("emby_signature"),
+                            identity.get("verified_at"),
+                            int(identity["tmdb_id"]),
+                        )
+                        for identity in rows
+                    ],
+                )
+
+    def clear_emby_person_identity_mapping(self, server_key, tmdb_id):
+        with self.connection(server_key) as connection:
+            with closing(connection.cursor()) as cursor:
+                cursor.execute(
+                    "UPDATE emby_person_identity SET emby_id = NULL, emby_etag = NULL, emby_signature = NULL, duplicate_emby_ids = NULL, verified_at = NULL WHERE tmdb_id = ?",
+                    (int(tmdb_id),),
+                )
+
+    def query_tvdb_people_external_ids(self, server_key, tvdb_ids, expiration):
+        ordered_ids = sorted({int(tvdb_id) for tvdb_id in tvdb_ids or []})
+        if not ordered_ids:
+            return {}, []
+        cached = {}
+        refresh_ids = []
+        with self.connection(server_key) as connection:
+            with closing(connection.cursor()) as cursor:
+                for start in range(0, len(ordered_ids), 900):
+                    batch = ordered_ids[start : start + 900]
+                    placeholders = ",".join("?" for _ in batch)
+                    cursor.execute(
+                        f"SELECT * FROM tvdb_people_external_ids WHERE tvdb_id IN ({placeholders})",
+                        batch,
+                    )
+                    for row in cursor.fetchall():
+                        inserted = datetime.strptime(row["expiration_date"], "%Y-%m-%d")
+                        if (datetime.now() - inserted).days > expiration:
+                            refresh_ids.append(int(row["tvdb_id"]))
+                        else:
+                            cached[int(row["tvdb_id"])] = {
+                                "tmdb_id": int(row["tmdb_id"]) if row["tmdb_id"] is not None else None,
+                                "imdb_id": row["imdb_id"],
+                                "wikidata_id": row["wikidata_id"],
+                            }
+        refresh_ids.extend(tvdb_id for tvdb_id in ordered_ids if tvdb_id not in cached and tvdb_id not in refresh_ids)
+        return cached, refresh_ids
+
+    def update_tvdb_people_external_ids(self, server_key, external_ids):
+        rows = list((external_ids or {}).items())
+        if not rows:
+            return
+        expiration_date = datetime.now().strftime("%Y-%m-%d")
+        with self.connection(server_key) as connection:
+            with closing(connection.cursor()) as cursor:
+                cursor.executemany(
+                    """
+                    INSERT INTO tvdb_people_external_ids(tvdb_id, tmdb_id, imdb_id, wikidata_id, expiration_date)
+                    VALUES(?, ?, ?, ?, ?)
+                    ON CONFLICT(tvdb_id) DO UPDATE SET
+                        tmdb_id = excluded.tmdb_id,
+                        imdb_id = excluded.imdb_id,
+                        wikidata_id = excluded.wikidata_id,
+                        expiration_date = excluded.expiration_date
+                    """,
+                    [
+                        (
+                            int(tvdb_id),
+                            int(data["tmdb_id"]) if data.get("tmdb_id") is not None else None,
+                            data.get("imdb_id"),
+                            data.get("wikidata_id"),
+                            expiration_date,
+                        )
+                        for tvdb_id, data in rows
+                    ],
+                )
+
+    def query_emby_people_item_states(self, server_key, item_ids):
+        normalized_ids = sorted({str(item_id) for item_id in item_ids if item_id is not None})
+        if not normalized_ids:
+            return {}
+        with self.connection(server_key) as connection:
+            with closing(connection.cursor()) as cursor:
+                cursor.execute(
+                    f"SELECT * FROM emby_people_item_state " f"WHERE item_id IN ({','.join('?' for _ in normalized_ids)})",
+                    normalized_ids,
+                )
+                return {str(row["item_id"]): dict(row) for row in cursor.fetchall()}
+
+    def update_emby_people_item_state(
+        self,
+        server_key,
+        library_id,
+        item_id,
+        tmdb_id,
+        emby_etag,
+        credits_source,
+        source_credits_hash,
+        applied_hash,
+        sync_version,
+    ):
+        with self.connection(server_key) as connection:
+            with closing(connection.cursor()) as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO emby_people_item_state(
+                        library_id, item_id, tmdb_id, emby_etag, credits_source,
+                        source_credits_hash, applied_hash, sync_version, last_success
+                    ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(item_id) DO UPDATE SET
+                        library_id = excluded.library_id,
+                        tmdb_id = excluded.tmdb_id,
+                        emby_etag = excluded.emby_etag,
+                        credits_source = excluded.credits_source,
+                        source_credits_hash = excluded.source_credits_hash,
+                        applied_hash = excluded.applied_hash,
+                        sync_version = excluded.sync_version,
+                        last_success = excluded.last_success
+                    """,
+                    (
+                        str(library_id),
+                        str(item_id),
+                        int(tmdb_id),
+                        emby_etag,
+                        str(credits_source),
+                        source_credits_hash,
+                        applied_hash,
+                        int(sync_version),
+                        datetime.now().isoformat(timespec="seconds"),
+                    ),
+                )
+
+    def replace_emby_item_people_links(self, server_key, item_id, tmdb_ids):
+        normalized_ids = sorted({int(tmdb_id) for tmdb_id in tmdb_ids if str(tmdb_id).lstrip("-").isdigit()})
+        with self.connection(server_key) as connection:
+            with closing(connection.cursor()) as cursor:
+                cursor.execute("DELETE FROM emby_item_person WHERE item_id = ?", (str(item_id),))
+                cursor.executemany(
+                    "INSERT INTO emby_item_person(item_id, tmdb_id) VALUES(?, ?)",
+                    [(str(item_id), tmdb_id) for tmdb_id in normalized_ids],
+                )
+
+    def query_emby_items_for_people(self, server_key, tmdb_ids):
+        normalized_ids = sorted({int(tmdb_id) for tmdb_id in tmdb_ids if str(tmdb_id).lstrip("-").isdigit()})
+        if not normalized_ids:
+            return set()
+        with self.connection(server_key) as connection:
+            with closing(connection.cursor()) as cursor:
+                cursor.execute(
+                    f"SELECT DISTINCT item_id FROM emby_item_person " f"WHERE tmdb_id IN ({','.join('?' for _ in normalized_ids)})",
+                    normalized_ids,
+                )
+                return {str(row[0]) for row in cursor.fetchall()}
+
     def query_false_friend_names(self, server_key):
         with self.connection(server_key) as connection:
             with closing(connection.cursor()) as cursor:
                 cursor.execute("SELECT name FROM false_friend_names")
-                return {
-                    str(row["name"]).strip().casefold()
-                    for row in cursor.fetchall()
-                    if row["name"]
-                }
+                return {str(row["name"]).strip().casefold() for row in cursor.fetchall() if row["name"]}
 
     def add_false_friend_name(self, server_key, name):
         with self.connection(server_key) as connection:

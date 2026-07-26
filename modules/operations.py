@@ -3,11 +3,13 @@ import os
 import re
 import time
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from plexapi.exceptions import NotFound
 from plexapi.video import Movie, Show
 
 from modules import anidb, plex, tvdb, util
+from modules.emby_people import EmbyPeopleSync, normalize_person_name
 from modules.request import urlparse
 from modules.util import Failed, LimitReached
 
@@ -86,6 +88,157 @@ class Operations:
         self._tvdb_pause_until = 0
         self._omdb_pause_until = 0
         self._api_pause_duration = 60  # Pause API for 60 seconds after timeout
+        self._movie_cast_fallbacks = {}
+
+    @staticmethod
+    def _provider_id(item, provider):
+        provider = str(provider).casefold()
+        for key, value in ((item or {}).get("ProviderIds") or {}).items():
+            if str(key).casefold() == provider and value not in (None, ""):
+                return str(value)
+        return None
+
+    def _movie_people_credits(self, tmdb_credits, tvdb_id):
+        if str(getattr(self.library, "movie_cast_source", "tmdb") or "tmdb").casefold() != "tvdb":
+            return tmdb_credits
+        if not tvdb_id:
+            self._record_movie_cast_fallback("missing TVDb ID", tmdb_credits.title)
+            return tmdb_credits
+        try:
+            tvdb_credits = self.config.TVDb.get_movie_credits(tvdb_id)
+        except Failed as error:
+            self._record_movie_cast_fallback(f"TVDb lookup failed: {error}", tmdb_credits.title)
+            return tmdb_credits
+        if not tvdb_credits.cast:
+            self._record_movie_cast_fallback("empty TVDb Cast", tmdb_credits.title)
+            return tmdb_credits
+        identity_links = self._movie_cast_identity_links(
+            tmdb_credits.cast,
+            tvdb_credits.cast,
+        )
+        return SimpleNamespace(
+            tmdb_id=tmdb_credits.tmdb_id,
+            tvdb_id=int(tvdb_id) if str(tvdb_id).isdigit() else tvdb_id,
+            title=tmdb_credits.title,
+            cast=list(tvdb_credits.cast),
+            crew=list(tmdb_credits.crew or []),
+            credits_source="tvdb-cast/tmdb-crew",
+            cast_source="tvdb",
+            crew_source="tmdb",
+            identity_links=identity_links,
+        )
+
+    @staticmethod
+    def _movie_cast_identity_links(tmdb_cast, tvdb_cast):
+        """Build one-to-one Person links from the same verified movie credit.
+
+        This is deliberately stricter than a name-only match: the normalized
+        name and non-empty role must be unique in both provider payloads.
+        """
+
+        def candidates(cast, provider):
+            grouped = {}
+            for credit in cast or []:
+                person_id = credit.get("id") if provider == "tmdb" else credit.get("tvdb_id")
+                name = str(credit.get("name") or "").strip()
+                role = str(credit.get("character") or "").strip()
+                person_type = str(credit.get("person_type") or "Actor").strip() or "Actor"
+                if not str(person_id or "").isdigit() or not name or not role:
+                    continue
+                key = (
+                    normalize_person_name(name),
+                    normalize_person_name(role),
+                    person_type.casefold(),
+                )
+                grouped.setdefault(key, []).append(
+                    {
+                        "person_id": int(person_id),
+                        "name": name,
+                        "role": role,
+                        "person_type": person_type,
+                    }
+                )
+            return grouped
+
+        tmdb_candidates = candidates(tmdb_cast, "tmdb")
+        tvdb_candidates = candidates(tvdb_cast, "tvdb")
+        links = []
+        for key, tvdb_matches in tvdb_candidates.items():
+            tmdb_matches = tmdb_candidates.get(key, [])
+            if len(tvdb_matches) != 1 or len(tmdb_matches) != 1:
+                continue
+            tvdb_match = tvdb_matches[0]
+            tmdb_match = tmdb_matches[0]
+            links.append(
+                {
+                    "tmdb_id": tmdb_match["person_id"],
+                    "tvdb_id": tvdb_match["person_id"],
+                    "name": tmdb_match["name"],
+                    "role": tmdb_match["role"],
+                    "person_type": tmdb_match["person_type"],
+                }
+            )
+        return links
+
+    def _record_movie_cast_fallback(self, reason, title):
+        fallback = self._movie_cast_fallbacks.setdefault(str(reason), {"count": 0, "samples": []})
+        fallback["count"] += 1
+        if title and title not in fallback["samples"] and len(fallback["samples"]) < 3:
+            fallback["samples"].append(str(title))
+        logger.ghost(f"TVDb movie Cast fallback | {title} | {reason} | using TMDb Cast")
+
+    def _log_movie_cast_fallback_summary(self):
+        if not self._movie_cast_fallbacks:
+            return
+        total = sum(fallback["count"] for fallback in self._movie_cast_fallbacks.values())
+        details = []
+        for reason, fallback in sorted(
+            self._movie_cast_fallbacks.items(),
+            key=lambda value: (-value[1]["count"], value[0]),
+        ):
+            samples = ", ".join(fallback["samples"])
+            details.append(f"{fallback['count']} {reason}" + (f" (e.g. {samples})" if samples else ""))
+        logger.info(f"TVDb movie Cast fallback summary | {total} Items used TMDb Cast | " + " | ".join(details))
+
+    def _stage_emby_show_people(self, people_sync, series_item):
+        server = self.library.EmbyServer
+        tmdb_show_id = self._provider_id(series_item, "Tmdb")
+        seasons = server.get_seasons(series_item.get("Id"))
+        episode_items = []
+        for season_item in seasons:
+            season_tvdb_id = self._provider_id(season_item, "Tvdb")
+            if season_tvdb_id:
+                try:
+                    season_credits = self.config.TVDb.get_season_credits(season_tvdb_id)
+                    if season_credits.cast or season_credits.crew:
+                        season_credits.tmdb_show_id = tmdb_show_id
+                        people_sync.stage_item(season_item, season_credits)
+                except Failed as error:
+                    logger.warning(f"TVDb season credits unavailable for {season_item.get('Name') or season_tvdb_id}: {error}")
+            episode_items.extend(server.get_episodes(season_item.get("Id")))
+
+        episode_ids = [self._provider_id(episode_item, "Tvdb") for episode_item in episode_items]
+        episode_ids = [episode_id for episode_id in episode_ids if episode_id]
+        fetch_started = time.monotonic()
+
+        def progress(completed, total):
+            elapsed = max(time.monotonic() - fetch_started, 0.001)
+            logger.ghost(f"TVDb Episode Cast & Crew | {series_item.get('Name') or series_item.get('Id')} | " f"{completed}/{total} fetched | {completed / elapsed:.2f} Episodes/s")
+
+        try:
+            credits_by_id = self.config.TVDb.get_episode_credits_bulk(episode_ids, progress_callback=progress)
+        except Failed as error:
+            logger.error(f"TVDb episode credits unavailable for {series_item.get('Name') or series_item.get('Id')}: {error}")
+            return
+
+        total = len(episode_items)
+        for index, episode_item in enumerate(episode_items, 1):
+            episode_tvdb_id = self._provider_id(episode_item, "Tvdb")
+            credits = credits_by_id.get(int(episode_tvdb_id)) if episode_tvdb_id and str(episode_tvdb_id).isdigit() else None
+            if credits and (credits.cast or credits.crew):
+                credits.tmdb_show_id = tmdb_show_id
+                people_sync.stage_item(episode_item, credits)
+            logger.ghost(f"TVDb Episode Cast & Crew | {series_item.get('Name') or series_item.get('Id')} | " f"{index}/{total} staged")
 
     def _should_be_deleted(self, col_in, labels_in, configured_in, managed_in, less_in, configured_names=None):
         # Return True if the collection matches the delete_collections criteria.
@@ -218,11 +371,18 @@ class Operations:
             ep_lock_edits = {}
             ep_unlock_edits = {}
 
-            people_alias_revert = []
             emby_payload = {}  # populated but not yet consumed; kept for future use
 
+            people_sync = None
             if self.library.mc_type == "emby" and self.library.mass_cast_and_crew_update:
                 self.library.EmbyServer.cleanup_stuck_aliases()
+                people_sync = EmbyPeopleSync(
+                    self.library.EmbyServer,
+                    self.config.TMDb,
+                    getattr(self.config, "EmbyCache", None),
+                    library_id=getattr(self.library.EmbyServer, "library_id", None),
+                    tvdb=getattr(self.config, "TVDb", None),
+                )
 
             trakt_user_ratings = None
 
@@ -249,10 +409,7 @@ class Operations:
                         if converted:
                             item = converted[0]
                         else:
-                            logger.error(
-                                f"Skipping unconvertable Emby item: "
-                                f"Id={item.get('Id')} Name={item.get('Name')} Type={item.get('Type')}"
-                            )
+                            logger.error(f"Skipping unconvertable Emby item: " f"Id={item.get('Id')} Name={item.get('Name')} Type={item.get('Type')}")
                             continue
                     else:
                         logger.error(f"Unexpected dict item in non-Emby library: {item}")
@@ -275,6 +432,7 @@ class Operations:
                 _item_start = time.time()
                 _phase_start = _item_start
                 _slow_threshold = 5.0
+
                 def _phase(name):
                     nonlocal _phase_start
                     elapsed = time.time() - _phase_start
@@ -304,9 +462,7 @@ class Operations:
                     continue
 
                 tmdb_id, tvdb_id, imdb_id = self.library.get_ids(item)
-                if self.library.respect_ignore_ids and self.library.item_is_ignored(
-                    item, tmdb_id=tmdb_id, tvdb_id=tvdb_id, imdb_id=imdb_id
-                ):
+                if self.library.respect_ignore_ids and self.library.item_is_ignored(item, tmdb_id=tmdb_id, tvdb_id=tvdb_id, imdb_id=imdb_id):
                     logger.info("Ignored by ignore_ids or ignore_imdb_ids")
                     continue
 
@@ -1138,13 +1294,16 @@ class Operations:
                                 except Failed:
                                     continue
                 _phase("studio_loop")
-                if self.library.mc_type == "emby" and self.library.mass_cast_and_crew_update and tmdb_id:
+                credits_id = tmdb_id if self.library.is_movie else tvdb_id
+                if self.library.mc_type == "emby" and self.library.mass_cast_and_crew_update and credits_id:
                     try:
-                        tmdb_item = tmdb_obj()
-                    except Failed:
-                        tmdb_item = None
+                        credits_item = tmdb_obj() if self.library.is_movie else self.config.TVDb.get_show_credits(tvdb_id)
+                    except Failed as error:
+                        if str(error).strip():
+                            logger.error(str(error))
+                        credits_item = None
 
-                    if tmdb_item and emby_item is not None:
+                    if credits_item and emby_item is not None:
 
                         def contains_non_latin(text: str, allow_greek=False, allow_cyrillic=False) -> bool:
                             """True, wenn der Text Zeichen enthält, die nicht in lateinischen/erlaubten Blöcken liegen."""
@@ -1169,48 +1328,35 @@ class Operations:
                                 return True
                             return False
 
-                        tmdb_title = tmdb_item.title
-                        emby_title = emby_item.get("Name")
-
-                        all_cast_string = "".join([c.get("name", "") for c in tmdb_item.cast]) if tmdb_item.cast else ""
-                        if contains_non_latin(tmdb_title) or contains_non_latin(all_cast_string):
-                            #     #     pass
-                            #     #     # ToDo: need to ensure EN title if lang from config tmdb has no translation
-                            _tmdb_obj = None
-                            tmdb_item = tmdb_obj(ignore_cache=True)
-                            tmdb_title = tmdb_item.title
-
-                        my_cast = tmdb_item.cast
-                        my_crew = tmdb_item.crew
-
-                        # This will get the title in the language set in config -> tmdb
-                        # with foreign titles, emby will only scrape the original title;
-                        # as I don't speak Chinese, I want EN title
-
-                        if tmdb_id == "46043":
-                            pass
-
-                        if tmdb_title != emby_title:
-
-                            if contains_non_latin(emby_title) and not contains_non_latin(tmdb_title):
-                                edits = {"Name": tmdb_title}
-                                self.library.EmbyServer.update_item(emby_item.get("Id"), edits)
+                        if self.library.is_movie:
+                            tmdb_title = credits_item.title
+                            emby_title = emby_item.get("Name")
+                            all_cast_string = "".join([c.get("name", "") for c in credits_item.cast]) if credits_item.cast else ""
+                            if contains_non_latin(tmdb_title) or contains_non_latin(all_cast_string):
+                                # Refresh once without the cached translation
+                                # when names cannot safely be represented in Emby.
+                                credits_item = self.config.TMDb.get_movie(credits_item.tmdb_id, ignore_cache=True)
+                                _tmdb_obj = credits_item
+                                tmdb_title = credits_item.title
+                            if tmdb_title != emby_title and contains_non_latin(emby_title) and not contains_non_latin(tmdb_title):
+                                self.library.EmbyServer.update_item(emby_item.get("Id"), {"Name": tmdb_title})
                                 item_edits.append(f"Changed title from '{emby_title}' to '{tmdb_title}'")
-                                pass
-                        # ToDo: needs good trigger + option
-                        if my_cast:
-                            # try:
-                            # has_edits, people_edits = emby_people.sync_people(emby_item, my_cast, my_crew)
+                            credits_item = self._movie_people_credits(credits_item, tvdb_id)
+                        else:
+                            credits_item.tmdb_show_id = tmdb_id
 
-                            has_edits, people_edits, new_people_renames = self.library.EmbyServer.sync_people(emby_item, my_cast, my_crew)
-                            if has_edits:
-                                item_edits.append(people_edits)
-                            if new_people_renames:
-                                people_alias_revert.extend(new_people_renames)
-
-                        # except Exception as e:
-                        #     logger.error(e)
-                        #     pass
+                        my_cast = credits_item.cast
+                        my_crew = credits_item.crew
+                        # Stage only. The library-wide apply happens after the
+                        # item loop so namesakes are known before Emby creates
+                        # or matches any Person records.
+                        if people_sync and (my_cast or my_crew):
+                            staged = people_sync.stage_item(emby_item, credits_item)
+                            source_name = str(getattr(credits_item, "credits_source", "tmdb")).upper()
+                            status = "staged" if staged else "skipped"
+                            logger.ghost(f"({i}/{total_items}) Cast & Crew ({source_name}) {status} | {title} | Cast: {len(my_cast or [])} | Crew: {len(my_crew or [])}")
+                            if staged and self.library.is_show:
+                                self._stage_emby_show_people(people_sync, emby_item)
                     # Title and case updates end
 
                     # tick("Emby genres updated", min_ms=5)
@@ -1623,9 +1769,12 @@ class Operations:
                             logger.info("\n".join(str(edit).lstrip("\n") for edit in item_edits))
 
             logger.info("")
-            logger.separator("Plex Updates", space=False, border=False)
+            platform_name = {"emby": "Emby", "jellyfin": "Jellyfin"}.get(self.library.mc_type, "Plex")
+            logger.separator(f"{platform_name} Updates", space=False, border=False)
             logger.info("")
 
+            batch_apply_started = time.monotonic()
+            logger.info(f"{platform_name} batch metadata apply | preparing queued field edits")
             self.library.apply_batch_operations(
                 label_edits=label_edits,
                 genre_edits=genre_edits,
@@ -1645,6 +1794,7 @@ class Operations:
                 ep_tmdb_id_edits=ep_tmdb_id_edits,
                 name_display=name_display,
             )
+            logger.info(f"{platform_name} batch metadata apply complete | {time.monotonic() - batch_apply_started:.1f}s")
 
             if hasattr(self.library, "EmbyServer"):
 
@@ -1738,31 +1888,9 @@ class Operations:
                         self.library.EmbyServer.dirty_items = set()
                     self.library.EmbyServer.dirty_items.update(modified_ids)
 
-            # Revert any pre-existing aliases detected by sync_people Phase E
-            if people_alias_revert and len(people_alias_revert) > 1:
-                dedup = []
-                seen = set()  # Key pro Aktion
-                for emby_pid, (alias_name, clean_name, tid) in people_alias_revert:
-                    key = (str(emby_pid), str(alias_name))
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    dedup.append((str(emby_pid), (alias_name, clean_name, tid)))
-
-                # 2) Stabil sortieren (erst nach alias, dann PID), damit das Log hübsch ist
-                dedup.sort(key=lambda t: (t[1][0].casefold(), t[0]))
-                _size = len(dedup)
-            else:
-                _size = len(people_alias_revert)
-                dedup = people_alias_revert
-
-            for i, (emby_pid, (alias_name, clean_name, tid)) in enumerate(dedup, 1):
-                try:
-                    logger.info(f"Reverting People Name {i}/{_size} | {alias_name} -> {clean_name}")
-                    self.library.EmbyServer.update_item(emby_pid, {"Id": emby_pid, "Name": clean_name, "ProviderIds": {"Tmdb": tid}})
-                    # log["aliases_reverted"].append((emby_pid, clean_name))
-                except Exception:
-                    pass
+            if people_sync:
+                self._log_movie_cast_fallback_summary()
+                people_sync.apply()
 
             if self.library.Radarr and self.library.radarr_add_all_existing:
                 logger.info("")

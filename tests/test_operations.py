@@ -8,6 +8,7 @@ so every managed collection appeared "unconfigured" and was deleted.
 Fix: use self.library.collection_names (pre-populated from YAML before the run_order loop).
 """
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import modules.builder  # noqa: F401 -- pre-import to break plex<->builder circular import
@@ -39,6 +40,146 @@ def make_col(title, childCount=5, smart=False):
     col.childCount = childCount
     col.smart = smart
     return col
+
+
+def test_show_people_stages_season_and_episode_tvdb_credits_separately():
+    series = {"Id": "series-1", "Name": "Game of Thrones", "ProviderIds": {"Tvdb": "121361"}}
+    season = {"Id": "season-1", "Name": "Season 1", "ProviderIds": {"Tvdb": "364731"}}
+    episode = {"Id": "episode-1", "Name": "Winter Is Coming", "ProviderIds": {"Tvdb": "3254641"}}
+    season_credits = MagicMock(cast=[], crew=[])
+    episode_credits = MagicMock(cast=[{"tvdb_id": 1}], crew=[{"tvdb_id": 2}])
+    server = MagicMock()
+    server.get_seasons.return_value = [season]
+    server.get_episodes.return_value = [episode]
+    tvdb = MagicMock()
+    tvdb.get_season_credits.return_value = season_credits
+    tvdb.get_episode_credits_bulk.return_value = {3254641: episode_credits}
+    people_sync = MagicMock()
+    library = MagicMock(EmbyServer=server)
+    ops = Operations(config=MagicMock(TVDb=tvdb), library=library)
+
+    ops._stage_emby_show_people(people_sync, series)
+
+    tvdb.get_season_credits.assert_called_once_with("364731")
+    tvdb.get_episode_credits_bulk.assert_called_once()
+    people_sync.stage_item.assert_called_once_with(episode, episode_credits)
+
+
+def test_movie_people_credits_mix_tvdb_cast_with_tmdb_crew():
+    tmdb_credits = SimpleNamespace(
+        tmdb_id=299534,
+        title="Avengers: Endgame",
+        cast=[{"id": 1, "name": "TMDb Actor"}],
+        crew=[{"id": 2, "name": "Alan Silvestri", "job": "Original Music Composer"}],
+    )
+    tvdb_credits = SimpleNamespace(
+        tvdb_id=148,
+        cast=[{"tvdb_id": 10, "name": "TVDb Actor", "character": "Hero"}],
+        crew=[{"tvdb_id": 20, "name": "TVDb Producer", "job": "Producer"}],
+    )
+    tvdb = MagicMock()
+    tvdb.get_movie_credits.return_value = tvdb_credits
+    library = MagicMock(movie_cast_source="tvdb")
+    ops = Operations(config=MagicMock(TVDb=tvdb), library=library)
+
+    credits = ops._movie_people_credits(tmdb_credits, 148)
+
+    assert credits.cast == tvdb_credits.cast
+    assert credits.crew == tmdb_credits.crew
+    assert credits.cast_source == "tvdb"
+    assert credits.crew_source == "tmdb"
+    assert credits.identity_links == []
+    tvdb.get_movie_credits.assert_called_once_with(148)
+
+
+def test_movie_people_credits_link_unique_same_item_cast_identity():
+    tmdb_credits = SimpleNamespace(
+        tmdb_id=89785,
+        title="Abschied von gestern",
+        cast=[
+            {
+                "id": 1041578,
+                "name": "Alexandra Kluge",
+                "character": "Anita G.",
+            }
+        ],
+        crew=[],
+    )
+    tvdb_credits = SimpleNamespace(
+        tvdb_id=151675,
+        cast=[
+            {
+                "tvdb_id": 8237646,
+                "name": "Alexandra Kluge",
+                "character": "Anita G.",
+            }
+        ],
+        crew=[],
+    )
+    tvdb = MagicMock()
+    tvdb.get_movie_credits.return_value = tvdb_credits
+    ops = Operations(
+        config=MagicMock(TVDb=tvdb),
+        library=MagicMock(movie_cast_source="tvdb"),
+    )
+
+    credits = ops._movie_people_credits(tmdb_credits, 151675)
+
+    assert credits.identity_links == [
+        {
+            "tmdb_id": 1041578,
+            "tvdb_id": 8237646,
+            "name": "Alexandra Kluge",
+            "role": "Anita G.",
+            "person_type": "Actor",
+        }
+    ]
+
+
+def test_movie_people_credits_do_not_link_ambiguous_same_name_and_role():
+    tmdb_cast = [
+        {"id": 1, "name": "Same Name", "character": "Self"},
+        {"id": 2, "name": "Same Name", "character": "Self"},
+    ]
+    tvdb_cast = [{"tvdb_id": 3, "name": "Same Name", "character": "Self"}]
+
+    assert Operations._movie_cast_identity_links(tmdb_cast, tvdb_cast) == []
+
+
+def test_movie_people_credits_fall_back_to_tmdb_when_tvdb_cast_is_empty():
+    tmdb_credits = SimpleNamespace(tmdb_id=299534, title="Avengers: Endgame", cast=[{"id": 1}], crew=[])
+    tvdb = MagicMock()
+    tvdb.get_movie_credits.return_value = SimpleNamespace(cast=[])
+    ops = Operations(config=MagicMock(TVDb=tvdb), library=MagicMock(movie_cast_source="tvdb"))
+
+    assert ops._movie_people_credits(tmdb_credits, 148) is tmdb_credits
+
+
+def test_movie_people_credit_fallbacks_are_summarized_once():
+    ops_module.logger.reset_mock()
+    tmdb_credits = SimpleNamespace(
+        tmdb_id=299534,
+        title="Avengers: Endgame",
+        cast=[{"id": 1}],
+        crew=[],
+    )
+    tvdb = MagicMock()
+    tvdb.get_movie_credits.return_value = SimpleNamespace(cast=[])
+    ops = Operations(
+        config=MagicMock(TVDb=tvdb),
+        library=MagicMock(movie_cast_source="tvdb"),
+    )
+
+    assert ops._movie_people_credits(tmdb_credits, None) is tmdb_credits
+    assert ops._movie_people_credits(tmdb_credits, 148) is tmdb_credits
+    ops._log_movie_cast_fallback_summary()
+
+    assert ops_module.logger.warning.call_count == 0
+    assert ops_module.logger.info.call_count == 1
+    summary = ops_module.logger.info.call_args.args[0]
+    assert "2 Items used TMDb Cast" in summary
+    assert "1 missing TVDb ID" in summary
+    assert "1 empty TVDb Cast" in summary
 
 
 # ---------------------------------------------------------------------------

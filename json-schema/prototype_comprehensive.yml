@@ -27,6 +27,12 @@ tmdb:
   language: en
   cache_expiration: 60
 
+tvdb:
+  apikey: YOUR_TVDB_API_KEY_HERE
+  pin:
+  cache_expiration: 60
+  language: eng
+
 # ============================================================================
 # OPTIONAL API INTEGRATIONS
 # ============================================================================
@@ -4809,6 +4815,7 @@ libraries:
     operations:
       split_duplicates: false
       assets_for_all: true
+      mass_cast_and_crew_update: false
       genre_mapper:
         Anime: Animation
         Kids: Family
@@ -5381,6 +5388,7 @@ libraries:
     operations:
       split_duplicates: false
       assets_for_all: true
+      mass_cast_and_crew_update: false
 
   Anime:
     collection_files:

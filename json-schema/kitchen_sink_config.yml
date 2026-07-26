@@ -349,6 +349,8 @@ libraries:
     operations:
       split_duplicates: false                       # Splits all duplicate movies/shows found in this library
       assets_for_all: true                          # Search in assets for images for every item in your library
+      mass_cast_and_crew_update: false              # Emby only: synchronize Cast & Crew with provider-backed person identities
+      movie_cast_source: tmdb                       # Emby movies only: tmdb or tvdb; Crew always remains from TMDb
       delete_collections:
         configured: false                           # False - Collection must be an Unconfigured Collection to be deleted (collection is not in the config file of the specific Kometa run).
         managed: false                              # False - Collection must be an Unmanaged Collection to be deleted (the collection does not have the Kometa label)
@@ -771,6 +773,7 @@ libraries:
     operations:
       split_duplicates: false                       # Splits all duplicate movies/shows found in this library
       assets_for_all: true                          # Search in assets for images for every item in your library
+      mass_cast_and_crew_update: false              # Emby only: synchronize Cast & Crew with provider-backed person identities
       delete_collections:
         configured: false                           # False - Collection must be an Unconfigured Collection to be deleted (collection is not in the config file of the specific Kometa run).
         managed: false                              # False - Collection must be an Unmanaged Collection to be deleted (the collection does not have the Kometa label)
@@ -895,6 +898,11 @@ tmdb:                                               # REQUIRED for the script to
   language: en
   region: CA                                        # Upper case ISO 3166-1 Code
   cache_expiration: 60
+tvdb:                                               # Required for Cast & Crew updates on show libraries
+  apikey: THIS_IS_A_FAKE_TOKEN
+  pin:
+  cache_expiration: 60
+  language: eng
 tautulli:                                           # Can be individually specified per library as well
   url: http://10.10.10.10:1234
   apikey: THIS_IS_A_FAKE_TOKEN

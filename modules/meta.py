@@ -1046,9 +1046,10 @@ class MetadataFile(DataFile):
                                                 if e_tmdbid not in include_cols:
                                                     include_cols.append(e_tmdbid)
                                             else:
-                                                if int(emby_id) not in people:
-                                                    people[int(emby_id)] = {"name": person.get("Name"), "tmdb_person_id": e_tmdbid, "count": 0}
-                                                people[int(emby_id)]["count"] += 1
+                                                person_key = int(e_tmdbid) if str(e_tmdbid).isdigit() else str(e_tmdbid)
+                                                if person_key not in people:
+                                                    people[person_key] = {"name": person.get("Name"), "tmdb_person_id": e_tmdbid, "count": 0}
+                                                people[person_key]["count"] += 1
                                         else:
                                             if person.get("Name") in include:
                                                 if person.get("Name") not in include_cols:

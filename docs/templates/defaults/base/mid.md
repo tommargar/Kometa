@@ -29,6 +29,7 @@ libraries:
           rating2_image: rt_popcorn
           rating3_image: tmdb
     operations:
+      mass_cast_and_crew_update: false
       mass_critic_rating_update: imdb
       mass_audience_rating_update: mdb_tomatoesaudience
       mass_user_rating_update: tmdb
@@ -79,6 +80,7 @@ libraries:
 
 <!--ratings-->
     operations:
+      mass_cast_and_crew_update: false
       mass_critic_rating_update: imdb
       mass_audience_rating_update: mdb_tomatoesaudience
       mass_user_rating_update: tmdb

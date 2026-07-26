@@ -56,6 +56,38 @@ Several of these operations perform **mass** updates; these are just that, **mas
 
 ## Operation Attributes
 
+###### Mass Cast and Crew Update
+
+??? info "`mass_cast_and_crew_update` - Synchronizes Emby Cast & Crew from an external credit source using stable person identities."
+    This operation is available for Emby libraries. Movie Cast and Crew come from TMDb by default. Set `movie_cast_source: tvdb` to use TVDb only for movie Cast; movie Crew continues to come from TMDb so credits such as Composer remain available. If TVDb has no usable movie Cast or the request fails, Kometa safely falls back to TMDb Cast. Movie Executive Producers are omitted. Series-level credits and any available season- or episode-level credits come from TVDb; normal Producers are omitted for shows, while Executive Producers and Showrunners remain. Episode directors, writers, and guest stars are synchronized on the episode rather than being added to the complete series. Credits are stored with their source so TMDb and TVDb revisions produce distinct change hashes. Kometa does not search Emby's Person library by provider ID. It reads the already-linked Person records and compares their external IDs and names with the credit source. Relationships are matched by verified Emby mapping, external IDs, and an unambiguous Type/Role/Name combination rather than by People-list position; ambiguous relationships are left unmatched instead of being classified as false friends. During an item update every People entry uses the display name for both `Id` and `Name`, allowing Emby to materialize the relationship directly.
+
+    Kometa's People database is authoritative for name conflicts. It stores the base name, normalized name, external person IDs, assigned Roman index, indexed display name, and confirmed TMDb/TVDb identity links per Emby server. Roman indexes are derived from these external identities, not from the order or names of Emby's Person records. When multiple genuinely different external identities have the same normalized name, the primary identity keeps the unmodified base name and additional namesakes receive persistent Roman suffixes beginning with `(II)`. An existing Emby Person with conflicting external IDs is handled as a false friend and likewise receives a persistent suffix beginning with `(II)`. Every later movie or show therefore uses the same display name.
+
+    If matching TMDb and TVDb IDs prove that two source records describe the same real person, Kometa does not treat them as namesakes. For a same-named TVDb-only/TMDb pair, Kometa reads the TVDb Person's remote IDs before assigning an index. It then selects the best existing Emby Person using external-ID completeness, current item references, and a stable ID preference; restores its base name; fills the missing provider ID; and makes later item updates converge on that Person. If the remote IDs instead prove that the existing same-named Person is different, that known identity is moved to its deterministic Roman index before the new Person is materialized. This also repairs an already-created pair such as `(I)` and `(II)` without using a global Emby Person search. Kometa does not delete the unused secondary Person record automatically.
+
+    The numeric Emby Person ID is used only to read or update the Person record after Emby materializes it; it is not used to resolve an item relationship. Movie and show relationships always use identical `Id` and `Name` values. Item ETags are used only as a performance optimization; source and applied-credit hashes are also verified. Kometa persists ETags only from Emby's list/bulk representation. Representation-specific ETags returned by direct user-item reads are discarded and never compared with the manifest. Person bulk ETags may themselves change when only derived Emby state changes, so Kometa additionally stores a stable signature of `Name`, `SortName`, type, and external IDs after a complete direct verification. Because Emby's bulk Items endpoint omits `LockedFields`, an unchanged identity signature allows later runs to trust the last direct lock verification without repeating it; a missing or changed signature triggers a new direct check. Periodic audits still detect changes that affect only the lock fields.
+
+    A newly materialized Person does not receive a full metadata or image refresh. Kometa writes the canonical `Name`, `SortName`, and external IDs, then reads the Person back and verifies those identity fields. `Name` and `SortName` are locked only for members of a genuine name-conflict group, including its indexless primary Person. Unique People and identities made unique by a confirmed TMDb/TVDb merge keep those fields unlocked. Missing external IDs on an otherwise matching existing Person are filled in the same lightweight way.
+
+    A full metadata and image replacement is reserved for an existing Person whose `Name`/`SortName` is wrong or whose populated external IDs contradict the expected identity. Emby's diacritic-free `SortName` normalization, such as `Javier Alvarez` for `Javier Álvarez`, is accepted as equivalent; managed Roman suffixes must still match. Kometa first removes `Name` and `SortName` from `LockedFields` when necessary, writes the corrected identity using both `SortName` and Emby's effective `ForcedSortName`, restores both locks, requests the Emby `FullRefresh`, restores the display name again if the provider refresh changed it, and verifies `Name`, `SortName`, both locks, and the external IDs before reporting success.
+
+    ```yaml
+    libraries:
+      Movies:
+        operations:
+          mass_cast_and_crew_update: true
+          movie_cast_source: tvdb
+
+    tvdb:
+      apikey: YOUR_TVDB_API_KEY
+      pin: YOUR_SUBSCRIBER_PIN
+    ```
+
+    `movie_cast_source` defaults to `tmdb`. A TVDb API key is required for show libraries and when `movie_cast_source` is `tvdb`. `pin` is only needed for user-supported TVDb keys.
+
+    !!! warning
+        This operation replaces the complete Cast & Crew list on each processed Emby item with the supported credits from TMDb, TVDb, or the configured hybrid movie sources. For genuine namesakes, Person names and sort names are locked in Emby so a later metadata refresh cannot remove Kometa's identity index.
+
 ###### Mass Metadata Update
 
 ??? info "`mass_metadata_update` - Updates metadata fields, artwork, ratings, mappings, and metadata backup data."

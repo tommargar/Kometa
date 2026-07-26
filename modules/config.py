@@ -207,6 +207,10 @@ mass_rating_options = {
     "mal": "Use MyAnimeList Rating",
 }
 reset_overlay_options = {"tmdb": "Reset to TMDb poster", "plex": "Reset to Plex Poster"}
+movie_cast_source_options = {
+    "tmdb": "Use TMDb movie cast",
+    "tvdb": "Use TVDb movie cast while retaining TMDb movie crew",
+}
 library_operations = {
     "assets_for_all": "bool",
     "assets_for_all_collections": "bool",
@@ -244,6 +248,7 @@ library_operations = {
     "content_rating_mapper": "dict",
     "plex_bulk_edit_batch_size": "int",
     "mass_cast_and_crew_update": "bool",
+    "movie_cast_source": movie_cast_source_options,
 }
 
 
@@ -1171,7 +1176,35 @@ class ConfigFile:
                         logger.info("")
                         logger.separator(f"Skipping {e} Playlist File")
 
-            self.TVDb = TVDb(self.Requests, self.Cache, self.general["tvdb_language"], self.general["cache_expiration"])
+            tvdb_apikey = None
+            tvdb_pin = None
+            tvdb_expiration = self.general["cache_expiration"]
+            tvdb_language = self.general["tvdb_language"]
+            if "tvdb" in self.data:
+                tvdb_apikey = check_for_attribute(self.data, "apikey", parent="tvdb", default_is_none=True)
+                tvdb_pin = check_for_attribute(self.data, "pin", parent="tvdb", default_is_none=True)
+                tvdb_language = check_for_attribute(
+                    self.data,
+                    "language",
+                    parent="tvdb",
+                    default=self.general["tvdb_language"],
+                )
+                tvdb_expiration = check_for_attribute(
+                    self.data,
+                    "cache_expiration",
+                    parent="tvdb",
+                    var_type="int",
+                    default=self.general["cache_expiration"],
+                    int_min=1,
+                )
+            self.TVDb = TVDb(
+                self.Requests,
+                self.Cache,
+                tvdb_language,
+                tvdb_expiration,
+                apikey=tvdb_apikey,
+                pin=tvdb_pin,
+            )
             self.IMDb = IMDb(self.Requests, self.Cache, self.default_dir)
             self.Convert = Convert(self.Requests, self.Cache, self.TMDb)
             self.AniList = AniList(self.Requests)
@@ -1649,6 +1682,8 @@ class ConfigFile:
                                 continue
                             if op == "mass_imdb_parental_labels":
                                 section_final[op] = check_for_attribute(config_op, op, test_list=data_type, default_is_none=True, save=False)
+                            elif op == "movie_cast_source":
+                                section_final[op] = check_for_attribute(config_op, op, test_list=data_type, default="tmdb", save=False)
                             elif isinstance(data_type, dict):
                                 try:
                                     if not config_op[op]:

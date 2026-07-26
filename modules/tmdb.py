@@ -144,6 +144,36 @@ def _log_tmdb_exception(tmdb_id, exception):
         logger.stacktrace()
 
 
+def _credit_value(credit, key):
+    return credit.get(key) if isinstance(credit, dict) else getattr(credit, key, None)
+
+
+def _credit_dicts(credits, cast=False):
+    output = []
+    fields = ("name", "character", "order") if cast else ("name", "job", "department")
+    for credit in credits or []:
+        # tmdbapis Credit.id is the credit ID for aggregated TV credits and
+        # can be a very large numeric string. person_id is the actual TMDb
+        # person identity required for Cast & Crew matching.
+        person_id = _credit_value(credit, "person_id")
+        if person_id is None:
+            person_id = _credit_value(credit, "id")
+        output.append({"id": person_id, **{field: _credit_value(credit, field) for field in fields}})
+    return output
+
+
+def _cached_credit_ids_valid(data):
+    max_sqlite_integer = (1 << 63) - 1
+    for credit_type in ("cast", "crew"):
+        for credit in data.get(credit_type) or []:
+            value = credit.get("id") if isinstance(credit, dict) else None
+            if value is None or not str(value).isdigit():
+                continue
+            if int(value) > max_sqlite_integer:
+                return False
+    return True
+
+
 class TMDBObj:
     def __init__(self, tmdb, tmdb_id, ignore_cache=False):
         self._tmdb = tmdb
@@ -173,6 +203,10 @@ class TMDbMovie(TMDBObj):
         data = None
         if self._tmdb.cache and not ignore_cache:
             data, expired = self._tmdb.cache.query_tmdb_movie(tmdb_id, self._tmdb.language, self._tmdb.expiration)
+            if data and not _cached_credit_ids_valid(data):
+                logger.info(f"TMDb movie {tmdb_id} has legacy credit IDs in cache; reloading credits")
+                data = None
+                expired = True
         if expired or not data:
             data = self.load_movie()
         super()._load(data)
@@ -182,6 +216,8 @@ class TMDbMovie(TMDBObj):
         self.studio = data["studio"] if isinstance(data, dict) else data.companies[0].name if data.companies else None
         self.collection_id = data["collection_id"] if isinstance(data, dict) else data.collection.id if data.collection else None
         self.collection_name = data["collection_name"] if isinstance(data, dict) else data.collection.name if data.collection else None
+        self.cast = list(data.get("cast") or []) if isinstance(data, dict) else _credit_dicts(data.cast, cast=True)
+        self.crew = list(data.get("crew") or []) if isinstance(data, dict) else _credit_dicts(data.crew)
         # tvdb_id is only meaningful for shows; set None here so the attribute
         # exists on the class and pyright doesn't flag it in convert_from().
         self.tvdb_id: None = None
@@ -192,7 +228,7 @@ class TMDbMovie(TMDBObj):
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type(Failed))
     def load_movie(self):
         try:
-            return self._tmdb.TMDb.movie(self.tmdb_id, partial="external_ids,keywords,images")
+            return self._tmdb.TMDb.movie(self.tmdb_id, partial="external_ids,keywords,images,credits")
         except TMDbNotFound:
             raise NotFound(f"TMDb Error: No Movie found for TMDb ID: {self.tmdb_id}")
         except TMDbException as e:
@@ -207,6 +243,10 @@ class TMDbShow(TMDBObj):
         data = None
         if self._tmdb.cache and not ignore_cache:
             data, expired = self._tmdb.cache.query_tmdb_show(tmdb_id, self._tmdb.language, self._tmdb.expiration)
+            if data and not _cached_credit_ids_valid(data):
+                logger.info(f"TMDb show {tmdb_id} has legacy credit IDs in cache; reloading credits")
+                data = None
+                expired = True
         if expired or not data:
             data = self.load_show()
         super()._load(data)
@@ -222,6 +262,8 @@ class TMDbShow(TMDBObj):
         self.countries = [TMDbCountry(c) for c in loop]
         loop = data.seasons if not isinstance(data, dict) else data["seasons"].split("%|%") if data["seasons"] else []  # noqa
         self.seasons = [TMDbSeason(s) for s in loop]
+        self.cast = list(data.get("cast") or []) if isinstance(data, dict) else _credit_dicts(data.cast, cast=True)
+        self.crew = list(data.get("crew") or []) if isinstance(data, dict) else _credit_dicts(data.crew)
 
         if self._tmdb.cache and not ignore_cache:
             self._tmdb.cache.update_tmdb_show(expired, self, self._tmdb.language, self._tmdb.expiration)
@@ -229,7 +271,7 @@ class TMDbShow(TMDBObj):
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type(Failed))
     def load_show(self):
         try:
-            return self._tmdb.TMDb.tv_show(self.tmdb_id, partial="external_ids,keywords,images")
+            return self._tmdb.TMDb.tv_show(self.tmdb_id, partial="external_ids,keywords,images,credits")
         except TMDbNotFound:
             raise NotFound(f"TMDb Error: No Show found for TMDb ID: {self.tmdb_id}")
         except TMDbException as e:
@@ -351,6 +393,56 @@ class TMDb:
         return TMDbShow(self, tmdb_id, ignore_cache=ignore_cache)
 
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type(Failed))
+    def get_show_aggregate_people(self, tmdb_id):
+        """Return unique Person identities from one show's aggregate credits."""
+        try:
+            show = self.TMDb.tv_show(int(tmdb_id), partial="aggregate_credits")
+        except TMDbNotFound as error:
+            raise Failed(f"TMDb Error: No Show found for TMDb ID {tmdb_id}: {error}")
+        except TMDbException as error:
+            _log_tmdb_exception(tmdb_id, error)
+            raise TMDbException(f"TMDb Error: Unexpected Error with TMDb ID: {tmdb_id}: {error}")
+
+        people = []
+        seen = set()
+        for credit in getattr(show, "aggregate_cast", None) or []:
+            person_id = getattr(credit, "person_id", None)
+            name = str(getattr(credit, "name", None) or "").strip()
+            key = int(person_id) if str(person_id or "").isdigit() else None, "Actor"
+            if key[0] is None or not name or key in seen:
+                continue
+            seen.add(key)
+            people.append({"id": key[0], "name": name, "person_type": key[1]})
+
+        crew_types = {
+            "directing": "Director",
+            "writing": "Writer",
+            "production": "Producer",
+        }
+        for credit in getattr(show, "aggregate_crew", None) or []:
+            person_id = getattr(credit, "person_id", None)
+            name = str(getattr(credit, "name", None) or "").strip()
+            job = str(getattr(credit, "job", None) or "").strip()
+            department = str(getattr(credit, "department", None) or "").strip()
+            job_key = job.casefold()
+            if "composer" in job_key:
+                person_type = "Composer"
+            elif job_key == "director":
+                person_type = "Director"
+            elif job_key in {"writer", "screenplay", "screenwriter", "teleplay", "story", "staff writer", "story editor"}:
+                person_type = "Writer"
+            elif job_key in {"producer", "executive producer", "showrunner"}:
+                person_type = "Producer"
+            else:
+                person_type = crew_types.get(department.casefold())
+            key = int(person_id) if str(person_id or "").isdigit() else None, person_type
+            if key[0] is None or not name or not person_type or key in seen:
+                continue
+            seen.add(key)
+            people.append({"id": key[0], "name": name, "person_type": person_type})
+        return people
+
+    @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type(Failed))
     def get_season(self, tmdb_id, season_number, partial=None):
         try:
             return self.TMDb.tv_season(tmdb_id, season_number, partial=partial)
@@ -373,6 +465,40 @@ class TMDb:
             return self.TMDb.person(tmdb_id, partial=partial)
         except TMDbNotFound as e:
             raise Failed(f"TMDb Error: No Person found for TMDb ID {tmdb_id}: {e}")
+
+    def get_wikidata_person_ids(self, wikidata_id):
+        """Return canonical media identifiers from one Wikidata person item."""
+        wikidata_id = str(wikidata_id or "").strip().upper()
+        if not re.fullmatch(r"Q[1-9]\d*", wikidata_id):
+            raise Failed(f"Wikidata Error: Invalid entity ID: {wikidata_id}")
+        payload = self.requests.get_json(
+            "https://www.wikidata.org/w/api.php",
+            params={
+                "action": "wbgetentities",
+                "ids": wikidata_id,
+                "props": "claims",
+                "format": "json",
+                "formatversion": 2,
+            },
+        )
+        entity = (payload.get("entities") or {}).get(wikidata_id) or {}
+        if entity.get("missing"):
+            raise Failed(f"Wikidata Error: No entity found for {wikidata_id}")
+        claims = entity.get("claims") or {}
+
+        def single_value(property_id):
+            values = {str((((claim or {}).get("mainsnak") or {}).get("datavalue") or {}).get("value") or "").strip() for claim in claims.get(property_id) or []}
+            values.discard("")
+            return next(iter(values)) if len(values) == 1 else None
+
+        tmdb_id = single_value("P4985")
+        tvdb_id = single_value("P7920")
+        return {
+            "wikidata_id": wikidata_id,
+            "tmdb_id": int(tmdb_id) if str(tmdb_id or "").isdigit() else None,
+            "tvdb_id": str(tvdb_id) if str(tvdb_id or "").isdigit() else None,
+            "imdb_id": single_value("P345"),
+        }
 
     @retry(stop=stop_after_attempt(6), wait=wait_fixed(10), retry=retry_if_not_exception_type(Failed))
     def _company(self, tmdb_id, partial=None):
